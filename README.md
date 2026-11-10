@@ -71,7 +71,7 @@ A TypeScript CLI harness and autonomous AI agent loop designed for custom OpenAI
 4. **Terminal User Interface (TUI)**
    - Colorized feedback using `picocolors`.
    - Clear distinction between model thinking/reasoning, tool calls with arguments, tool execution output, and final agent response.
-   - Built-in REPL with slash commands.
+   - Built-in REPL with slash commands and `@` file mentions (Claude Code-style).
 
 ---
 
@@ -164,3 +164,37 @@ Available slash commands:
 - `/tokens` — Check current estimated token count and context usage.
 - `/clear` — Reset conversation history.
 - `/exit` or `/quit` — Exit the harness.
+
+---
+
+### 6. File Mentions — Attach Files with `@` (Dynamic Preview)
+
+Just like Claude Code: type `@` anywhere in your prompt and a live preview of workspace
+files appears beneath your cursor, filtering as you type.
+
+- **`@`** — opens the file preview (workspace files and directories, ranked by relevance:
+  exact match > basename > path prefix > substring > fuzzy subsequence).
+- **`Tab`** — inserts the highlighted file into the prompt as `@path/to/file`.
+  Inserting a directory (`@src/tools/`) keeps the preview open so you can drill down.
+- **`↑ / ↓`** — navigate the preview; **`Enter`** confirms the highlighted file.
+  Without navigation, `Enter` submits the prompt as usual.
+- **`Esc`** — dismisses the preview until you edit the mention again.
+
+On submit, every `@path` mention is resolved and the file's current contents are
+attached to the message sent to the model (directories attach a listing of their
+entries). Mentioned files are shown with a `📎 Attached:` summary, and the agent can
+work with them without spending tool calls on `read_file` first.
+
+```text
+user > review @src/ui/prompt.ts and @src/tools/editFile.ts for bugs
+📎 Attached: @src/ui/prompt.ts (625 lines), @src/tools/editFile.ts (143 lines)
+```
+
+Details and guardrails:
+
+- Mentions only trigger at the start of a word, so emails like `user@host` are ignored.
+- `node_modules`, `.git`, binary files, and symlinks are excluded from the preview.
+- Large files are attached with head+tail truncation (100 KB per file, 300 KB total
+  per prompt); binary files are rejected with a warning instead of dumped as garbage.
+- `@mentions` also work in non-interactive mode: `npm start -- -p "Summarize @README.md"`.
+- Mention resolution is covered by `npm run test:mentions`.

@@ -1,4 +1,5 @@
 import pc from 'picocolors';
+import { AttachedFile } from '../context/fileMentions.js';
 
 export class TerminalUI {
   static printBanner(model: string, vendor: string, endpoint: string) {
@@ -27,7 +28,7 @@ export class TerminalUI {
     );
     console.log(pc.cyan(`╚${border}╝`));
     console.log(
-      pc.dim('Type your prompt or use slash commands (/help, /tools, /models, /clear, /exit)\n')
+      pc.dim('Type your prompt, mention files with @ for live preview, or use slash commands (/help)\n')
     );
   }
 
@@ -118,6 +119,19 @@ export class TerminalUI {
     console.log(`\n${pc.bold(pc.magenta('🤖 Assistant:'))}`);
     console.log(content);
     console.log();
+  }
+
+  static printAttachedFiles(attachments: AttachedFile[]) {
+    if (attachments.length === 0) return;
+    const summary = attachments
+      .map((a) => {
+        const detail = a.isDir
+          ? `${a.lines} entries`
+          : `${a.lines} lines${a.truncated ? pc.yellow(', truncated') : ''}`;
+        return `${pc.cyan(a.mention)} ${pc.dim(`(${detail})`)}`;
+      })
+      .join(pc.dim(', '));
+    console.log(`${pc.green('📎 Attached:')} ${summary}`);
   }
 
   static printError(msg: string) {

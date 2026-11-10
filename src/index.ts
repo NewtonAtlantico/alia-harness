@@ -8,6 +8,8 @@ import { ContextManager } from './context/contextManager.js';
 import { AliaAgent } from './agent/agentLoop.js';
 import { TerminalUI } from './ui/terminal.js';
 import { DynamicPrompt } from './ui/prompt.js';
+import { FileIndex } from './ui/fileIndex.js';
+import { resolveFileMentions } from './context/fileMentions.js';
 
 interface CliArgs {
   prompt?: string;
@@ -50,6 +52,13 @@ ${pc.bold('OPTIONS:')}
   -c, --config <path>      Path to custom configuration file
   --auto-approve           Auto-approve potentially destructive commands (skip safety prompt)
   -h, --help               Display this help message
+
+${pc.bold('FILE MENTIONS (type "@" for live interactive preview):')}
+  @path/to/file            Attach a file to your prompt (contents added to context)
+  @path/to/dir/            Attach a directory (its entries are listed for the model)
+
+  Type @ followed by a query to filter workspace files, then:
+  Tab inserts the highlighted file, ↑/↓ navigate, Enter confirms, Esc dismisses.
 
 ${pc.bold('SLASH COMMANDS (type "/" for live interactive preview):')}
   /help                    Show available slash commands
@@ -103,7 +112,10 @@ async function main() {
   if (cliArgs.prompt) {
     console.log(pc.bold(pc.cyan(`\nExecuting prompt with model [${agent.getModel()}]:`)));
     console.log(pc.white(`> ${cliArgs.prompt}\n`));
-    await agent.run(cliArgs.prompt);
+    const { prompt, attachments, errors } = resolveFileMentions(cliArgs.prompt, process.cwd());
+    TerminalUI.printAttachedFiles(attachments);
+    for (const err of errors) console.log(pc.yellow(`⚠️  ${err}`));
+    await agent.run(prompt);
     return;
   }
 
@@ -114,7 +126,8 @@ async function main() {
     clientInstance.modelConfig.url
   );
 
-  const prompt = new DynamicPrompt(TerminalUI.printUserPrompt());
+  const fileIndex = new FileIndex(process.cwd());
+  const prompt = new DynamicPrompt(TerminalUI.printUserPrompt(), fileIndex);
 
   const askPrompt = async () => {
     while (true) {
@@ -228,7 +241,14 @@ async function main() {
 
       // Execute prompt in the agent loop
       try {
-        await agent.run(trimmed);
+        // Resolve @file mentions into attached context, then run the agent loop
+        const { prompt: enrichedPrompt, attachments, errors } = resolveFileMentions(
+          trimmed,
+          process.cwd()
+        );
+        TerminalUI.printAttachedFiles(attachments);
+        for (const err of errors) console.log(pc.yellow(`⚠️  ${err}`));
+        await agent.run(enrichedPrompt);
       } catch (err: any) {
         TerminalUI.printError(`Execution error: ${err.message}`);
       }

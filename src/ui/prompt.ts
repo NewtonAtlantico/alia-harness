@@ -1,5 +1,6 @@
 import readline from 'node:readline';
 import pc from 'picocolors';
+import { FileIndex, WorkspaceEntry, FILE_PREVIEW_LIMIT } from './fileIndex.js';
 
 export interface SlashCommandInfo {
   command: string;
@@ -22,6 +23,22 @@ function visibleLength(str: string): number {
   return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').length;
 }
 
+function humanSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Details about the `@query` the cursor is currently inside of. */
+interface ActiveMention {
+  /** Identity of this mention instance (changes when the user edits it). */
+  key: string;
+  /** Index of the `@` character in the input buffer. */
+  startIndex: number;
+  /** Characters typed after the `@` up to the cursor (no whitespace allowed). */
+  query: string;
+}
+
 export class DynamicPrompt {
   private history: string[] = [];
   private historyIndex = -1;
@@ -29,17 +46,21 @@ export class DynamicPrompt {
   private promptPrefix = pc.bold(pc.green('user > '));
   private promptPrefixLen = 7;
   private lastPreviewLines = 0;
+  private fileIndex?: FileIndex;
 
-  constructor(promptPrefix?: string) {
+  constructor(promptPrefix?: string, fileIndex?: FileIndex) {
     if (promptPrefix) {
       this.promptPrefix = promptPrefix;
       this.promptPrefixLen = visibleLength(promptPrefix);
     }
+    this.fileIndex = fileIndex;
   }
 
   /**
    * Prompts the user for input.
-   * If running in an interactive TTY, provides dynamic slash-command preview on typing '/'.
+   * If running in an interactive TTY, provides:
+   *   - dynamic slash-command preview on typing '/'
+   *   - dynamic file-mention preview on typing '@' (when a FileIndex is provided)
    * Otherwise falls back to standard line reading.
    */
   async ask(): Promise<string> {
@@ -68,6 +89,8 @@ export class DynamicPrompt {
       let cursorPos = 0;
       let selectedIndex = 0;
       let hasNavigated = false;
+      let menuSuppressed = false;
+      let lastMentionKey = '';
       this.historyIndex = this.history.length;
       this.savedBuffer = '';
       this.lastPreviewLines = 0;
@@ -94,6 +117,68 @@ export class DynamicPrompt {
         }
       };
 
+      /**
+       * Detects the @-mention the cursor is currently composing, if any.
+       * A mention is active when '@' starts a new word (start of input or
+       * preceded by whitespace/punctuation) and no whitespace has been typed
+       * since. Slash-command mode takes precedence.
+       */
+      const getActiveMention = (): ActiveMention | null => {
+        if (!this.fileIndex || buffer.startsWith('/')) return null;
+        if (cursorPos === 0) return null;
+
+        const before = buffer.slice(0, cursorPos);
+        const at = before.lastIndexOf('@');
+        if (at === -1) return null;
+        if (at > 0 && /[\w@]/.test(before[at - 1])) return null; // emails, code refs, '@@'
+
+        const query = before.slice(at + 1);
+        if (/\s/.test(query)) return null; // mention already closed with whitespace
+
+        return { key: `${at}:${query}`, startIndex: at, query };
+      };
+
+      /**
+       * Returns the active mention when the file preview menu should be
+       * visible for it, syncing per-mention UI state (dismissal, selection).
+       */
+      const getMenuMention = (): ActiveMention | null => {
+        const mention = getActiveMention();
+        if (!mention) return null;
+
+        if (mention.key !== lastMentionKey) {
+          lastMentionKey = mention.key;
+          menuSuppressed = false;
+          selectedIndex = 0;
+        }
+        if (menuSuppressed) return null;
+        // Once a mention is a complete known file path, the menu has served
+        // its purpose — hide it until the user edits the mention again.
+        if (this.fileIndex!.exactFileMatch(mention.query)) return null;
+
+        return mention;
+      };
+
+      /** Current ranked matches for a mention, with selection clamped. */
+      const getMentionMatches = (mention: ActiveMention) => {
+        const result = this.fileIndex!.search(mention.query, FILE_PREVIEW_LIMIT);
+        selectedIndex = Math.max(0, Math.min(selectedIndex, Math.max(0, result.matches.length - 1)));
+        return result;
+      };
+
+      /** Replaces the typed `@query` with the chosen `@path` (plus trailing space or slash). */
+      const insertMention = (entry: WorkspaceEntry) => {
+        const mention = getActiveMention();
+        if (!mention) return;
+
+        const insertText = '@' + entry.path + (entry.isDir ? '/' : ' ');
+        buffer = buffer.slice(0, mention.startIndex) + insertText + buffer.slice(cursorPos);
+        cursorPos = mention.startIndex + insertText.length;
+        selectedIndex = 0;
+        hasNavigated = false;
+        render();
+      };
+
       const render = () => {
         // 1. Clear previous preview lines if any
         clearPreview();
@@ -101,7 +186,7 @@ export class DynamicPrompt {
         // 2. Redraw current prompt line
         process.stdout.write(`\r\x1b[2K${this.promptPrefix}${buffer}`);
 
-        // 3. Render dynamic preview if input starts with '/'
+        // 3. Render dynamic preview (slash commands or file mentions)
         let previewLines: string[] = [];
         if (buffer.startsWith('/')) {
           const typedCmd = buffer.split(' ')[0].toLowerCase();
@@ -119,6 +204,21 @@ export class DynamicPrompt {
           if (previewLines.length > 0) {
             process.stdout.write(`\x1b[${previewLines.length}A`);
             this.lastPreviewLines = previewLines.length;
+          }
+        } else {
+          const mention = getMenuMention();
+          if (mention) {
+            const { matches, total } = getMentionMatches(mention);
+            previewLines = this.buildFilePreviewBox(matches, selectedIndex, total);
+
+            for (const line of previewLines) {
+              process.stdout.write('\n\x1b[2K' + line);
+            }
+
+            if (previewLines.length > 0) {
+              process.stdout.write(`\x1b[${previewLines.length}A`);
+              this.lastPreviewLines = previewLines.length;
+            }
           }
         }
 
@@ -157,12 +257,23 @@ export class DynamicPrompt {
 
         // Enter / Return handling
         if (key.name === 'return' || key.name === 'enter') {
+          // If the user highlighted a file with arrows inside the @-menu,
+          // Enter confirms the insertion instead of submitting.
+          const mention = getMenuMention();
+          if (mention && hasNavigated) {
+            const { matches } = getMentionMatches(mention);
+            if (matches[selectedIndex]) {
+              insertMention(matches[selectedIndex]);
+              return;
+            }
+          }
+
           clearPreview();
           process.stdout.write('\n');
 
           let finalInput = buffer.trim();
 
-          // If user navigated with arrows inside the preview menu, select that command
+          // If user navigated with arrows inside the slash preview, select that command
           if (buffer.startsWith('/') && hasNavigated) {
             const typedCmd = buffer.split(' ')[0].toLowerCase();
             const matches = SLASH_COMMANDS.filter((c) =>
@@ -191,8 +302,17 @@ export class DynamicPrompt {
           return;
         }
 
-        // Tab Autocomplete
+        // Tab Autocomplete (slash commands or file mentions)
         if (key.name === 'tab') {
+          const mention = getMenuMention();
+          if (mention) {
+            const { matches } = getMentionMatches(mention);
+            if (matches.length > 0) {
+              insertMention(matches[selectedIndex] || matches[0]);
+            }
+            return;
+          }
+
           if (buffer.startsWith('/')) {
             const typedCmd = buffer.split(' ')[0].toLowerCase();
             const matches = SLASH_COMMANDS.filter((c) =>
@@ -207,6 +327,16 @@ export class DynamicPrompt {
               hasNavigated = false;
               render();
             }
+          }
+          return;
+        }
+
+        // Escape: dismiss the file-mention preview until the mention changes
+        if (key.name === 'escape') {
+          const mention = getMenuMention();
+          if (mention) {
+            menuSuppressed = true;
+            render();
           }
           return;
         }
@@ -264,6 +394,18 @@ export class DynamicPrompt {
 
         // Arrow Up
         if (key.name === 'up') {
+          const mention = getMenuMention();
+          if (mention) {
+            // Navigate file-mention preview
+            const { matches } = getMentionMatches(mention);
+            if (matches.length > 0) {
+              selectedIndex = (selectedIndex - 1 + matches.length) % matches.length;
+              hasNavigated = true;
+              render();
+            }
+            return;
+          }
+
           if (buffer.startsWith('/')) {
             // Navigate slash command preview
             const typedCmd = buffer.split(' ')[0].toLowerCase();
@@ -294,6 +436,18 @@ export class DynamicPrompt {
 
         // Arrow Down
         if (key.name === 'down') {
+          const mention = getMenuMention();
+          if (mention) {
+            // Navigate file-mention preview
+            const { matches } = getMentionMatches(mention);
+            if (matches.length > 0) {
+              selectedIndex = (selectedIndex + 1) % matches.length;
+              hasNavigated = true;
+              render();
+            }
+            return;
+          }
+
           if (buffer.startsWith('/')) {
             // Navigate slash command preview
             const typedCmd = buffer.split(' ')[0].toLowerCase();
@@ -387,6 +541,82 @@ export class DynamicPrompt {
     const hint = pc.dim(' [Tab: complete, ↑/↓: navigate, Enter: select] ');
     const hintLen = 46;
     const footerPad = Math.max(0, boxWidth - hintLen - 4);
+    lines.push(pc.cyan('  └─') + hint + pc.cyan('─'.repeat(footerPad) + '┘'));
+
+    return lines;
+  }
+
+  private buildFilePreviewBox(
+    matches: WorkspaceEntry[],
+    selectedIndex: number,
+    total: number
+  ): string[] {
+    const boxWidth = 68;
+    const pathColWidth = 36;
+    const infoColWidth = 10;
+    const lines: string[] = [];
+
+    // Header
+    const title = pc.bold(pc.white(' Files '));
+    const padCount = Math.max(0, boxWidth - 4 - visibleLength(title) - 1);
+    lines.push(pc.cyan('  ┌─') + title + pc.cyan('─'.repeat(padCount) + '┐'));
+
+    if (matches.length === 0) {
+      const msg = ' No matching files. Keep typing to search the workspace.';
+      // visible width: 4 ("  │ ") + msg + pad + 1 (space) + 1 ("│") = boxWidth
+      const rightPad = Math.max(0, boxWidth - msg.length - 6);
+      lines.push(
+        pc.cyan('  │ ') + pc.yellow(msg) + ' '.repeat(rightPad) + pc.cyan(' │')
+      );
+    } else {
+      for (let i = 0; i < matches.length; i++) {
+        const entry = matches[i];
+        const isSelected = i === selectedIndex;
+
+        const label = entry.isDir ? entry.path + '/' : entry.path;
+        const displayPath =
+          label.length > pathColWidth
+            ? '…' + label.slice(label.length - pathColWidth + 1)
+            : label;
+
+        const rawInfo = entry.isDir ? `${entry.childCount} items` : humanSize(entry.size);
+        const info =
+          rawInfo.length > infoColWidth ? rawInfo.slice(0, infoColWidth - 1) + '…' : rawInfo;
+
+        const pointer = isSelected ? pc.cyan(pc.bold('❯ ')) : '  ';
+        // Pad plain text first, then colorize, so ANSI escapes don't skew widths
+        const paddedPath = displayPath.padEnd(pathColWidth);
+        const paddedInfo = info.padStart(infoColWidth);
+        const pathText = isSelected ? pc.bold(pc.yellow(paddedPath)) : pc.cyan(paddedPath);
+        const infoText = isSelected ? pc.bold(pc.white(paddedInfo)) : pc.dim(paddedInfo);
+
+        // visible width: 4 ("  │ ") + 2 (pointer) + 36 (path) + 1 (space) + 10 (info) + pad + 1 ("│")
+        const rightPad = Math.max(1, boxWidth - 4 - 2 - pathColWidth - 1 - infoColWidth - 1);
+
+        lines.push(
+          pc.cyan('  │ ') +
+            pointer +
+            pathText +
+            ' ' +
+            infoText +
+            ' '.repeat(rightPad) +
+            pc.cyan('│')
+        );
+      }
+
+      // Overflow indicator when more matches exist than displayed
+      if (total > matches.length) {
+        const msg = ` … and ${total - matches.length} more matches (keep typing to filter)`;
+        const rightPad = Math.max(0, boxWidth - msg.length - 6);
+        lines.push(
+          pc.cyan('  │ ') + pc.dim(msg) + ' '.repeat(rightPad) + pc.cyan(' │')
+        );
+      }
+    }
+
+    // Footer with navigation hints
+    const hint = pc.dim(' [Tab: insert, ↑/↓: navigate, Enter: confirm, Esc: dismiss] ');
+    const footerPad = Math.max(0, boxWidth - visibleLength(hint) - 5);
     lines.push(pc.cyan('  └─') + hint + pc.cyan('─'.repeat(footerPad) + '┘'));
 
     return lines;
