@@ -4,12 +4,16 @@ import { readFileTool } from './readFile.js';
 import { runBashTool } from './runBash.js';
 import { writeFileTool } from './writeFile.js';
 import { listFilesTool } from './listFiles.js';
+import { editFileTool } from './editFile.js';
+import { grepSearchTool } from './grepSearch.js';
 
 export * from './types.js';
 export { readFileTool } from './readFile.js';
 export { runBashTool } from './runBash.js';
 export { writeFileTool } from './writeFile.js';
 export { listFilesTool } from './listFiles.js';
+export { editFileTool } from './editFile.js';
+export { grepSearchTool } from './grepSearch.js';
 
 export class ToolRegistry {
   private tools: Map<string, ToolDefinition> = new Map();
@@ -19,6 +23,8 @@ export class ToolRegistry {
     this.register(runBashTool);
     this.register(writeFileTool);
     this.register(listFilesTool);
+    this.register(editFileTool);
+    this.register(grepSearchTool);
   }
 
   register(tool: ToolDefinition) {
