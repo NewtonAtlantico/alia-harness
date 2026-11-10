@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ToolDefinition } from './types.js';
+import { detectBinaryFile } from './fileUtils.js';
 
 interface ReadFileArgs {
   path: string;
@@ -10,7 +11,8 @@ interface ReadFileArgs {
 
 export const readFileTool: ToolDefinition<ReadFileArgs> = {
   name: 'read_file',
-  description: 'Reads text content from a given file path. Can optionally read a specific line range.',
+  description:
+    'Reads text content from a given file path. Can optionally read a specific line range. Binary files are rejected (detected by extension or NUL bytes).',
   parameters: {
     type: 'object',
     properties: {
@@ -46,6 +48,12 @@ export const readFileTool: ToolDefinition<ReadFileArgs> = {
       const stat = fs.statSync(resolvedPath);
       if (stat.isDirectory()) {
         return `Error: Path "${args.path}" is a directory, not a file. Use list_files or run_bash to inspect directory contents.`;
+      }
+
+      // Reject binary files instead of dumping unreadable garbage into the context window.
+      const binaryCheck = detectBinaryFile(resolvedPath);
+      if (binaryCheck.binary) {
+        return `Error: File "${args.path}" appears to be a binary file (detected via ${binaryCheck.reason}; ${stat.size} bytes). read_file only supports text files.`;
       }
 
       const content = fs.readFileSync(resolvedPath, 'utf-8');

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ToolDefinition } from './types.js';
+import { IGNORED_DIRS, BINARY_EXTENSIONS } from './fileUtils.js';
 
 interface GrepSearchArgs {
   query: string;
@@ -9,15 +10,13 @@ interface GrepSearchArgs {
   max_results?: number;
 }
 
-const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.cache', '.gemini']);
-const BINARY_EXTENSIONS = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.ico', '.pdf', '.zip', '.tar', '.gz', '.exe', '.dll', '.bin',
-]);
+// NUL character, used to detect binary content in files with unknown/absent extensions.
+const NUL = String.fromCharCode(0);
 
 export const grepSearchTool: ToolDefinition<GrepSearchArgs> = {
   name: 'grep_search',
   description:
-    'Searches for text or regex across files in the workspace. Returns matching file paths, line numbers, and matching lines.',
+    'Searches for text or regex across files in the workspace, skipping binary files. Returns matching file paths, line numbers, and matching lines.',
   parameters: {
     type: 'object',
     properties: {
@@ -90,6 +89,9 @@ export const grepSearchTool: ToolDefinition<GrepSearchArgs> = {
 
             try {
               const fileContent = fs.readFileSync(fullPath, 'utf-8');
+              // Skip binary files with unknown/absent extensions (NUL-byte heuristic).
+              if (fileContent.includes(NUL)) continue;
+
               const lines = fileContent.split('\n');
               const relPath = path.relative(context.workingDirectory, fullPath);
 

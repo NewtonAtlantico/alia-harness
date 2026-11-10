@@ -56,12 +56,12 @@ A TypeScript CLI harness and autonomous AI agent loop designed for custom OpenAI
    - **Feedback**: The tool output is appended as a `tool` role message and fed back into the model until the task is complete.
 
 2. **Constrained Tool Sandbox & Safety Gate**
-   - `read_file`: Reads text files with line range and line numbering support.
-   - `run_bash`: Runs shell commands (PowerShell on Windows, Bash on POSIX) with configurable timeout and stderr capture.
+   - `read_file`: Reads text files with line range and line numbering support; binary files are rejected (detected by extension or NUL bytes) instead of polluting the context window.
+   - `run_bash`: Runs shell commands with configurable timeout and stderr capture. Prefers a POSIX bash shell (Git Bash on Windows) so `&&`, pipes, and POSIX syntax work on every platform; falls back to PowerShell and reports the active shell when a command fails.
    - `write_file`: Creates or overwrites files, automatically making parent directories.
-   - `edit_file`: Surgically replaces specific target substrings within files.
+   - `edit_file`: Surgically replaces exact target strings; rejects ambiguous targets that match more than once (unless `replace_all`), and supports multiple atomic edits in one call via an `edits` array (all-or-nothing).
    - `list_files`: Explores directory trees with depth limits, ignoring noise (`node_modules`, `.git`, etc.).
-   - `grep_search`: Fast text and regex search across files in the workspace.
+   - `grep_search`: Fast text and regex search across files in the workspace, skipping binary files.
    - **Safety Gate**: Interactively warns the user and requires approval before executing potentially destructive commands (`rm -rf`, `del /s`, `git reset --hard`, `DROP DATABASE`, etc.).
 
 3. **Context & Token Window Management**

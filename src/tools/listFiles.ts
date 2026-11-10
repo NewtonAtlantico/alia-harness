@@ -1,13 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ToolDefinition } from './types.js';
+import { IGNORED_DIRS } from './fileUtils.js';
 
 interface ListFilesArgs {
   path?: string;
   max_depth?: number;
 }
-
-const IGNORED_NAMES = new Set(['node_modules', '.git', 'dist', 'build', '.cache', '.gemini']);
 
 export const listFilesTool: ToolDefinition<ListFilesArgs> = {
   name: 'list_files',
@@ -64,7 +63,7 @@ export const listFilesTool: ToolDefinition<ListFilesArgs> = {
         });
 
         for (const entry of entries) {
-          if (IGNORED_NAMES.has(entry.name)) {
+          if (IGNORED_DIRS.has(entry.name)) {
             continue;
           }
 
