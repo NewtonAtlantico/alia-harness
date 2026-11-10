@@ -59,7 +59,9 @@ A TypeScript CLI harness and autonomous AI agent loop designed for custom OpenAI
    - `read_file`: Reads text files with line range and line numbering support.
    - `run_bash`: Runs shell commands (PowerShell on Windows, Bash on POSIX) with configurable timeout and stderr capture.
    - `write_file`: Creates or overwrites files, automatically making parent directories.
+   - `edit_file`: Surgically replaces specific target substrings within files.
    - `list_files`: Explores directory trees with depth limits, ignoring noise (`node_modules`, `.git`, etc.).
+   - `grep_search`: Fast text and regex search across files in the workspace.
    - **Safety Gate**: Interactively warns the user and requires approval before executing potentially destructive commands (`rm -rf`, `del /s`, `git reset --hard`, `DROP DATABASE`, etc.).
 
 3. **Context & Token Window Management**
@@ -73,15 +75,28 @@ A TypeScript CLI harness and autonomous AI agent loop designed for custom OpenAI
 
 ---
 
-## Configuration
+## Configuration & Security
 
-Configuration is loaded from `alia-config.json` (or via `ALIA_CONFIG` environment variable or `--config <path>` flag):
+API credentials are kept strictly out of version control by loading from `.env`:
+
+### 1. Set Your API Key in `.env`
+
+Copy `.env.example` to `.env` and configure your key:
+
+```bash
+# .env (git-ignored)
+ALIA_API_KEY=sk-your-actual-api-key
+```
+
+### 2. Model & Endpoint Configuration ([`alia-config.json`](file:///c:/Projetos/alia-harness/alia-config.json))
+
+The JSON file contains the provider metadata and model endpoints without secrets:
 
 ```json
 {
   "name": "alia-quiver",
   "vendor": "customendpoint",
-  "apiKey": "your-api-key",
+  "apiKey": "",
   "apiType": "chat-completions",
   "models": [
     {

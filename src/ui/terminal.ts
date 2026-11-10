@@ -35,6 +35,10 @@ export class TerminalUI {
     return pc.bold(pc.green('user > '));
   }
 
+  static printThinkingStatus() {
+    process.stdout.write(pc.dim('🤔 Thinking...\r'));
+  }
+
   static printThinking(reasoning?: string) {
     if (reasoning && reasoning.trim()) {
       console.log(pc.dim(pc.italic(`\n💭 [Thinking / Reasoning]:\n${reasoning.trim()}\n`)));
@@ -45,6 +49,32 @@ export class TerminalUI {
 
   static clearLine() {
     process.stdout.write('\r\x1b[K');
+  }
+
+  static startReasoningBlock() {
+    TerminalUI.clearLine();
+    console.log(pc.dim(pc.italic('💭 [Thinking / Reasoning]:')));
+  }
+
+  static streamReasoningChunk(chunk: string) {
+    process.stdout.write(pc.dim(pc.italic(chunk)));
+  }
+
+  static endReasoningBlock() {
+    console.log('\n');
+  }
+
+  static startAssistantBlock() {
+    TerminalUI.clearLine();
+    console.log(pc.bold(pc.magenta('🤖 Assistant:')));
+  }
+
+  static streamContentChunk(chunk: string) {
+    process.stdout.write(chunk);
+  }
+
+  static endAssistantBlock() {
+    console.log('\n');
   }
 
   static printToolCall(toolName: string, argsStr: string) {

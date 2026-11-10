@@ -8,9 +8,23 @@ export interface AliaClientInstance {
 }
 
 export function createAliaClient(config: AliaConfig, selectedModelId?: string): AliaClientInstance {
-  const modelConfig = selectedModelId
+  let modelConfig = selectedModelId
     ? config.models.find(m => m.id === selectedModelId || m.name === selectedModelId)
     : config.models[0];
+
+  // If user selected a model id that exists on the endpoint but isn't explicitly defined in config,
+  // construct a dynamic model config using the base endpoint url
+  if (!modelConfig && selectedModelId) {
+    const baseModel = config.models[0];
+    modelConfig = {
+      id: selectedModelId,
+      name: selectedModelId,
+      url: baseModel.url,
+      toolCalling: true,
+      maxInputTokens: baseModel.maxInputTokens || 128000,
+      maxOutputTokens: baseModel.maxOutputTokens || 16000,
+    };
+  }
 
   if (!modelConfig) {
     const available = config.models.map(m => m.id).join(', ');
@@ -32,4 +46,13 @@ export function createAliaClient(config: AliaConfig, selectedModelId?: string): 
     model: modelConfig.id,
     modelConfig,
   };
+}
+
+export async function fetchAvailableModels(client: OpenAI): Promise<string[]> {
+  try {
+    const list = await client.models.list();
+    return list.data.map(m => m.id);
+  } catch {
+    return [];
+  }
 }

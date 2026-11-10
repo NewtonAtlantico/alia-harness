@@ -19,6 +19,50 @@ export interface AliaConfig {
   models: AliaModelConfig[];
 }
 
+/**
+ * Loads environment variables from a local .env file.
+ * Uses Node's native process.loadEnvFile() when available, with a safe fallback parser.
+ */
+export function loadEnv(): void {
+  const envCandidates = [
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(process.cwd(), '../.env'),
+  ];
+
+  for (const envFile of envCandidates) {
+    if (fs.existsSync(envFile)) {
+      if (typeof (process as any).loadEnvFile === 'function') {
+        try {
+          (process as any).loadEnvFile(envFile);
+        } catch {
+          parseAndInjectEnv(envFile);
+        }
+      } else {
+        parseAndInjectEnv(envFile);
+      }
+      break;
+    }
+  }
+}
+
+function parseAndInjectEnv(envFile: string): void {
+  try {
+    const content = fs.readFileSync(envFile, 'utf-8');
+    for (const rawLine of content.split('\n')) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eqIdx = line.indexOf('=');
+      if (eqIdx !== -1) {
+        const key = line.slice(0, eqIdx).trim();
+        const value = line.slice(eqIdx + 1).trim().replace(/^['"](.*)['"]$/, '$1');
+        if (!process.env[key]) {
+          process.env[key] = value;
+        }
+      }
+    }
+  } catch {}
+}
+
 export function findConfigFile(customPath?: string): string {
   if (customPath && fs.existsSync(customPath)) {
     return path.resolve(customPath);
@@ -47,13 +91,24 @@ export function findConfigFile(customPath?: string): string {
 }
 
 export function loadConfig(configPath?: string): AliaConfig {
+  // Always load .env file before reading config
+  loadEnv();
+
   const resolvedPath = findConfigFile(configPath);
   try {
     const raw = fs.readFileSync(resolvedPath, 'utf-8');
     const parsed = JSON.parse(raw) as AliaConfig;
 
-    if (!parsed.apiKey && process.env.ALIA_API_KEY) {
-      parsed.apiKey = process.env.ALIA_API_KEY;
+    // Highest priority: environment variable from .env or system environment
+    const envApiKey = process.env.ALIA_API_KEY || process.env.OPENAI_API_KEY;
+    if (envApiKey) {
+      parsed.apiKey = envApiKey;
+    }
+
+    if (!parsed.apiKey) {
+      throw new Error(
+        'Missing API key. Please define ALIA_API_KEY in your .env file or environment variables.'
+      );
     }
 
     if (!parsed.models || !Array.isArray(parsed.models) || parsed.models.length === 0) {
