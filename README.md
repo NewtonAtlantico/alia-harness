@@ -148,12 +148,18 @@ OPTIONS:
   -h, --help               Display help message
 ```
 
-### 5. Interactive REPL Slash Commands
+### 5. Interactive REPL Slash Commands (Dynamic Preview on `/`)
 
-Within the interactive session, you can run:
+As soon as you type `/`, a dynamic preview menu appears directly beneath your cursor and filters in real-time as you type:
+- **`Tab`**: Autocomplete the matching command.
+- **`↑ / ↓`**: Navigate and highlight commands in the menu.
+- **`Enter`**: Select and execute the highlighted command.
+- **`Backspace`**: Delete characters; deleting `/` automatically closes the preview.
+
+Available slash commands:
 - `/help` — Display help and command list.
 - `/tools` — Inspect all registered tools and their schemas.
-- `/models` — List configured models.
+- `/models` — List configured models and live endpoint models.
 - `/model <id>` — Switch active model dynamically.
 - `/tokens` — Check current estimated token count and context usage.
 - `/clear` — Reset conversation history.

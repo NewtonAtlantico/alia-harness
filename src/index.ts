@@ -1,14 +1,13 @@
 #!/usr/bin/env node
-import readline from 'node:readline/promises';
-import { stdin as input, stdout as output } from 'node:process';
 import pc from 'picocolors';
 import { loadConfig, AliaConfig } from './config.js';
-import { createAliaClient } from './client.js';
+import { createAliaClient, fetchAvailableModels } from './client.js';
 import { ToolRegistry } from './tools/index.js';
 import { SafetyChecker } from './safety/safetyChecker.js';
 import { ContextManager } from './context/contextManager.js';
 import { AliaAgent } from './agent/agentLoop.js';
 import { TerminalUI } from './ui/terminal.js';
+import { DynamicPrompt } from './ui/prompt.js';
 
 interface CliArgs {
   prompt?: string;
@@ -43,7 +42,7 @@ ${pc.bold(pc.cyan('ALIA HARNESS - AI Agent CLI'))}
 
 ${pc.bold('USAGE:')}
   npx tsx src/index.ts [options]
-  npm start -- [options]
+  node dist/index.js [options]
 
 ${pc.bold('OPTIONS:')}
   -p, --prompt <string>    Execute a single prompt and exit (non-interactive mode)
@@ -52,10 +51,11 @@ ${pc.bold('OPTIONS:')}
   --auto-approve           Auto-approve potentially destructive commands (skip safety prompt)
   -h, --help               Display this help message
 
-${pc.bold('SLASH COMMANDS (in interactive REPL):')}
+${pc.bold('SLASH COMMANDS (type "/" for live interactive preview):')}
   /help                    Show available slash commands
   /tools                   List all available tools and parameters
-  /models                  List models from configuration or switch model (/model <id>)
+  /models                  List models from configuration & endpoint
+  /model <id>              Switch active model on the fly
   /clear                   Reset conversation history
   /tokens                  Show estimated context tokens used
   /exit, /quit             Exit the agent harness
@@ -114,13 +114,13 @@ async function main() {
     clientInstance.modelConfig.url
   );
 
-  const rl = readline.createInterface({ input, output });
+  const prompt = new DynamicPrompt(TerminalUI.printUserPrompt());
 
   const askPrompt = async () => {
     while (true) {
       let userInput: string;
       try {
-        userInput = await rl.question(TerminalUI.printUserPrompt());
+        userInput = await prompt.ask();
       } catch {
         break;
       }
@@ -135,8 +135,7 @@ async function main() {
           case '/exit':
           case '/quit':
             console.log(pc.yellow('Exiting Alia Harness. Goodbye! 👋'));
-            rl.close();
-            return;
+            process.exit(0);
 
           case '/clear':
             agent.reset();
@@ -161,22 +160,50 @@ async function main() {
           case '/model': {
             if (cmdArgs.length > 0) {
               const newModel = cmdArgs[0];
-              const found = config.models.find(m => m.id === newModel || m.name === newModel);
-              if (found) {
-                agent.setModel(found.id, found);
-                TerminalUI.printSuccess(`Switched active model to: ${pc.bold(found.id)}`);
+              const foundInConfig = config.models.find(
+                (m) => m.id === newModel || m.name === newModel
+              );
+              if (foundInConfig) {
+                agent.setModel(foundInConfig.id, foundInConfig);
+                TerminalUI.printSuccess(`Switched active model to: ${pc.bold(foundInConfig.id)}`);
               } else {
-                TerminalUI.printError(
-                  `Model "${newModel}" not found in config. Available: ${config.models.map(m => m.id).join(', ')}`
-                );
+                // Dynamically allow switching to any remote model
+                const remoteModels = await fetchAvailableModels(clientInstance.client);
+                if (remoteModels.includes(newModel)) {
+                  agent.setModel(newModel, {
+                    id: newModel,
+                    name: newModel,
+                    url: clientInstance.modelConfig.url,
+                    toolCalling: true,
+                    maxInputTokens: 128000,
+                    maxOutputTokens: 16000,
+                  });
+                  TerminalUI.printSuccess(`Switched active model to: ${pc.bold(newModel)}`);
+                } else {
+                  TerminalUI.printError(
+                    `Model "${newModel}" not found. Available on endpoint: ${remoteModels.join(', ')}`
+                  );
+                }
               }
             } else {
               console.log(pc.bold('\nConfigured Models:'));
               for (const m of config.models) {
                 const active = m.id === agent.getModel() ? pc.green(' (active)') : '';
-                console.log(`• ${pc.bold(m.id)} - ${m.name} (${m.url})${active}`);
+                console.log(`• ${pc.bold(m.id)} - ${m.name}${active}`);
               }
-              console.log(pc.dim('\nTo switch model: /model <model_id>\n'));
+
+              TerminalUI.printThinkingStatus();
+              const remoteModels = await fetchAvailableModels(clientInstance.client);
+              TerminalUI.clearLine();
+
+              if (remoteModels.length > 0) {
+                console.log(pc.bold('\nEndpoint Models (switch with /model <id>):'));
+                for (const rModel of remoteModels) {
+                  const active = rModel === agent.getModel() ? pc.green(' (active)') : '';
+                  console.log(`• ${pc.cyan(rModel)}${active}`);
+                }
+              }
+              console.log();
             }
             continue;
           }
@@ -208,11 +235,7 @@ async function main() {
     }
   };
 
-  try {
-    await askPrompt();
-  } finally {
-    rl.close();
-  }
+  await askPrompt();
 }
 
 main().catch((err) => {
