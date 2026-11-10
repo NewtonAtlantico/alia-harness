@@ -1,39 +1,17 @@
 import pc from 'picocolors';
 import { AttachedFile } from '../context/fileMentions.js';
+import { renderBanner } from './logo.js';
+import { brand, brandLight, danger, muted, success } from './theme.js';
 
 export class TerminalUI {
   static printBanner(model: string, vendor: string, endpoint: string) {
-    const border = '═'.repeat(68);
-    console.log(pc.cyan(`╔${border}╗`));
-    console.log(
-      pc.cyan('║') +
-        pc.bold(pc.magenta('                 ALIA HARNESS - AI AGENT CLI                        ')) +
-        pc.cyan('║')
-    );
-    console.log(
-      pc.cyan('║') +
-        pc.dim('  Autonomous coding agent powered by OpenAI-compatible Alia models  ') +
-        pc.cyan('║')
-    );
-    console.log(pc.cyan(`╠${border}╣`));
-    console.log(
-      pc.cyan('║') +
-        ` ${pc.bold('Vendor:')}   ${pc.yellow(vendor.padEnd(20))} ${pc.bold('Model:')} ${pc.green(model.padEnd(28))} ` +
-        pc.cyan('║')
-    );
-    console.log(
-      pc.cyan('║') +
-        ` ${pc.bold('Endpoint:')} ${pc.dim(endpoint.padEnd(55).slice(0, 55))} ` +
-        pc.cyan('║')
-    );
-    console.log(pc.cyan(`╚${border}╝`));
-    console.log(
-      pc.dim('Type your prompt, mention files with @ for live preview, or use slash commands (/help)\n')
-    );
+    for (const line of renderBanner({ model, vendor, endpoint, cwd: process.cwd() })) {
+      console.log(line);
+    }
   }
 
   static printUserPrompt() {
-    return pc.bold(pc.green('user > '));
+    return pc.bold(brandLight('❯ '));
   }
 
   static printThinkingStatus() {
@@ -67,7 +45,11 @@ export class TerminalUI {
 
   static startAssistantBlock() {
     TerminalUI.clearLine();
-    console.log(pc.bold(pc.magenta('🤖 Assistant:')));
+    console.log(TerminalUI.assistantLabel());
+  }
+
+  private static assistantLabel() {
+    return pc.bold(brandLight('◆ alia'));
   }
 
   static streamContentChunk(chunk: string) {
@@ -90,33 +72,30 @@ export class TerminalUI {
       // Use raw if not valid json yet
     }
 
-    console.log(
-      `\n${pc.bgBlue(pc.white(' 🔧 TOOL '))} ${pc.bold(pc.cyan(toolName))} ${formattedArgs}`
-    );
+    console.log(`\n${brand('●')} ${pc.bold(brandLight(toolName))} ${formattedArgs}`);
   }
 
   static printToolResult(output: string, isError = false) {
     const lines = output.trim().split('\n');
-    const badge = isError
-      ? pc.bgRed(pc.white(' ❌ RESULT '))
-      : pc.bgGreen(pc.black(' ✓ RESULT '));
+    const bar = isError ? danger('│') : muted('│');
+    const status = isError ? danger('✗ erro') : success('✓ ok');
 
-    console.log(`${badge} ${pc.dim(`(${lines.length} lines)`)}`);
+    console.log(`  ${bar} ${status} ${muted(`(${lines.length} lines)`)}`);
 
     // Indent tool output for readability
     const previewLines = lines.slice(0, 15);
     for (const line of previewLines) {
-      console.log(pc.dim('  │ ') + (isError ? pc.red(line) : pc.white(line)));
+      console.log(`  ${bar} ` + (isError ? danger(line) : muted(line)));
     }
     if (lines.length > 15) {
-      console.log(pc.dim(`  │ ... and ${lines.length - 15} more lines`));
+      console.log(`  ${bar} ${muted(`… and ${lines.length - 15} more lines`)}`);
     }
-    console.log(pc.dim('  └───'));
+    console.log(muted('  ╰─'));
   }
 
   static printAssistantMessage(content: string) {
     TerminalUI.clearLine();
-    console.log(`\n${pc.bold(pc.magenta('🤖 Assistant:'))}`);
+    console.log(`\n${TerminalUI.assistantLabel()}`);
     console.log(content);
     console.log();
   }
@@ -131,18 +110,18 @@ export class TerminalUI {
         return `${pc.cyan(a.mention)} ${pc.dim(`(${detail})`)}`;
       })
       .join(pc.dim(', '));
-    console.log(`${pc.green('📎 Attached:')} ${summary}`);
+    console.log(`${success('📎 Attached:')} ${summary}`);
   }
 
   static printError(msg: string) {
-    console.log(pc.red(`\n❌ Error: ${msg}\n`));
+    console.log(danger(`\n✗ Error: ${msg}\n`));
   }
 
   static printInfo(msg: string) {
-    console.log(pc.cyan(`ℹ️  ${msg}`));
+    console.log(brandLight(`ℹ ${msg}`));
   }
 
   static printSuccess(msg: string) {
-    console.log(pc.green(`✔ ${msg}`));
+    console.log(success(`✔ ${msg}`));
   }
 }

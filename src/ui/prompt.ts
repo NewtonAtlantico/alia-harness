@@ -1,6 +1,7 @@
 import readline from 'node:readline';
 import pc from 'picocolors';
 import { FileIndex, WorkspaceEntry, FILE_PREVIEW_LIMIT } from './fileIndex.js';
+import { accent, brandLight } from './theme.js';
 
 export interface SlashCommandInfo {
   command: string;
@@ -43,8 +44,8 @@ export class DynamicPrompt {
   private history: string[] = [];
   private historyIndex = -1;
   private savedBuffer = '';
-  private promptPrefix = pc.bold(pc.green('user > '));
-  private promptPrefixLen = 7;
+  private promptPrefix = pc.bold(brandLight('❯ '));
+  private promptPrefixLen = 2;
   private lastPreviewLines = 0;
   private fileIndex?: FileIndex;
 
@@ -498,26 +499,26 @@ export class DynamicPrompt {
     // Header
     const title = pc.bold(pc.white(' Slash Commands '));
     const padCount = Math.max(0, boxWidth - 19 - 2);
-    lines.push(pc.cyan('  ┌─') + title + pc.cyan('─'.repeat(padCount) + '┐'));
+    lines.push(brandLight('  ┌─') + title + brandLight('─'.repeat(padCount) + '┐'));
 
     if (matches.length === 0) {
       const msg = '   No matching commands found. Type /help to see all commands.';
       const rightPad = Math.max(0, boxWidth - msg.length - 4);
       lines.push(
-        pc.cyan('  │') +
-          pc.yellow(msg) +
+        brandLight('  │') +
+          accent(msg) +
           ' '.repeat(rightPad) +
-          pc.cyan('│')
+          brandLight('│')
       );
     } else {
       for (let i = 0; i < matches.length; i++) {
         const item = matches[i];
         const isSelected = i === selectedIndex;
 
-        const pointer = isSelected ? pc.cyan(pc.bold('❯ ')) : '  ';
+        const pointer = isSelected ? brandLight(pc.bold('❯ ')) : '  ';
         const cmdName = isSelected
-          ? pc.bold(pc.yellow(item.command.padEnd(14)))
-          : pc.cyan(item.command.padEnd(14));
+          ? pc.bold(accent(item.command.padEnd(14)))
+          : brandLight(item.command.padEnd(14));
         const desc = isSelected ? pc.bold(pc.white(item.description)) : pc.dim(item.description);
 
         // Calculate visible string length to pad to boxWidth
@@ -526,13 +527,13 @@ export class DynamicPrompt {
         const rightPad = Math.max(0, boxWidth - rawLen - 1);
 
         lines.push(
-          pc.cyan('  │ ') +
+          brandLight('  │ ') +
             pointer +
             cmdName +
             ' ' +
             desc +
             ' '.repeat(rightPad) +
-            pc.cyan('│')
+            brandLight('│')
         );
       }
     }
@@ -541,7 +542,7 @@ export class DynamicPrompt {
     const hint = pc.dim(' [Tab: complete, ↑/↓: navigate, Enter: select] ');
     const hintLen = 46;
     const footerPad = Math.max(0, boxWidth - hintLen - 4);
-    lines.push(pc.cyan('  └─') + hint + pc.cyan('─'.repeat(footerPad) + '┘'));
+    lines.push(brandLight('  └─') + hint + brandLight('─'.repeat(footerPad) + '┘'));
 
     return lines;
   }
@@ -559,14 +560,14 @@ export class DynamicPrompt {
     // Header
     const title = pc.bold(pc.white(' Files '));
     const padCount = Math.max(0, boxWidth - 4 - visibleLength(title) - 1);
-    lines.push(pc.cyan('  ┌─') + title + pc.cyan('─'.repeat(padCount) + '┐'));
+    lines.push(brandLight('  ┌─') + title + brandLight('─'.repeat(padCount) + '┐'));
 
     if (matches.length === 0) {
       const msg = ' No matching files. Keep typing to search the workspace.';
       // visible width: 4 ("  │ ") + msg + pad + 1 (space) + 1 ("│") = boxWidth
       const rightPad = Math.max(0, boxWidth - msg.length - 6);
       lines.push(
-        pc.cyan('  │ ') + pc.yellow(msg) + ' '.repeat(rightPad) + pc.cyan(' │')
+        brandLight('  │ ') + accent(msg) + ' '.repeat(rightPad) + brandLight(' │')
       );
     } else {
       for (let i = 0; i < matches.length; i++) {
@@ -583,24 +584,24 @@ export class DynamicPrompt {
         const info =
           rawInfo.length > infoColWidth ? rawInfo.slice(0, infoColWidth - 1) + '…' : rawInfo;
 
-        const pointer = isSelected ? pc.cyan(pc.bold('❯ ')) : '  ';
+        const pointer = isSelected ? brandLight(pc.bold('❯ ')) : '  ';
         // Pad plain text first, then colorize, so ANSI escapes don't skew widths
         const paddedPath = displayPath.padEnd(pathColWidth);
         const paddedInfo = info.padStart(infoColWidth);
-        const pathText = isSelected ? pc.bold(pc.yellow(paddedPath)) : pc.cyan(paddedPath);
+        const pathText = isSelected ? pc.bold(accent(paddedPath)) : brandLight(paddedPath);
         const infoText = isSelected ? pc.bold(pc.white(paddedInfo)) : pc.dim(paddedInfo);
 
         // visible width: 4 ("  │ ") + 2 (pointer) + 36 (path) + 1 (space) + 10 (info) + pad + 1 ("│")
         const rightPad = Math.max(1, boxWidth - 4 - 2 - pathColWidth - 1 - infoColWidth - 1);
 
         lines.push(
-          pc.cyan('  │ ') +
+          brandLight('  │ ') +
             pointer +
             pathText +
             ' ' +
             infoText +
             ' '.repeat(rightPad) +
-            pc.cyan('│')
+            brandLight('│')
         );
       }
 
@@ -609,7 +610,7 @@ export class DynamicPrompt {
         const msg = ` … and ${total - matches.length} more matches (keep typing to filter)`;
         const rightPad = Math.max(0, boxWidth - msg.length - 6);
         lines.push(
-          pc.cyan('  │ ') + pc.dim(msg) + ' '.repeat(rightPad) + pc.cyan(' │')
+          brandLight('  │ ') + pc.dim(msg) + ' '.repeat(rightPad) + brandLight(' │')
         );
       }
     }
@@ -617,7 +618,7 @@ export class DynamicPrompt {
     // Footer with navigation hints
     const hint = pc.dim(' [Tab: insert, ↑/↓: navigate, Enter: confirm, Esc: dismiss] ');
     const footerPad = Math.max(0, boxWidth - visibleLength(hint) - 5);
-    lines.push(pc.cyan('  └─') + hint + pc.cyan('─'.repeat(footerPad) + '┘'));
+    lines.push(brandLight('  └─') + hint + brandLight('─'.repeat(footerPad) + '┘'));
 
     return lines;
   }
