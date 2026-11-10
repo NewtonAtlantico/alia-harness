@@ -98,7 +98,7 @@ export class AliaAgent {
         TerminalUI.printInfo('Context window compacted to preserve token budget.');
       }
 
-      TerminalUI.printThinking();
+      const thinking = TerminalUI.startThinking();
 
       let response: OpenAI.Chat.Completions.ChatCompletion;
       try {
@@ -109,13 +109,13 @@ export class AliaAgent {
           tool_choice: 'auto',
         });
       } catch (err: any) {
-        TerminalUI.clearLine();
+        thinking.stop();
         const errorMsg = `API request failed: ${err.message}`;
         TerminalUI.printError(errorMsg);
         return errorMsg;
       }
 
-      TerminalUI.clearLine();
+      thinking.stop();
 
       const choice = response.choices?.[0];
       if (!choice || !choice.message) {

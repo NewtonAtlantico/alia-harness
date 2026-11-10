@@ -1,6 +1,7 @@
 import pc from 'picocolors';
 import { AttachedFile } from '../context/fileMentions.js';
 import { renderBanner } from './logo.js';
+import { ThinkingAnimation } from './thinking.js';
 import { brand, brandLight, danger, muted, success } from './theme.js';
 
 export class TerminalUI {
@@ -14,15 +15,14 @@ export class TerminalUI {
     return pc.bold(brandLight('❯ '));
   }
 
-  static printThinkingStatus() {
-    process.stdout.write(pc.dim('🤔 Thinking...\r'));
+  /** Starts the animated mascot; call `.stop()` on the result when done. */
+  static startThinking(label?: string): ThinkingAnimation {
+    return new ThinkingAnimation(label).start();
   }
 
-  static printThinking(reasoning?: string) {
-    if (reasoning && reasoning.trim()) {
+  static printThinking(reasoning: string) {
+    if (reasoning.trim()) {
       console.log(pc.dim(pc.italic(`\n💭 [Thinking / Reasoning]:\n${reasoning.trim()}\n`)));
-    } else {
-      process.stdout.write(pc.dim('🤔 Thinking...\r'));
     }
   }
 

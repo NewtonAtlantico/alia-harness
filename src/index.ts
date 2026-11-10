@@ -205,9 +205,10 @@ async function main() {
                 console.log(`• ${pc.bold(m.id)} - ${m.name}${active}`);
               }
 
-              TerminalUI.printThinkingStatus();
-              const remoteModels = await fetchAvailableModels(clientInstance.client);
-              TerminalUI.clearLine();
+              const loading = TerminalUI.startThinking('Loading models');
+              const remoteModels = await fetchAvailableModels(clientInstance.client).finally(() =>
+                loading.stop()
+              );
 
               if (remoteModels.length > 0) {
                 console.log(pc.bold('\nEndpoint Models (switch with /model <id>):'));

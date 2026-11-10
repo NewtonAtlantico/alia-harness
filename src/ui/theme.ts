@@ -6,9 +6,9 @@ import pc from 'picocolors';
  * basic 16-colour palette (via picocolors) otherwise.
  */
 
-const colorOn = pc.isColorSupported;
+export const colorOn = pc.isColorSupported;
 
-const trueColor =
+export const trueColor =
   colorOn &&
   (/truecolor|24bit/i.test(process.env.COLORTERM ?? '') ||
     !!process.env.WT_SESSION || // Windows Terminal
