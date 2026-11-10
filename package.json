@@ -1,0 +1,28 @@
+{
+  "name": "alia-harness",
+  "version": "1.0.0",
+  "description": "CLI agent harness for Alia LLMs with custom endpoints and tool calling",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "alia-agent": "dist/index.js"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": ["ai", "agent", "alia", "llm", "cli", "harness"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "openai": "^7.54.0",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,17 @@
+{
+		"name": "alia-quiver",
+		"vendor": "customendpoint",
+		"apiKey": "sk-fd34e9faced7490090a8891ea6be7428",
+		"apiType": "chat-completions",
+		"models": [
+			{
+				"id": "gpt-oss:20b",
+				"name": "gpt-oss",
+				"url": "https://chat.alia.atlantico.com.br/api/",
+				"toolCalling": true,
+				"vision": true,
+				"maxInputTokens": 128000,
+				"maxOutputTokens": 16000
+			}
+		]
+	}
