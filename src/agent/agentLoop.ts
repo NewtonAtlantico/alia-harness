@@ -17,6 +17,24 @@ export interface AgentOptions {
   maxSteps?: number;
 }
 
+/**
+ * How a run ended:
+ * - completed: the model produced a final text answer.
+ * - max_steps: the step budget ran out before the model concluded.
+ * - failed:    the API call threw, or the endpoint returned no usable message
+ *              (see `failure` for which).
+ */
+export type AgentStatus = 'completed' | 'max_steps' | 'failed';
+
+export interface AgentResult {
+  status: AgentStatus;
+  /** Final answer on `completed`; a human-readable message otherwise. */
+  text: string;
+  /** Model round-trips used by this run (not cumulative across runs). */
+  steps: number;
+  failure?: 'api_error' | 'empty_response';
+}
+
 export const DEFAULT_SYSTEM_PROMPT =`You are an expert AI software engineer and autonomous agent operating inside a CLI harness.
 You have access to tools that let you read files, execute shell commands, write files, and inspect directories.
 Follow these principles:
@@ -80,6 +98,14 @@ export class AliaAgent {
    * and repeats until the model finishes its task with a final text response.
    */
   async run(userPrompt: string): Promise<string> {
+    return (await this.runDetailed(userPrompt)).text;
+  }
+
+  /**
+   * Same loop as `run()`, but reports how it ended so callers (subagents, tests) can branch
+   * on completed / max_steps / failed instead of string-matching the text.
+   */
+  async runDetailed(userPrompt: string): Promise<AgentResult> {
     // 1. Append user prompt to message history
     this.messages.push({
       role: 'user',
@@ -112,7 +138,7 @@ export class AliaAgent {
         thinking.stop();
         const errorMsg = `API request failed: ${err.message}`;
         TerminalUI.printError(errorMsg);
-        return errorMsg;
+        return { status: 'failed', text: errorMsg, steps: step, failure: 'api_error' };
       }
 
       thinking.stop();
@@ -120,7 +146,7 @@ export class AliaAgent {
       const choice = response.choices?.[0];
       if (!choice || !choice.message) {
         TerminalUI.printError('Empty response received from LLM endpoint.');
-        return 'Empty response received.';
+        return { status: 'failed', text: 'Empty response received.', steps: step, failure: 'empty_response' };
       }
 
       const assistantMessage = choice.message;
@@ -143,7 +169,7 @@ export class AliaAgent {
         const content = assistantMessage.content || '';
         this.messages.push(assistantMessage);
         TerminalUI.printAssistantMessage(content);
-        return content;
+        return { status: 'completed', text: content, steps: step };
       }
 
       // Model returned tool calls: append assistant's tool-call request to messages
@@ -185,6 +211,6 @@ export class AliaAgent {
 
     const maxStepsMsg = `Agent reached maximum allowable steps (${this.maxSteps}) without concluding.`;
     TerminalUI.printError(maxStepsMsg);
-    return maxStepsMsg;
+    return { status: 'max_steps', text: maxStepsMsg, steps: step };
   }
 }

@@ -13,7 +13,8 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test:mentions": "tsx scripts/smoke-mentions.ts && tsx scripts/tty-mentions.ts",
-    "test:skills": "tsx scripts/smoke-skills.ts"
+    "test:skills": "tsx scripts/smoke-skills.ts",
+    "test:agent": "tsx scripts/smoke-agent.ts"
   },
   "keywords": ["ai", "agent", "alia", "llm", "cli", "harness"],
   "author": "",
