@@ -14,6 +14,16 @@ export const DEFAULT_CONTEXT_LIMITS: ContextLimits = {
   pruneThresholdRatio: 0.75, // Prune when exceeding 75% of context window
 };
 
+/**
+ * Tool outputs starting with this tag are skill instructions (see use_skill). They are
+ * the model's working playbook, so pruning must never replace them with an archive stub.
+ */
+export const SKILL_TAG_PREFIX = '<skill ';
+
+export function isPinnedToolOutput(content: string): boolean {
+  return content.startsWith(SKILL_TAG_PREFIX);
+}
+
 export class ContextManager {
   private limits: ContextLimits;
 
@@ -121,7 +131,12 @@ export class ContextManager {
     // Prune stale tool responses in the older segment
     for (let i = startIndex; i < endIndex; i++) {
       const msg = prunedMessages[i];
-      if (msg.role === 'tool' && typeof msg.content === 'string' && msg.content.length > 300) {
+      if (
+        msg.role === 'tool' &&
+        typeof msg.content === 'string' &&
+        msg.content.length > 300 &&
+        !isPinnedToolOutput(msg.content)
+      ) {
         prunedMessages[i] = {
           ...msg,
           content: `[Previous tool output archived to save context: ${msg.content.slice(0, 80)}...]`,

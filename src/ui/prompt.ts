@@ -7,11 +7,16 @@ export interface SlashCommandInfo {
   command: string;
   description: string;
   usage?: string;
+  /** Picking it in the preview menu fills `/cmd ` so the user can type arguments. */
+  acceptsArgs?: boolean;
+  /** True for commands generated from skills. */
+  skill?: boolean;
 }
 
 export const SLASH_COMMANDS: SlashCommandInfo[] = [
   { command: '/help', description: 'Show available slash commands and usage' },
   { command: '/tools', description: 'List all available tools and parameters' },
+  { command: '/skills', description: 'List skills and whether they are available' },
   { command: '/models', description: 'List models from config and remote endpoint' },
   { command: '/model', description: 'Switch active model (e.g. /model gpt-oss:20b)', usage: '/model <id>' },
   { command: '/clear', description: 'Reset conversation history' },
@@ -19,6 +24,35 @@ export const SLASH_COMMANDS: SlashCommandInfo[] = [
   { command: '/exit', description: 'Exit the agent harness' },
   { command: '/quit', description: 'Exit the agent harness' },
 ];
+
+/**
+ * Adds one `/<name>` command per skill to the live slash menu (replacing any
+ * previously registered skill commands). Skills whose name clashes with a built-in
+ * command are skipped; the names of skipped skills are returned.
+ */
+export function registerSkillCommands(skills: { name: string; description: string }[]): string[] {
+  for (let i = SLASH_COMMANDS.length - 1; i >= 0; i--) {
+    if (SLASH_COMMANDS[i].skill) SLASH_COMMANDS.splice(i, 1);
+  }
+  const taken = new Set(SLASH_COMMANDS.map((c) => c.command.toLowerCase()));
+  const skipped: string[] = [];
+  for (const skill of skills) {
+    const command = `/${skill.name}`;
+    if (taken.has(command.toLowerCase())) {
+      skipped.push(skill.name);
+      continue;
+    }
+    taken.add(command.toLowerCase());
+    SLASH_COMMANDS.push({
+      command,
+      description: `[skill] ${skill.description.replace(/\s+/g, ' ').trim()}`,
+      usage: `${command} <input>`,
+      acceptsArgs: true,
+      skill: true,
+    });
+  }
+  return skipped;
+}
 
 function visibleLength(str: string): number {
   return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').length;
@@ -282,9 +316,9 @@ export class DynamicPrompt {
             );
             if (matches[selectedIndex]) {
               const chosen = matches[selectedIndex];
-              if (chosen.command === '/model' && !buffer.includes(' ')) {
-                // If /model chosen, prompt them to specify model
-                buffer = '/model ';
+              if ((chosen.command === '/model' || chosen.acceptsArgs) && !buffer.includes(' ')) {
+                // /model and skills take an argument: fill the command and let the user type it
+                buffer = chosen.command + ' ';
                 cursorPos = buffer.length;
                 hasNavigated = false;
                 render();
@@ -511,20 +545,37 @@ export class DynamicPrompt {
           brandLight('│')
       );
     } else {
-      for (let i = 0; i < matches.length; i++) {
-        const item = matches[i];
-        const isSelected = i === selectedIndex;
+      // Scroll a fixed-size window around the selection so many skills don't flood the terminal.
+      const maxRows = 10;
+      const windowStart = Math.max(
+        0,
+        Math.min(selectedIndex - Math.floor(maxRows / 2), matches.length - maxRows)
+      );
+      const visible = matches.slice(windowStart, windowStart + maxRows);
+
+      // Command column grows for long skill names (capped); descriptions are cut to fit the box.
+      const cmdWidth = Math.min(
+        30,
+        Math.max(14, ...visible.map((m) => m.command.length))
+      );
+      const descWidth = Math.max(10, boxWidth - 8 - cmdWidth);
+      const fit = (text: string, width: number) =>
+        text.length > width ? text.slice(0, Math.max(0, width - 1)) + '…' : text;
+
+      for (let v = 0; v < visible.length; v++) {
+        const item = visible[v];
+        const isSelected = windowStart + v === selectedIndex;
+
+        const command = fit(item.command, cmdWidth).padEnd(cmdWidth);
+        const description = fit(item.description, descWidth);
 
         const pointer = isSelected ? brandLight(pc.bold('❯ ')) : '  ';
-        const cmdName = isSelected
-          ? pc.bold(accent(item.command.padEnd(14)))
-          : brandLight(item.command.padEnd(14));
-        const desc = isSelected ? pc.bold(pc.white(item.description)) : pc.dim(item.description);
+        const cmdName = isSelected ? pc.bold(accent(command)) : brandLight(command);
+        const desc = isSelected ? pc.bold(pc.white(description)) : pc.dim(description);
 
         // Calculate visible string length to pad to boxWidth
-        const rawContent = `  │ ${isSelected ? '❯ ' : '  '}${item.command.padEnd(14)} ${item.description}`;
-        const rawLen = rawContent.length;
-        const rightPad = Math.max(0, boxWidth - rawLen - 1);
+        const rawContent = `  │ ${isSelected ? '❯ ' : '  '}${command} ${description}`;
+        const rightPad = Math.max(0, boxWidth - rawContent.length - 1);
 
         lines.push(
           brandLight('  │ ') +
@@ -533,6 +584,17 @@ export class DynamicPrompt {
             ' ' +
             desc +
             ' '.repeat(rightPad) +
+            brandLight('│')
+        );
+      }
+
+      const hidden = matches.length - visible.length;
+      if (hidden > 0) {
+        const note = `   ${matches.length} matches, showing ${visible.length}. Keep typing to narrow.`;
+        lines.push(
+          brandLight('  │') +
+            pc.dim(note) +
+            ' '.repeat(Math.max(0, boxWidth - note.length - 4)) +
             brandLight('│')
         );
       }

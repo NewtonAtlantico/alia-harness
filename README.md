@@ -62,6 +62,7 @@ A TypeScript CLI harness and autonomous AI agent loop designed for custom OpenAI
    - `edit_file`: Surgically replaces exact target strings; rejects ambiguous targets that match more than once (unless `replace_all`), and supports multiple atomic edits in one call via an `edits` array (all-or-nothing).
    - `list_files`: Explores directory trees with depth limits, ignoring noise (`node_modules`, `.git`, etc.).
    - `grep_search`: Fast text and regex search across files in the workspace, skipping binary files.
+   - `use_skill`: Loads a skill's full instructions on demand (see [Skills](#skills)).
    - **Safety Gate**: Interactively warns the user and requires approval before executing potentially destructive commands (`rm -rf`, `del /s`, `git reset --hard`, `DROP DATABASE`, etc.).
 
 3. **Context & Token Window Management**
@@ -159,6 +160,8 @@ As soon as you type `/`, a dynamic preview menu appears directly beneath your cu
 Available slash commands:
 - `/help` — Display help and command list.
 - `/tools` — Inspect all registered tools and their schemas.
+- `/skills` — List skills and whether each is available.
+- `/<skill-name> [input]` — Run a skill directly (every available skill appears in the `/` menu).
 - `/models` — List configured models and live endpoint models.
 - `/model <id>` — Switch active model dynamically.
 - `/tokens` — Check current estimated token count and context usage.
@@ -198,3 +201,53 @@ Details and guardrails:
   per prompt); binary files are rejected with a warning instead of dumped as garbage.
 - `@mentions` also work in non-interactive mode: `npm start -- -p "Summarize @README.md"`.
 - Mention resolution is covered by `npm run test:mentions`.
+
+---
+
+## Skills
+
+Skills are reusable playbooks: a folder with a `SKILL.md` (YAML frontmatter with `name` and
+`description`, then markdown instructions) and optional `references/`, `scripts/` and `assets/`.
+The harness loads them with progressive disclosure, so 19 skills cost about 1.5k tokens of context
+instead of tens of thousands:
+
+1. **Catalog** — only `name: description` for each available skill is added to the system prompt.
+2. **On demand** — the model calls `use_skill("<name>")`, or you run `/<name> [input]`, and the full
+   `SKILL.md` is loaded into the conversation (wrapped in a `<skill ...>` block).
+3. **Lazily** — supporting files (`references/…`, `scripts/…`) are read with `read_file` /
+   `run_bash` only when a step needs them.
+
+```text
+user > /spec-to-tasks @docs/specs/login.md
+ℹ Skill loaded: spec-to-tasks
+user > write a spec for the export feature      # the model may call use_skill("spec-driven-development") itself
+```
+
+**Where skills are found** (later wins on a name clash): the bundled `./skills` folder next to the
+harness, `~/.alia/skills`, `<cwd>/.alia/skills`, then any folders in `ALIA_SKILLS_DIR`
+(path-delimited). Only direct children of a root are scanned.
+
+**Harness adaptations** applied when a skill is loaded:
+
+- A short note maps Claude Code concepts onto the harness (the `Skill` tool is `use_skill`; there is
+  no `AskUserQuestion`, subagent or MCP tool, so ask plain-text questions and wait).
+- `.claude/skills/<name>/…` paths inside a skill are rewritten to the real folder, so bundled
+  scripts such as `embrapii-docs/scripts/build_docx.py` resolve.
+- Loaded skills are **never pruned** by context compaction, and are not subject to the 16k-char
+  tool-output cap.
+
+**Gating with `requires:`** — a skill may list tools it needs in its frontmatter:
+
+```yaml
+requires: createJiraIssue, searchJiraIssuesUsingJql
+```
+
+If no registered tool matches (exactly, or as an MCP-prefixed `mcp__server__<name>`), the skill is
+left out of the catalog and the `/` menu, and `/skills` shows why. Today this hides
+`add-tasks-to-jira` and `playwright-mcp-verification`, which need an MCP client the harness does not
+have yet.
+
+Run `npm run test:skills` to check loading, gating, path rewriting and pruning behavior.
+
+**Roadmap:** running each stage of `requirements-to-tasks-pipeline` in an isolated subagent is
+planned in [docs/backlog/001-subagents.md](docs/backlog/001-subagents.md).

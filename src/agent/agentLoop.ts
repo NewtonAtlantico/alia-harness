@@ -17,7 +17,7 @@ export interface AgentOptions {
   maxSteps?: number;
 }
 
-const DEFAULT_SYSTEM_PROMPT = `You are an expert AI software engineer and autonomous agent operating inside a CLI harness.
+export const DEFAULT_SYSTEM_PROMPT =`You are an expert AI software engineer and autonomous agent operating inside a CLI harness.
 You have access to tools that let you read files, execute shell commands, write files, and inspect directories.
 Follow these principles:
 1. Always explore the existing codebase (inspect directory, read relevant files) before guessing or editing.

@@ -5,9 +5,11 @@ import { createAliaClient, fetchAvailableModels } from './client.js';
 import { ToolRegistry } from './tools/index.js';
 import { SafetyChecker } from './safety/safetyChecker.js';
 import { ContextManager } from './context/contextManager.js';
-import { AliaAgent } from './agent/agentLoop.js';
+import { AliaAgent, DEFAULT_SYSTEM_PROMPT } from './agent/agentLoop.js';
 import { TerminalUI } from './ui/terminal.js';
-import { DynamicPrompt } from './ui/prompt.js';
+import { DynamicPrompt, registerSkillCommands } from './ui/prompt.js';
+import { SkillRegistry, buildSkillCatalog, buildSkillInvocationPrompt } from './skills/skillLoader.js';
+import { createUseSkillTool } from './tools/useSkill.js';
 import { FileIndex } from './ui/fileIndex.js';
 import { resolveFileMentions } from './context/fileMentions.js';
 
@@ -63,7 +65,9 @@ ${pc.bold('FILE MENTIONS (type "@" for live interactive preview):')}
 ${pc.bold('SLASH COMMANDS (type "/" for live interactive preview):')}
   /help                    Show available slash commands
   /tools                   List all available tools and parameters
-  /models                  List models from configuration & endpoint
+  /skills                  List skills and whether they are available
+  /<skill-name> [input]    Run a skill directly (e.g. /spec-to-tasks @docs/specs/login.md)
+  /models                 List models from configuration & endpoint
   /model <id>              Switch active model on the fly
   /clear                   Reset conversation history
   /tokens                  Show estimated context tokens used
@@ -83,6 +87,17 @@ async function main() {
   }
 
   const toolRegistry = new ToolRegistry();
+
+  // Skills: scan folders, expose the use_skill tool, and advertise a catalog in the system prompt.
+  const skills = new SkillRegistry({
+    getToolNames: () => toolRegistry.getAll().map((t) => t.name),
+    cwd: process.cwd(),
+  });
+  skills.load();
+  toolRegistry.register(createUseSkillTool(skills));
+  const catalog = buildSkillCatalog(skills);
+  const systemPrompt = catalog ? `${DEFAULT_SYSTEM_PROMPT}\n\n${catalog}` : DEFAULT_SYSTEM_PROMPT;
+
   const safetyChecker = new SafetyChecker(cliArgs.autoApprove ?? false);
 
   const selectedModelId = cliArgs.model || config.models[0].id;
@@ -106,12 +121,51 @@ async function main() {
     safetyChecker,
     contextManager,
     workingDirectory: process.cwd(),
+    systemPrompt,
   });
+
+  const skippedSkills = registerSkillCommands(skills.available());
+  for (const w of skills.warnings) TerminalUI.printInfo(`skills: ${w}`);
+  for (const name of skippedSkills) {
+    TerminalUI.printInfo(`skills: "${name}" clashes with a built-in command; use it via use_skill only.`);
+  }
+
+  /**
+   * Turns `/skill-name <input>` into the prompt for the agent loop, or returns null when
+   * the command is not a skill (errors for known-but-unavailable skills are printed).
+   */
+  const resolveSkillCommand = (cmd: string, input: string): string | null => {
+    const skill = skills.get(cmd);
+    if (!skill) return null;
+    const missing = skills.missingRequirements(skill);
+    if (missing.length > 0) {
+      TerminalUI.printError(
+        `Skill "${skill.name}" is unavailable: it requires ${missing.join(', ')} (no matching tool is registered in this harness).`
+      );
+      return '';
+    }
+    const { prompt, attachments, errors } = resolveFileMentions(input, process.cwd());
+    TerminalUI.printAttachedFiles(attachments);
+    for (const err of errors) console.log(pc.yellow(`⚠️  ${err}`));
+    TerminalUI.printInfo(`Skill loaded: ${skill.name}`);
+    return buildSkillInvocationPrompt(skill, skills, prompt);
+  };
 
   // Non-interactive single-prompt mode
   if (cliArgs.prompt) {
     console.log(pc.bold(pc.cyan(`\nExecuting prompt with model [${agent.getModel()}]:`)));
     console.log(pc.white(`> ${cliArgs.prompt}\n`));
+
+    if (cliArgs.prompt.startsWith('/')) {
+      const cmd = cliArgs.prompt.trim().split(/\s+/)[0];
+      const skillPrompt = resolveSkillCommand(cmd, cliArgs.prompt.trim().slice(cmd.length));
+      if (skillPrompt === '') process.exit(1);
+      if (skillPrompt !== null) {
+        await agent.run(skillPrompt);
+        return;
+      }
+    }
+
     const { prompt, attachments, errors } = resolveFileMentions(cliArgs.prompt, process.cwd());
     TerminalUI.printAttachedFiles(attachments);
     for (const err of errors) console.log(pc.yellow(`⚠️  ${err}`));
@@ -164,6 +218,24 @@ async function main() {
             for (const tool of toolRegistry.getAll()) {
               console.log(`• ${pc.bold(pc.cyan(tool.name))}: ${tool.description}`);
               console.log(`  Parameters: ${JSON.stringify(tool.parameters.properties, null, 2)}`);
+            }
+            console.log();
+            continue;
+          }
+
+          case '/skills': {
+            const all = skills.all();
+            if (all.length === 0) {
+              console.log(pc.yellow('\nNo skills found. Add folders with a SKILL.md to ./skills, ~/.alia/skills or ./.alia/skills.\n'));
+              continue;
+            }
+            console.log(pc.bold(`\nSkills (${all.length}) — run with /<name> [input], or the model loads them via use_skill:`));
+            for (const s of all) {
+              const missing = skills.missingRequirements(s);
+              const status = missing.length === 0 ? '' : pc.red(` [unavailable: needs ${missing.join(', ')}]`);
+              const desc = s.description.replace(/\s+/g, ' ');
+              console.log(`• ${pc.bold(pc.cyan('/' + s.name))} ${pc.dim(`(${s.source})`)}${status}`);
+              console.log(`  ${pc.dim(desc.length > 160 ? desc.slice(0, 157) + '...' : desc)}`);
             }
             console.log();
             continue;
@@ -234,9 +306,21 @@ async function main() {
             continue;
           }
 
-          default:
-            TerminalUI.printError(`Unknown command "${cmd}". Type /help for assistance.`);
+          default: {
+            // `/skill-name [input]` runs a skill directly
+            const skillPrompt = resolveSkillCommand(cmd, trimmed.slice(cmd.length));
+            if (skillPrompt === null) {
+              TerminalUI.printError(`Unknown command "${cmd}". Type /help for assistance.`);
+              continue;
+            }
+            if (skillPrompt === '') continue;
+            try {
+              await agent.run(skillPrompt);
+            } catch (err: any) {
+              TerminalUI.printError(`Execution error: ${err.message}`);
+            }
             continue;
+          }
         }
       }
 
