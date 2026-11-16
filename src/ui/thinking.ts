@@ -64,7 +64,8 @@ export class ThinkingAnimation {
     if (this.timer) process.stdout.write('\x1b[?25h');
   };
 
-  constructor(label = 'Thinking') {
+  /** @param plain skip the sprite and show the text fallback (used inside nested subagent output). */
+  constructor(label = 'Thinking', private plain = false) {
     this.label = label;
   }
 
@@ -74,7 +75,7 @@ export class ThinkingAnimation {
     this.trackWidth = Math.min(MAX_TRACK, columns - INDENT - 2 - LABEL_WIDTH);
 
     const animated =
-      process.stdout.isTTY && spriteSupported && this.trackWidth >= SPRITE_WIDTH + 4;
+      !this.plain && process.stdout.isTTY && spriteSupported && this.trackWidth >= SPRITE_WIDTH + 4;
 
     if (!animated) {
       process.stdout.write(muted(`${this.label}…\r`));

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | In progress. Done: S1, S3, S4, S7 (`run_subagent` works end to end against the fake model; `npm run test:subagents`). Next: S2 (UI nesting), S5 (skill pre-load + `inputs`), S6, S8, S9. |
+| **Status** | In progress. Done: S1, S2, S3, S4, S5, S7 (isolation, depth guard, skill pre-load, inputs, nested output; `npm run test:subagents`). Next: S6 (blocked-at-gate resume), S8 (pipeline skill), S9 (docs). |
 | **Depends on** | Skills phase 1: `use_skill`, skill catalog, pinned skill output, `requires:` gating |
 | **Primary consumer** | `requirements-to-tasks-pipeline` (`skills/e2e-pipeline`) |
 
@@ -101,10 +101,10 @@ Points are Fibonacci, capped at 8, matching the `spec-to-tasks` convention used 
 | ID | Task | Pts | Acceptance criteria |
 |---|---|---|---|
 | S1 | `AgentResult` + `runDetailed()` (**done**) | 3 | Returns `completed`, `max_steps`, `failed` (API error / empty response) with step count. `run()` output unchanged; existing REPL behavior unaffected. |
-| S2 | Terminal output context (nesting/quiet) | 3 | A child run prints indented, labelled lines; `quiet` prints one summary line per tool call. Parent output is byte-identical when no subagent runs. |
+| S2 | Terminal output context (nesting/quiet) (**done**; compact by default, `ALIA_SUBAGENT_VERBOSE=1` for the full indented transcript) | 3 | A child run prints indented, labelled lines; `quiet` prints one summary line per tool call. Parent output is byte-identical when no subagent runs. |
 | S3 | `ToolRegistry.without()` and depth guard (**done**) | 2 | Child registry lacks `run_subagent`; a child that somehow calls it gets a clear error. |
-| S4 | `run_subagent` tool + child system prompt (**done**; `skill` and `inputs` args come with S5) | 5 | Spawns an isolated agent, returns the structured result capped at 4k chars; honors `max_steps` and the hard cap; child history never leaks into the parent's `messages`. |
-| S5 | Skill pre-load and `inputs` attachments | 3 | `skill` arg injects the pinned skill body; `inputs` attach through `resolveFileMentions`; unknown/unavailable skill returns an `Error:` string like `use_skill`. |
+| S4 | `run_subagent` tool + child system prompt (**done**) | 5 | Spawns an isolated agent, returns the structured result capped at 4k chars; honors `max_steps` and the hard cap; child history never leaks into the parent's `messages`. |
+| S5 | Skill pre-load and `inputs` attachments (**done**; inputs and skill are validated before any child starts) | 3 | `skill` arg injects the pinned skill body; `inputs` attach through `resolveFileMentions`; unknown/unavailable skill returns an `Error:` string like `use_skill`. |
 | S6 | Blocked-at-gate protocol | 3 | A child that ends with `STATUS: blocked` returns `QUESTIONS`; parent asks the user, then re-spawns; second run resumes from `STATE.md`. Verified with a scripted fake model. |
 | S7 | Fake-model test harness + smoke test (`npm run test:subagents`). **Harness done** (`scripts/lib/fakeModel.ts`, with loop tests in `npm run test:agent`); the subagent-specific cases land with S4/S6. | 5 | Scripted `OpenAI`-compatible client drives the loop deterministically. Covers: isolation, depth guard, step cap, blocked path, error path. No network or API key needed. |
 | S8 | Update `requirements-to-tasks-pipeline` for the harness | 3 | Skill (or a harness-specific note in its README) says to use `run_subagent` per stage when available and falls back to inline stages when it is not. Add `requires: run_subagent` only to a harness-specific variant, so Claude Code still works. |

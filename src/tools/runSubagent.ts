@@ -7,6 +7,8 @@ import { AliaAgent } from '../agent/agentLoop.js';
 import { ContextManager } from '../context/contextManager.js';
 import { AliaModelConfig } from '../config.js';
 import { TerminalUI } from '../ui/terminal.js';
+import { SkillRegistry, buildSkillInvocationPrompt } from '../skills/skillLoader.js';
+import { resolveFileMentions } from '../context/fileMentions.js';
 import {
   SubagentReport,
   formatSubagentReport,
@@ -37,10 +39,19 @@ export interface SubagentDeps {
   getRegistry: () => ToolRegistry;
   /** The parent's full system prompt (base + skill catalog). */
   systemPrompt: string;
+  /** Needed for the `skill` argument; without it that argument returns an error. */
+  getSkills?: () => SkillRegistry;
+  /**
+   * Show the child's full transcript, indented, instead of one line per tool call.
+   * Defaults to the ALIA_SUBAGENT_VERBOSE=1 environment variable.
+   */
+  verbose?: boolean;
 }
 
 interface RunSubagentArgs {
   task: string;
+  skill?: string;
+  inputs?: string[];
   max_steps?: number;
 }
 
@@ -67,13 +78,23 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
       'and returns a short result block (STATUS, SUMMARY, ARTIFACTS, QUESTIONS). Use it for a heavy, ' +
       'separable stage so its details do not fill your context. The subagent cannot ask the user: if it ' +
       'returns STATUS: blocked, ask the user its QUESTIONS yourself, then start a new subagent with the answers. ' +
-      'Put everything it needs in "task" (file paths, constraints, where to write results); it cannot see this conversation.',
+      'Put everything it needs in "task" (constraints, where to write results); it cannot see this conversation. ' +
+      'Use "skill" to start it with a skill already loaded, and "inputs" to hand it files.',
     parameters: {
       type: 'object',
       properties: {
         task: {
           type: 'string',
-          description: 'Complete, self-contained instructions for the subagent, including input and output file paths.',
+          description: 'Complete, self-contained instructions for the subagent, including output file paths.',
+        },
+        skill: {
+          type: 'string',
+          description: 'Optional skill name (as listed in the system prompt) to pre-load, so the subagent does not need to call use_skill.',
+        },
+        inputs: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional file or directory paths (relative to the working directory) whose contents are attached to the subagent\'s first message.',
         },
         max_steps: {
           type: 'number',
@@ -84,6 +105,42 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
     },
     execute: async (args, ctx) => {
       if (!args?.task || !args.task.trim()) return 'Error: Parameter "task" is required.';
+
+      // Validate everything before spawning: a bad skill name or input path should cost the
+      // parent one cheap tool error, not a child run that wanders without its inputs.
+      let firstMessage = args.task.trim();
+
+      if (args.inputs !== undefined) {
+        if (!Array.isArray(args.inputs) || args.inputs.some((p) => typeof p !== 'string' || !p.trim())) {
+          return 'Error: Parameter "inputs" must be an array of file or directory paths.';
+        }
+        if (args.inputs.length > 0) {
+          const resolved = resolveFileMentions(
+            `Input files: ${args.inputs.map((p) => `@${p.trim()}`).join(' ')}`,
+            ctx.workingDirectory
+          );
+          if (resolved.errors.length > 0) {
+            return `Error: could not attach inputs, so no subagent was started:\n${resolved.errors.join('\n')}`;
+          }
+          firstMessage = `${firstMessage}\n\n${resolved.prompt}`;
+        }
+      }
+
+      if (args.skill) {
+        const skills = deps.getSkills?.();
+        if (!skills) return 'Error: Skills are not available in this harness, so "skill" cannot be used.';
+        const name = args.skill.replace(/^\//, '');
+        const skill = skills.get(name);
+        if (!skill) {
+          const names = skills.available().map((s) => s.name).join(', ') || '(none)';
+          return `Error: Unknown skill "${args.skill}". Available skills: ${names}`;
+        }
+        const missing = skills.missingRequirements(skill);
+        if (missing.length > 0) {
+          return `Error: Skill "${skill.name}" is unavailable in this harness: it requires ${missing.join(', ')} (no matching tool is registered).`;
+        }
+        firstMessage = buildSkillInvocationPrompt(skill, skills, firstMessage);
+      }
 
       const maxSteps = clampSteps(args.max_steps);
       const { id, config } = deps.getModel();
@@ -103,8 +160,16 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
         maxSteps,
       });
 
-      TerminalUI.printInfo(`Subagent started (max ${maxSteps} steps): ${args.task.trim().split('\n')[0].slice(0, 100)}`);
-      const result = await child.runDetailed(args.task);
+      const label = args.task.trim().split('\n')[0].slice(0, 100);
+      TerminalUI.printInfo(`Subagent started (max ${maxSteps} steps${args.skill ? `, skill ${args.skill}` : ''}): ${label}`);
+      const verbose = deps.verbose ?? process.env.ALIA_SUBAGENT_VERBOSE === '1';
+      TerminalUI.pushScope({ label, quiet: !verbose });
+      let result;
+      try {
+        result = await child.runDetailed(firstMessage);
+      } finally {
+        TerminalUI.popScope();
+      }
 
       let report: SubagentReport;
       if (result.status === 'completed') {

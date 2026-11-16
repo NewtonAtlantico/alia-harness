@@ -4,7 +4,63 @@ import { renderBanner } from './logo.js';
 import { ThinkingAnimation } from './thinking.js';
 import { brand, brandLight, danger, muted, success } from './theme.js';
 
+interface OutputScope {
+  indent: string;
+  quiet: boolean;
+  label: string;
+}
+
+const SCOPE_INDENT = '  ';
+const QUIET_ARGS_MAX = 90;
+
 export class TerminalUI {
+  /**
+   * Nested output scopes (one per running subagent). With none active, every print goes
+   * straight to console.log exactly as before, so the parent's output is unchanged.
+   */
+  private static scopes: OutputScope[] = [];
+
+  /**
+   * Starts a nested scope: output is indented under a `│` gutter. `quiet` collapses it to
+   * one line per tool call (no reasoning, previews or final message). Always pair with
+   * {@link popScope} in a `finally`.
+   */
+  static pushScope(opts: { label: string; quiet?: boolean }) {
+    const depth = TerminalUI.scopes.length + 1;
+    TerminalUI.scopes.push({
+      indent: SCOPE_INDENT.repeat(depth - 1) + muted('  │ '),
+      quiet: opts.quiet ?? false,
+      label: opts.label,
+    });
+  }
+
+  static popScope() {
+    TerminalUI.scopes.pop();
+  }
+
+  /** Label of the innermost active subagent scope, if any (used to attribute approval prompts). */
+  static getScopeLabel(): string | undefined {
+    return TerminalUI.scopes.at(-1)?.label;
+  }
+
+  private static get scope(): OutputScope | undefined {
+    return TerminalUI.scopes.at(-1);
+  }
+
+  private static out(text: string) {
+    const s = TerminalUI.scope;
+    if (!s) {
+      console.log(text);
+      return;
+    }
+    console.log(
+      text
+        .split('\n')
+        .map((line) => (line.length > 0 ? s.indent + line : s.indent.trimEnd()))
+        .join('\n')
+    );
+  }
+
   static printBanner(model: string, vendor: string, endpoint: string) {
     for (const line of renderBanner({ model, vendor, endpoint, cwd: process.cwd() })) {
       console.log(line);
@@ -17,12 +73,14 @@ export class TerminalUI {
 
   /** Starts the animated mascot; call `.stop()` on the result when done. */
   static startThinking(label?: string): ThinkingAnimation {
-    return new ThinkingAnimation(label).start();
+    // Inside a subagent the cursor-addressed sprite would fight the nested layout: use text.
+    return new ThinkingAnimation(label, TerminalUI.scope !== undefined).start();
   }
 
   static printThinking(reasoning: string) {
+    if (TerminalUI.scope?.quiet) return;
     if (reasoning.trim()) {
-      console.log(pc.dim(pc.italic(`\n💭 [Thinking / Reasoning]:\n${reasoning.trim()}\n`)));
+      TerminalUI.out(pc.dim(pc.italic(`\n💭 [Thinking / Reasoning]:\n${reasoning.trim()}\n`)));
     }
   }
 
@@ -72,32 +130,51 @@ export class TerminalUI {
       // Use raw if not valid json yet
     }
 
-    console.log(`\n${brand('●')} ${pc.bold(brandLight(toolName))} ${formattedArgs}`);
+    if (TerminalUI.scope?.quiet) {
+      // One compact line per step; plain text so truncation can't cut an ANSI sequence.
+      const flat = Object.entries(safeParse(argsStr) ?? {})
+        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+        .join(' ') || argsStr;
+      const args = flat.length > QUIET_ARGS_MAX ? flat.slice(0, QUIET_ARGS_MAX - 1) + '…' : flat;
+      TerminalUI.out(`${brand('●')} ${pc.bold(brandLight(toolName))} ${muted(args)}`);
+      return;
+    }
+
+    TerminalUI.out(`\n${brand('●')} ${pc.bold(brandLight(toolName))} ${formattedArgs}`);
   }
 
   static printToolResult(output: string, isError = false) {
     const lines = output.trim().split('\n');
+
+    if (TerminalUI.scope?.quiet) {
+      // Successful results are noise at this level; failures are not.
+      if (isError) TerminalUI.out(`${danger('✗')} ${danger(lines[0].slice(0, 160))}`);
+      return;
+    }
+
     const bar = isError ? danger('│') : muted('│');
     const status = isError ? danger('✗ erro') : success('✓ ok');
 
-    console.log(`  ${bar} ${status} ${muted(`(${lines.length} lines)`)}`);
+    TerminalUI.out(`  ${bar} ${status} ${muted(`(${lines.length} lines)`)}`);
 
     // Indent tool output for readability
     const previewLines = lines.slice(0, 15);
     for (const line of previewLines) {
-      console.log(`  ${bar} ` + (isError ? danger(line) : muted(line)));
+      TerminalUI.out(`  ${bar} ` + (isError ? danger(line) : muted(line)));
     }
     if (lines.length > 15) {
-      console.log(`  ${bar} ${muted(`… and ${lines.length - 15} more lines`)}`);
+      TerminalUI.out(`  ${bar} ${muted(`… and ${lines.length - 15} more lines`)}`);
     }
-    console.log(muted('  ╰─'));
+    TerminalUI.out(muted('  ╰─'));
   }
 
   static printAssistantMessage(content: string) {
     TerminalUI.clearLine();
-    console.log(`\n${TerminalUI.assistantLabel()}`);
-    console.log(content);
-    console.log();
+    // A quiet subagent's final message goes to its caller, not the screen.
+    if (TerminalUI.scope?.quiet) return;
+    TerminalUI.out(`\n${TerminalUI.assistantLabel()}`);
+    TerminalUI.out(content);
+    TerminalUI.out('');
   }
 
   static printAttachedFiles(attachments: AttachedFile[]) {
@@ -114,14 +191,23 @@ export class TerminalUI {
   }
 
   static printError(msg: string) {
-    console.log(danger(`\n✗ Error: ${msg}\n`));
+    TerminalUI.out(danger(`\n✗ Error: ${msg}\n`));
   }
 
   static printInfo(msg: string) {
-    console.log(brandLight(`ℹ ${msg}`));
+    TerminalUI.out(brandLight(`ℹ ${msg}`));
   }
 
   static printSuccess(msg: string) {
-    console.log(success(`✔ ${msg}`));
+    TerminalUI.out(success(`✔ ${msg}`));
+  }
+}
+
+function safeParse(text: string): Record<string, unknown> | undefined {
+  try {
+    const v = JSON.parse(text);
+    return v && typeof v === 'object' ? v : undefined;
+  } catch {
+    return undefined;
   }
 }

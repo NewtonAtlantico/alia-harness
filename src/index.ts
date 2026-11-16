@@ -133,6 +133,7 @@ async function main() {
       getModel: () => ({ id: agent.getModel(), config: agent.getModelConfig() }),
       getRegistry: () => toolRegistry,
       systemPrompt,
+      getSkills: () => skills,
     })
   );
 

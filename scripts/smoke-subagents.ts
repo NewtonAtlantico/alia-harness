@@ -2,7 +2,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { AliaAgent } from '../src/agent/agentLoop.js';
-import { ToolRegistry } from '../src/tools/index.js';
+import { ToolRegistry, ToolDefinition } from '../src/tools/index.js';
+import { SkillRegistry, bundledSkillsDir } from '../src/skills/skillLoader.js';
+import { TerminalUI } from '../src/ui/terminal.js';
 import {
   createRunSubagentTool,
   SUBAGENT_PROMPT_BLOCK,
@@ -16,7 +18,7 @@ import {
   MAX_RESULT_CHARS,
 } from '../src/agent/subagentResult.js';
 import { FakeModel, ScriptedTurn, RecordedRequest } from './lib/fakeModel.js';
-import { quiet } from './lib/testUtils.js';
+import { quiet, capture } from './lib/testUtils.js';
 
 let failures = 0;
 function check(name: string, cond: boolean, extra = '') {
@@ -34,9 +36,13 @@ const PARENT_PROMPT = 'PARENT SYSTEM PROMPT';
  * One FakeModel serves parent and child (they share the client), so the script is the
  * interleaved sequence of model calls: parent, child..., parent.
  */
-function setup(turns: ScriptedTurn[], opts: { repeatLast?: boolean } = {}) {
+function setup(
+  turns: ScriptedTurn[],
+  opts: { repeatLast?: boolean; skills?: SkillRegistry; verbose?: boolean; extraTools?: ToolDefinition[] } = {}
+) {
   const model = new FakeModel(turns, opts.repeatLast ? 'repeat-last' : 'throw');
   const tools = new ToolRegistry();
+  for (const t of opts.extraTools ?? []) tools.register(t);
   const modelConfig = { id: 'fake-model', name: 'fake', url: 'http://fake', toolCalling: true };
   tools.register(
     createRunSubagentTool({
@@ -44,6 +50,8 @@ function setup(turns: ScriptedTurn[], opts: { repeatLast?: boolean } = {}) {
       getModel: () => ({ id: 'fake-model', config: modelConfig }),
       getRegistry: () => tools,
       systemPrompt: PARENT_PROMPT,
+      getSkills: opts.skills ? () => opts.skills! : undefined,
+      verbose: opts.verbose ?? false,
     })
   );
   const parent = new AliaAgent({
@@ -197,6 +205,170 @@ console.log('\n=== S4: blocked-at-gate result ===');
   ]);
   const r = await quiet(() => parent.runDetailed('go'));
   check('blocked status and questions surface to the parent', r.text.startsWith('STATUS: blocked') && r.text.includes('QUESTIONS: Which tenant model?'), r.text);
+}
+
+console.log('\n=== S5: skill pre-load ===');
+{
+  const skills = new SkillRegistry({ roots: [{ label: 'bundled', dir: bundledSkillsDir() }], getToolNames: () => [] });
+  skills.load();
+  const done: ScriptedTurn = { content: 'STATUS: completed\nSUMMARY: ok' };
+
+  const ok = setup([delegate('Break spec X into tasks', { skill: 'spec-to-tasks' }), done, relay], { skills });
+  await quiet(() => ok.parent.runDetailed('go'));
+  const first = ok.model.requests[1].messages[1].content as string;
+  check('child first message carries the skill body', first.includes('<skill name="spec-to-tasks"'));
+  check('child told not to re-load it', first.includes('do not call use_skill'));
+  check('child first message carries the task', first.endsWith('Request / input: Break spec X into tasks'));
+
+  const slash = setup([delegate('t', { skill: '/spec-to-tasks' }), done, relay], { skills });
+  await quiet(() => slash.parent.runDetailed('go'));
+  check('leading slash accepted', (slash.model.requests[1].messages[1].content as string).includes('<skill name="spec-to-tasks"'));
+
+  const unknown = setup([delegate('t', { skill: 'nope' }), relay], { skills });
+  const ru = await quiet(() => unknown.parent.runDetailed('go'));
+  check('unknown skill -> Error listing skills, no child spawned', ru.text.startsWith('Error: Unknown skill "nope"') && ru.text.includes('spec-to-tasks') && unknown.model.callCount === 2, ru.text);
+
+  const gated = setup([delegate('t', { skill: 'add-tasks-to-jira' }), relay], { skills });
+  const rg = await quiet(() => gated.parent.runDetailed('go'));
+  check('gated skill -> Error unavailable, no child spawned', rg.text.includes('unavailable') && gated.model.callCount === 2, rg.text);
+
+  const noSkills = setup([delegate('t', { skill: 'spec-to-tasks' }), relay]);
+  const rn = await quiet(() => noSkills.parent.runDetailed('go'));
+  check('skill arg without a skill registry -> Error', rn.text.startsWith('Error: Skills are not available'), rn.text);
+}
+
+console.log('\n=== S5: inputs attachments ===');
+{
+  fs.mkdirSync(path.join(tmp, 'docs'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'docs', 'in.md'), '# Spec\nUNIQUE-SPEC-MARKER');
+  const done: ScriptedTurn = { content: 'STATUS: completed\nSUMMARY: ok' };
+
+  const ok = setup([delegate('Summarise the spec', { inputs: ['docs/in.md', 'docs'] }), done, relay]);
+  await quiet(() => ok.parent.runDetailed('go'));
+  const first = ok.model.requests[1].messages[1].content as string;
+  check('file contents attached to the child first message', first.includes('<file path="docs/in.md"') && first.includes('UNIQUE-SPEC-MARKER'));
+  check('directory inputs are listed', first.includes('<directory path="docs"'));
+  check('task text comes first', first.startsWith('Summarise the spec'));
+  check('contents did not leak into the parent history', !JSON.stringify(ok.parent.getMessages()).includes('UNIQUE-SPEC-MARKER'));
+
+  const missing = setup([delegate('t', { inputs: ['docs/in.md', 'docs/typo.md'] }), relay]);
+  const rm = await quiet(() => missing.parent.runDetailed('go'));
+  check('missing input -> Error naming it, no child spawned', rm.text.startsWith('Error: could not attach inputs') && rm.text.includes('docs/typo.md') && missing.model.callCount === 2, rm.text);
+
+  const bad = setup([delegate('t', { inputs: 'docs/in.md' }), relay]);
+  const rb = await quiet(() => bad.parent.runDetailed('go'));
+  check('non-array inputs -> Error, no child spawned', rb.text.startsWith('Error: Parameter "inputs"') && bad.model.callCount === 2, rb.text);
+
+  // docs/in.md exists, so a resolver run over the task text WOULD attach it; @ghost would error.
+  const taskText = 'ping me@x.com, ask @ghost, see @docs/in.md';
+  const mention = setup([delegate(taskText), done, relay]);
+  const rt = await quiet(() => mention.parent.runDetailed('go'));
+  check('@mentions inside the task text are left alone (only "inputs" attach files)', rt.text.startsWith('STATUS: completed') && mention.model.requests[1].messages[1].content === taskText, rt.text);
+
+  const both = setup(
+    [delegate('combine', { inputs: ['docs/in.md'], skill: 'spec-to-tasks' }), done, relay],
+    { skills: (() => { const s = new SkillRegistry({ roots: [{ label: 'bundled', dir: bundledSkillsDir() }], getToolNames: () => [] }); s.load(); return s; })() }
+  );
+  await quiet(() => both.parent.runDetailed('go'));
+  const combined = both.model.requests[1].messages[1].content as string;
+  check('skill + inputs together: skill body, task and attachment all present', combined.includes('<skill name="spec-to-tasks"') && combined.includes('combine') && combined.includes('UNIQUE-SPEC-MARKER'));
+}
+
+console.log('\n=== S2: nested terminal output ===');
+{
+  const rec = (fn: () => void) => capture(async () => fn());
+
+  const base = await rec(() => {
+    TerminalUI.printToolCall('read_file', '{"path":"a.ts"}');
+    TerminalUI.printToolResult('line1\nline2');
+  });
+  TerminalUI.pushScope({ label: 'x' });
+  TerminalUI.popScope();
+  const after = await rec(() => {
+    TerminalUI.printToolCall('read_file', '{"path":"a.ts"}');
+    TerminalUI.printToolResult('line1\nline2');
+  });
+  check('no scope: output unchanged and unaffected by a push/pop pair', base.text === after.text && base.lines.length > 0);
+  check('no scope: no gutter', !base.text.includes('│ ●'));
+
+  const verbose = await (async () => {
+    TerminalUI.pushScope({ label: 'child', quiet: false });
+    try {
+      return await rec(() => {
+        TerminalUI.printToolCall('read_file', '{"path":"a.ts"}');
+        TerminalUI.printToolResult('line1\nline2');
+        TerminalUI.printAssistantMessage('final words');
+      });
+    } finally {
+      TerminalUI.popScope();
+    }
+  })();
+  const vLines = verbose.text.split('\n').filter((l) => l.trim() !== '');
+  check('verbose scope: every non-empty line sits under the gutter', vLines.length > 3 && vLines.every((l) => l.includes('│')), verbose.text);
+  check('verbose scope: full detail kept (result preview + final message)', verbose.text.includes('line2') && verbose.text.includes('final words'));
+
+  const quietOut = await (async () => {
+    TerminalUI.pushScope({ label: 'child', quiet: true });
+    try {
+      return await rec(() => {
+        TerminalUI.printThinking('secret reasoning');
+        TerminalUI.printToolCall('write_file', '{"path":"a.ts","content":"' + 'x'.repeat(500) + '"}');
+        TerminalUI.printToolResult('wrote it\nsecond line');
+        TerminalUI.printToolResult('Error: boom\nmore', true);
+        TerminalUI.printAssistantMessage('final words');
+      });
+    } finally {
+      TerminalUI.popScope();
+    }
+  })();
+  const qLines = quietOut.text.split('\n').filter((l) => l.trim() !== '');
+  check('quiet scope: exactly a tool-call line and an error line', qLines.length === 2, JSON.stringify(qLines));
+  check('quiet scope: call line names the tool, long args truncated', qLines[0].includes('write_file') && qLines[0].length < 160 && qLines[0].includes('…'));
+  check('quiet scope: errors surface, one line', qLines[1].includes('Error: boom') && !quietOut.text.includes('more'));
+  check('quiet scope: reasoning, ok-results and final message hidden', !/secret|wrote it|final words/.test(quietOut.text));
+
+  TerminalUI.pushScope({ label: 'outer', quiet: false });
+  TerminalUI.pushScope({ label: 'inner', quiet: false });
+  const nested = await rec(() => TerminalUI.printInfo('deep'));
+  check('label is the innermost scope', TerminalUI.getScopeLabel() === 'inner');
+  TerminalUI.popScope();
+  const shallow = await rec(() => TerminalUI.printInfo('deep'));
+  TerminalUI.popScope();
+  check('nested scope indents deeper than its parent', nested.text.indexOf('deep') > shallow.text.indexOf('deep'));
+  check('scopes fully unwound', TerminalUI.getScopeLabel() === undefined);
+}
+
+console.log('\n=== S2: wired into run_subagent ===');
+{
+  const labels: (string | undefined)[] = [];
+  const probe: ToolDefinition = {
+    name: 'probe',
+    description: 'records the active output scope label',
+    parameters: { type: 'object', properties: {} },
+    execute: async () => {
+      labels.push(TerminalUI.getScopeLabel());
+      return 'probed';
+    },
+  };
+  const script = (): ScriptedTurn[] => [
+    delegate('Probe things in a subagent'),
+    { toolCalls: [{ name: 'probe', args: {} }] },
+    { content: 'STATUS: completed\nSUMMARY: ok' },
+    relay,
+  ];
+
+  const compact = setup(script(), { extraTools: [probe], verbose: false });
+  const c = await capture(() => compact.parent.runDetailed('go'));
+  check('child tool sees its scope label (used for approval prompts)', labels[0] === 'Probe things in a subagent', String(labels[0]));
+  check('scope is gone once the child finishes', TerminalUI.getScopeLabel() === undefined);
+  check('compact: child tool call shown on one gutter line', c.lines.some((l) => l.includes('│') && l.includes('probe')));
+  const okCount = (t: string) => (t.match(/✓ ok/g) ?? []).length;
+  check('compact: only the parent\'s tool result preview is printed', okCount(c.text) === 1, `ok=${okCount(c.text)}`);
+  check('compact: start/finish lines frame the child', c.text.includes('Subagent started') && c.text.includes('Subagent finished: completed'));
+
+  const full = setup(script(), { extraTools: [probe], verbose: true });
+  const f = await capture(() => full.parent.runDetailed('go'));
+  check('verbose: child result previews are shown too', okCount(f.text) === 2, `ok=${okCount(f.text)}`);
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

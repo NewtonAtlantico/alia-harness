@@ -1,6 +1,7 @@
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import pc from 'picocolors';
+import { TerminalUI } from '../ui/terminal.js';
 
 export interface DangerousCommandRule {
   pattern: RegExp;
@@ -79,6 +80,8 @@ export class SafetyChecker {
     }
 
     console.log('\n' + pc.bgRed(pc.white(' ⚠️  SAFETY GATE: POTENTIALLY DESTRUCTIVE ACTION DETECTED ')));
+    const requester = TerminalUI.getScopeLabel();
+    if (requester) console.log(pc.magenta(`Requested by subagent: ${requester}`));
     console.log(pc.red(`Command: ${pc.bold(command)}`));
     console.log(pc.yellow(`Reason(s): ${check.reasons.join(', ')}`));
     console.log(pc.cyan('The agent is requesting permission to execute this command on your machine.'));
