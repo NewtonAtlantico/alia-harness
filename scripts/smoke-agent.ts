@@ -4,6 +4,7 @@ import { ToolRegistry, ToolDefinition } from '../src/tools/index.js';
 import { SafetyChecker } from '../src/safety/safetyChecker.js';
 import { ContextManager } from '../src/context/contextManager.js';
 import { FakeModel, ScriptedTurn } from './lib/fakeModel.js';
+import { quiet } from './lib/testUtils.js';
 
 let failures = 0;
 function check(name: string, cond: boolean, extra = '') {
@@ -11,20 +12,6 @@ function check(name: string, cond: boolean, extra = '') {
   else {
     failures++;
     console.log(`  ✘ ${name} ${extra}`);
-  }
-}
-
-/** Runs fn with the agent's UI output (spinner, tool previews) swallowed. */
-async function quiet<T>(fn: () => Promise<T>): Promise<T> {
-  const log = console.log;
-  const write = process.stdout.write;
-  console.log = () => {};
-  process.stdout.write = (() => true) as typeof process.stdout.write;
-  try {
-    return await fn();
-  } finally {
-    console.log = log;
-    process.stdout.write = write;
   }
 }
 

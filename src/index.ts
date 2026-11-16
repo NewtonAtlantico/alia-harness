@@ -10,6 +10,7 @@ import { TerminalUI } from './ui/terminal.js';
 import { DynamicPrompt, registerSkillCommands } from './ui/prompt.js';
 import { SkillRegistry, buildSkillCatalog, buildSkillInvocationPrompt } from './skills/skillLoader.js';
 import { createUseSkillTool } from './tools/useSkill.js';
+import { createRunSubagentTool } from './tools/runSubagent.js';
 import { FileIndex } from './ui/fileIndex.js';
 import { resolveFileMentions } from './context/fileMentions.js';
 
@@ -123,6 +124,17 @@ async function main() {
     workingDirectory: process.cwd(),
     systemPrompt,
   });
+
+  // Subagents: registered after the agent exists so the tool can read the live model/client.
+  // Callers see it in the tool list; a child gets a copy of the registry without it.
+  toolRegistry.register(
+    createRunSubagentTool({
+      getClient: () => clientInstance.client,
+      getModel: () => ({ id: agent.getModel(), config: agent.getModelConfig() }),
+      getRegistry: () => toolRegistry,
+      systemPrompt,
+    })
+  );
 
   const skippedSkills = registerSkillCommands(skills.available());
   for (const w of skills.warnings) TerminalUI.printInfo(`skills: ${w}`);

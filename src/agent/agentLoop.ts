@@ -85,6 +85,10 @@ export class AliaAgent {
     return this.model;
   }
 
+  getModelConfig() {
+    return this.modelConfig;
+  }
+
   setModel(newModel: string, config?: AliaModelConfig) {
     this.model = newModel;
     if (config) {
