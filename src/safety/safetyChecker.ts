@@ -1,8 +1,3 @@
-import readline from 'node:readline/promises';
-import { stdin as input, stdout as output } from 'node:process';
-import pc from 'picocolors';
-import { TerminalUI } from '../ui/terminal.js';
-
 export interface DangerousCommandRule {
   pattern: RegExp;
   reason: string;
@@ -38,11 +33,66 @@ export interface SafetyCheckResult {
   reasons: string[];
 }
 
+export interface SafetyConfirmationContext {
+  command: string;
+  reasons: string[];
+  requester?: string;
+}
+
+export type SafetyConfirmationHandler = (
+  context: SafetyConfirmationContext
+) => Promise<boolean>;
+
+export interface SafetyCheckerOptions {
+  autoApprove?: boolean;
+  onConfirm?: SafetyConfirmationHandler;
+  getScopeLabel?: () => string | undefined;
+  onAutoApprove?: (command: string) => void;
+}
+
+let defaultConfirmationHandler: SafetyConfirmationHandler | undefined;
+let defaultScopeLabelProvider: (() => string | undefined) | undefined;
+let defaultAutoApproveHandler: ((command: string) => void) | undefined;
+
+export function setDefaultSafetyConfirmationHandler(handler: SafetyConfirmationHandler | undefined): void {
+  defaultConfirmationHandler = handler;
+}
+
+export function getDefaultSafetyConfirmationHandler(): SafetyConfirmationHandler | undefined {
+  return defaultConfirmationHandler;
+}
+
+export function setDefaultScopeLabelProvider(provider: (() => string | undefined) | undefined): void {
+  defaultScopeLabelProvider = provider;
+}
+
+export function getDefaultScopeLabelProvider(): (() => string | undefined) | undefined {
+  return defaultScopeLabelProvider;
+}
+
+export function setDefaultAutoApproveHandler(handler: ((command: string) => void) | undefined): void {
+  defaultAutoApproveHandler = handler;
+}
+
+export function getDefaultAutoApproveHandler(): ((command: string) => void) | undefined {
+  return defaultAutoApproveHandler;
+}
+
 export class SafetyChecker {
   private autoApprove: boolean;
+  private onConfirm?: SafetyConfirmationHandler;
+  private getScopeLabelFn?: () => string | undefined;
+  private onAutoApproveFn?: (command: string) => void;
 
-  constructor(autoApprove = false) {
-    this.autoApprove = autoApprove;
+  constructor(options: boolean | SafetyCheckerOptions = false) {
+    if (typeof options === 'boolean') {
+      this.autoApprove = options;
+    } else {
+      this.autoApprove = options.autoApprove ?? false;
+      this.onConfirm = options.onConfirm;
+      this.getScopeLabelFn = options.getScopeLabel;
+      this.onAutoApproveFn = options.onAutoApprove;
+    }
   }
 
   /**
@@ -64,7 +114,7 @@ export class SafetyChecker {
   }
 
   /**
-   * Interactively prompt user for confirmation if command is dangerous.
+   * Prompt user for confirmation if command is dangerous.
    * Returns true if approved, false if denied.
    */
   async confirmIfDangerous(command: string): Promise<{ approved: boolean; reason?: string }> {
@@ -75,33 +125,34 @@ export class SafetyChecker {
     }
 
     if (this.autoApprove) {
-      console.log(pc.yellow(`⚠️  [Auto-Approved Dangerous Command]: ${command}`));
+      const autoApproveHandler = this.onAutoApproveFn ?? defaultAutoApproveHandler;
+      autoApproveHandler?.(command);
       return { approved: true };
     }
 
-    console.log('\n' + pc.bgRed(pc.white(' ⚠️  SAFETY GATE: POTENTIALLY DESTRUCTIVE ACTION DETECTED ')));
-    const requester = TerminalUI.getScopeLabel();
-    if (requester) console.log(pc.magenta(`Requested by subagent: ${requester}`));
-    console.log(pc.red(`Command: ${pc.bold(command)}`));
-    console.log(pc.yellow(`Reason(s): ${check.reasons.join(', ')}`));
-    console.log(pc.cyan('The agent is requesting permission to execute this command on your machine.'));
+    const requester = this.getScopeLabelFn ? this.getScopeLabelFn() : defaultScopeLabelProvider?.();
+    const handler = this.onConfirm ?? defaultConfirmationHandler;
 
-    const rl = readline.createInterface({ input, output });
-    try {
-      const answer = await rl.question(pc.bold('Do you want to allow this command? [y/N]: '));
-      const trimmed = answer.trim().toLowerCase();
-      const approved = trimmed === 'y' || trimmed === 'yes';
-
-      if (!approved) {
-        return {
-          approved: false,
-          reason: `User denied permission to execute potentially destructive command: "${command}". Reasons: ${check.reasons.join('; ')}`,
-        };
-      }
-
-      return { approved: true };
-    } finally {
-      rl.close();
+    if (!handler) {
+      return {
+        approved: false,
+        reason: `Potentially destructive command detected: "${command}". Reasons: ${check.reasons.join('; ')}, but no confirmation handler is available.`,
+      };
     }
+
+    const approved = await handler({
+      command,
+      reasons: check.reasons,
+      requester,
+    });
+
+    if (!approved) {
+      return {
+        approved: false,
+        reason: `User denied permission to execute potentially destructive command: "${command}". Reasons: ${check.reasons.join('; ')}`,
+      };
+    }
+
+    return { approved: true };
   }
 }

@@ -4,6 +4,10 @@
   "description": "CLI agent harness for Alia LLMs with custom endpoints and tool calling",
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./core": "./dist/core.js"
+  },
   "bin": {
     "alia-agent": "dist/index.js"
   },

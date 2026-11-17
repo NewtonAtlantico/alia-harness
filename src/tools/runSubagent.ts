@@ -6,7 +6,7 @@ import { ToolRegistry } from './index.js';
 import { AliaAgent } from '../agent/agentLoop.js';
 import { ContextManager } from '../context/contextManager.js';
 import { AliaModelConfig } from '../config.js';
-import { TerminalUI } from '../ui/terminal.js';
+import { AgentUI, getDefaultAgentUI } from '../agent/agentUI.js';
 import { SkillRegistry, buildSkillInvocationPrompt } from '../skills/skillLoader.js';
 import { resolveFileMentions } from '../context/fileMentions.js';
 import {
@@ -46,6 +46,8 @@ export interface SubagentDeps {
    * Defaults to the ALIA_SUBAGENT_VERBOSE=1 environment variable.
    */
   verbose?: boolean;
+  /** Custom UI / observer for subagent logging and scopes. */
+  ui?: AgentUI;
 }
 
 interface RunSubagentArgs {
@@ -144,6 +146,7 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
 
       const maxSteps = clampSteps(args.max_steps);
       const { id, config } = deps.getModel();
+      const ui = deps.ui ?? getDefaultAgentUI();
 
       const child = new AliaAgent({
         client: deps.getClient(),
@@ -158,17 +161,18 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
         workingDirectory: ctx.workingDirectory,
         systemPrompt: `${deps.systemPrompt}\n\n${SUBAGENT_PROMPT_BLOCK}`,
         maxSteps,
+        ui,
       });
 
       const label = args.task.trim().split('\n')[0].slice(0, 100);
-      TerminalUI.printInfo(`Subagent started (max ${maxSteps} steps${args.skill ? `, skill ${args.skill}` : ''}): ${label}`);
+      ui?.printInfo?.(`Subagent started (max ${maxSteps} steps${args.skill ? `, skill ${args.skill}` : ''}): ${label}`);
       const verbose = deps.verbose ?? process.env.ALIA_SUBAGENT_VERBOSE === '1';
-      TerminalUI.pushScope({ label, quiet: !verbose });
+      ui?.pushScope?.({ label, quiet: !verbose });
       let result;
       try {
         result = await child.runDetailed(firstMessage);
       } finally {
-        TerminalUI.popScope();
+        ui?.popScope?.();
       }
 
       let report: SubagentReport;
@@ -186,7 +190,7 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
         report = { status: result.status === 'max_steps' ? 'max_steps' : 'failed', summary: result.text, artifacts: [], questions: '' };
       }
 
-      TerminalUI.printInfo(`Subagent finished: ${report.status} (${result.steps}/${maxSteps} steps)`);
+      ui?.printInfo?.(`Subagent finished: ${report.status} (${result.steps}/${maxSteps} steps)`);
       return formatSubagentReport(report, { steps: result.steps, maxSteps });
     },
   };

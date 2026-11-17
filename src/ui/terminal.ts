@@ -1,8 +1,17 @@
+import readline from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process';
 import pc from 'picocolors';
 import { AttachedFile } from '../context/fileMentions.js';
 import { renderBanner } from './logo.js';
 import { ThinkingAnimation } from './thinking.js';
 import { brand, brandLight, danger, muted, success } from './theme.js';
+import { setDefaultAgentUI } from '../agent/agentUI.js';
+import {
+  SafetyConfirmationContext,
+  setDefaultSafetyConfirmationHandler,
+  setDefaultScopeLabelProvider,
+  setDefaultAutoApproveHandler,
+} from '../safety/safetyChecker.js';
 
 interface OutputScope {
   indent: string;
@@ -211,3 +220,28 @@ function safeParse(text: string): Record<string, unknown> | undefined {
     return undefined;
   }
 }
+
+export async function cliConfirmDangerousCommand(ctx: SafetyConfirmationContext): Promise<boolean> {
+  console.log('\n' + pc.bgRed(pc.white(' ⚠️  SAFETY GATE: POTENTIALLY DESTRUCTIVE ACTION DETECTED ')));
+  const requester = ctx.requester ?? TerminalUI.getScopeLabel();
+  if (requester) console.log(pc.magenta(`Requested by subagent: ${requester}`));
+  console.log(pc.red(`Command: ${pc.bold(ctx.command)}`));
+  console.log(pc.yellow(`Reason(s): ${ctx.reasons.join(', ')}`));
+  console.log(pc.cyan('The agent is requesting permission to execute this command on your machine.'));
+
+  const rl = readline.createInterface({ input, output });
+  try {
+    const answer = await rl.question(pc.bold('Do you want to allow this command? [y/N]: '));
+    const trimmed = answer.trim().toLowerCase();
+    return trimmed === 'y' || trimmed === 'yes';
+  } finally {
+    rl.close();
+  }
+}
+
+setDefaultAgentUI(TerminalUI);
+setDefaultScopeLabelProvider(() => TerminalUI.getScopeLabel());
+setDefaultSafetyConfirmationHandler(cliConfirmDangerousCommand);
+setDefaultAutoApproveHandler((command) => {
+  console.log(pc.yellow(`⚠️  [Auto-Approved Dangerous Command]: ${command}`));
+});

@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 import { ToolRegistry, ToolContext } from '../tools/index.js';
 import { SafetyChecker } from '../safety/safetyChecker.js';
 import { ContextManager } from '../context/contextManager.js';
-import { TerminalUI } from '../ui/terminal.js';
+import { AgentUI, getDefaultAgentUI } from './agentUI.js';
 import { AliaModelConfig } from '../config.js';
 
 export interface AgentOptions {
@@ -15,6 +15,7 @@ export interface AgentOptions {
   workingDirectory?: string;
   systemPrompt?: string;
   maxSteps?: number;
+  ui?: AgentUI;
 }
 
 /**
@@ -52,6 +53,7 @@ export class AliaAgent {
   private workingDirectory: string;
   private systemPrompt: string;
   private maxSteps: number;
+  private ui?: AgentUI;
   private messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
 
   constructor(options: AgentOptions) {
@@ -64,6 +66,7 @@ export class AliaAgent {
     this.workingDirectory = options.workingDirectory || process.cwd();
     this.systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     this.maxSteps = options.maxSteps || 30;
+    this.ui = options.ui ?? getDefaultAgentUI();
 
     this.reset();
   }
@@ -125,10 +128,10 @@ export class AliaAgent {
       const { messages: prunedMessages, pruned } = this.contextManager.pruneMessages(this.messages);
       if (pruned) {
         this.messages = prunedMessages;
-        TerminalUI.printInfo('Context window compacted to preserve token budget.');
+        this.ui?.printInfo?.('Context window compacted to preserve token budget.');
       }
 
-      const thinking = TerminalUI.startThinking();
+      const thinking = this.ui?.startThinking?.();
 
       let response: OpenAI.Chat.Completions.ChatCompletion;
       try {
@@ -139,17 +142,17 @@ export class AliaAgent {
           tool_choice: 'auto',
         });
       } catch (err: any) {
-        thinking.stop();
+        thinking?.stop();
         const errorMsg = `API request failed: ${err.message}`;
-        TerminalUI.printError(errorMsg);
+        this.ui?.printError?.(errorMsg);
         return { status: 'failed', text: errorMsg, steps: step, failure: 'api_error' };
       }
 
-      thinking.stop();
+      thinking?.stop();
 
       const choice = response.choices?.[0];
       if (!choice || !choice.message) {
-        TerminalUI.printError('Empty response received from LLM endpoint.');
+        this.ui?.printError?.('Empty response received from LLM endpoint.');
         return { status: 'failed', text: 'Empty response received.', steps: step, failure: 'empty_response' };
       }
 
@@ -162,7 +165,7 @@ export class AliaAgent {
         (assistantMessage as any).reasoning;
 
       if (reasoning) {
-        TerminalUI.printThinking(reasoning);
+        this.ui?.printThinking?.(reasoning);
       }
 
       // Check if the model requested tool calls
@@ -172,7 +175,7 @@ export class AliaAgent {
         // No tool calls: model has concluded and produced a final text response
         const content = assistantMessage.content || '';
         this.messages.push(assistantMessage);
-        TerminalUI.printAssistantMessage(content);
+        this.ui?.printAssistantMessage?.(content);
         return { status: 'completed', text: content, steps: step };
       }
 
@@ -193,14 +196,14 @@ export class AliaAgent {
         const fnName = toolCall.function.name;
         const fnArgs = toolCall.function.arguments;
 
-        TerminalUI.printToolCall(fnName, fnArgs);
+        this.ui?.printToolCall?.(fnName, fnArgs);
 
         const startTime = Date.now();
         const result = await this.toolRegistry.execute(fnName, fnArgs, toolContext);
         const duration = Date.now() - startTime;
 
         const isError = result.startsWith('Error:');
-        TerminalUI.printToolResult(result, isError);
+        this.ui?.printToolResult?.(result, isError);
 
         // Feedback: Append tool result back into message history as a tool role message
         this.messages.push({
@@ -214,7 +217,7 @@ export class AliaAgent {
     }
 
     const maxStepsMsg = `Agent reached maximum allowable steps (${this.maxSteps}) without concluding.`;
-    TerminalUI.printError(maxStepsMsg);
+    this.ui?.printError?.(maxStepsMsg);
     return { status: 'max_steps', text: maxStepsMsg, steps: step };
   }
 }
