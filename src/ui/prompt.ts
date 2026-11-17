@@ -1,4 +1,5 @@
 import readline from 'node:readline';
+import { stripVTControlCharacters } from 'node:util';
 import pc from 'picocolors';
 import { FileIndex, WorkspaceEntry, FILE_PREVIEW_LIMIT } from './fileIndex.js';
 import { accent, brandLight } from './theme.js';
@@ -56,6 +57,24 @@ export function registerSkillCommands(skills: { name: string; description: strin
 
 function visibleLength(str: string): number {
   return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').length;
+}
+
+export function getDisplayPos(str: string, col: number): { cols: number; rows: number } {
+  let offset = 0;
+  let rows = 0;
+  const clean = stripVTControlCharacters(str);
+  for (let i = 0; i < clean.length; i++) {
+    const char = clean[i];
+    if (char === '\n') {
+      rows += Math.floor(offset / col) + 1;
+      offset = 0;
+      continue;
+    }
+    offset++;
+  }
+  const cols = offset % col;
+  rows += Math.floor(offset / col);
+  return { cols, rows };
 }
 
 function humanSize(bytes: number): string {
@@ -129,27 +148,34 @@ export class DynamicPrompt {
       this.historyIndex = this.history.length;
       this.savedBuffer = '';
       this.lastPreviewLines = 0;
+      let prevCursorRow = 0;
 
       const wasRaw = process.stdin.isRaw;
       process.stdin.setRawMode(true);
       process.stdin.resume();
       readline.emitKeypressEvents(process.stdin);
 
+      const onResize = () => {
+        render();
+      };
+      if (typeof process.stdout.on === 'function') {
+        process.stdout.on('resize', onResize);
+      }
+
       const cleanup = () => {
         process.stdin.removeListener('keypress', onKeypress);
+        if (typeof process.stdout.removeListener === 'function') {
+          process.stdout.removeListener('resize', onResize);
+        }
         if (process.stdin.setRawMode) {
           process.stdin.setRawMode(wasRaw || false);
         }
       };
 
-      const clearPreview = () => {
-        if (this.lastPreviewLines > 0) {
-          for (let i = 0; i < this.lastPreviewLines; i++) {
-            process.stdout.write('\n\x1b[2K');
-          }
-          process.stdout.write(`\x1b[${this.lastPreviewLines}A`);
-          this.lastPreviewLines = 0;
-        }
+      const getColumns = (): number => {
+        return process.stdout.columns && process.stdout.columns > 0
+          ? process.stdout.columns
+          : 80;
       };
 
       /**
@@ -215,13 +241,28 @@ export class DynamicPrompt {
       };
 
       const render = () => {
-        // 1. Clear previous preview lines if any
-        clearPreview();
+        const cols = Math.max(10, getColumns());
 
-        // 2. Redraw current prompt line
-        process.stdout.write(`\r\x1b[2K${this.promptPrefix}${buffer}`);
+        // 1. Return cursor to prompt origin (row 0, col 0)
+        if (prevCursorRow > 0) {
+          readline.moveCursor(process.stdout, 0, -prevCursorRow);
+        }
+        readline.cursorTo(process.stdout, 0);
 
-        // 3. Render dynamic preview (slash commands or file mentions)
+        // 2. Erase everything from prompt origin downwards
+        readline.clearScreenDown(process.stdout);
+
+        // 3. Redraw prompt and buffer
+        process.stdout.write(this.promptPrefix + buffer);
+
+        const endPos = getDisplayPos(this.promptPrefix + buffer, cols);
+
+        // Force terminal to allocate a new line if text wrapped exactly at the right boundary
+        if (endPos.rows > 0 && endPos.cols === 0) {
+          process.stdout.write(' ');
+        }
+
+        // 4. Render dynamic preview (slash commands or file mentions)
         let previewLines: string[] = [];
         if (buffer.startsWith('/')) {
           const typedCmd = buffer.split(' ')[0].toLowerCase();
@@ -233,12 +274,7 @@ export class DynamicPrompt {
           previewLines = this.buildPreviewBox(matches, selectedIndex);
 
           for (const line of previewLines) {
-            process.stdout.write('\n\x1b[2K' + line);
-          }
-
-          if (previewLines.length > 0) {
-            process.stdout.write(`\x1b[${previewLines.length}A`);
-            this.lastPreviewLines = previewLines.length;
+            process.stdout.write('\n' + line);
           }
         } else {
           const mention = getMenuMention();
@@ -247,19 +283,24 @@ export class DynamicPrompt {
             previewLines = this.buildFilePreviewBox(matches, selectedIndex, total);
 
             for (const line of previewLines) {
-              process.stdout.write('\n\x1b[2K' + line);
-            }
-
-            if (previewLines.length > 0) {
-              process.stdout.write(`\x1b[${previewLines.length}A`);
-              this.lastPreviewLines = previewLines.length;
+              process.stdout.write('\n' + line);
             }
           }
         }
 
-        // 4. Position cursor at the user's active cursor location
-        const targetCol = this.promptPrefixLen + cursorPos + 1;
-        process.stdout.write(`\x1b[${targetCol}G`);
+        this.lastPreviewLines = previewLines.length;
+
+        // 5. Position cursor at user's active cursor location
+        const cursorPosDisplay = getDisplayPos(
+          this.promptPrefix + buffer.slice(0, cursorPos),
+          cols
+        );
+        const upRows = endPos.rows + previewLines.length - cursorPosDisplay.rows;
+        if (upRows > 0) {
+          readline.moveCursor(process.stdout, 0, -upRows);
+        }
+        readline.cursorTo(process.stdout, cursorPosDisplay.cols);
+        prevCursorRow = cursorPosDisplay.rows;
       };
 
       const onKeypress = (str: string, key: readline.Key) => {
@@ -276,7 +317,6 @@ export class DynamicPrompt {
 
         // Ctrl+C handling
         if (key.ctrl && key.name === 'c') {
-          clearPreview();
           if (buffer.length > 0) {
             buffer = '';
             cursorPos = 0;
@@ -303,11 +343,6 @@ export class DynamicPrompt {
             }
           }
 
-          clearPreview();
-          process.stdout.write('\n');
-
-          let finalInput = buffer.trim();
-
           // If user navigated with arrows inside the slash preview, select that command
           if (buffer.startsWith('/') && hasNavigated) {
             const typedCmd = buffer.split(' ')[0].toLowerCase();
@@ -324,10 +359,20 @@ export class DynamicPrompt {
                 render();
                 return;
               }
-              finalInput = chosen.command;
+              buffer = chosen.command;
             }
           }
 
+          // Clear preview lines and leave the final wrapped prompt clean on screen
+          if (prevCursorRow > 0) {
+            readline.moveCursor(process.stdout, 0, -prevCursorRow);
+          }
+          readline.cursorTo(process.stdout, 0);
+          readline.clearScreenDown(process.stdout);
+          process.stdout.write(this.promptPrefix + buffer);
+          process.stdout.write('\n');
+
+          const finalInput = buffer.trim();
           if (finalInput) {
             this.history.push(finalInput);
           }

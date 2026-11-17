@@ -84,7 +84,8 @@ async function main() {
   press(undefined, 'down');
   press(undefined, 'return'); // confirms highlighted entry (2nd match)
   press(undefined, 'return'); // then submits
-  check('Enter confirms navigated entry', (await pending) === '@src/tools/readFile.ts');
+  const secondMatch = idx.search('read', 5).matches[1]?.path;
+  check('Enter confirms navigated entry', (await pending) === `@${secondMatch}`);
 
   log('\n=== directory drill-down ===');
   pending = begin();
@@ -140,6 +141,25 @@ async function main() {
   press(undefined, 'return');
   const recalled = await pending;
   check('up-arrow recalls last submitted input', recalled === '/models', `got "${recalled}"`);
+
+  log('\n=== multiline input wrapping (no duplicate lines) ===');
+  process.stdout.columns = 30;
+  pending = begin();
+  // 'user > ' is 7 visible chars.
+  // Typing 23 chars brings total to 30 (fills row 0).
+  type('abcdefghijklmnopqrstuvw');
+  // Next char 'x' wraps to row 1 (total 31 chars)
+  out = '';
+  type('x');
+  check('wrapped line emitted', out.includes('x'));
+  // Next char 'y' continues on row 1 - must move up 1 row (\x1b[1A) and clearScreenDown (\x1b[0J)
+  out = '';
+  type('y');
+  check('redrawing wrapped line moves cursor up to origin', out.includes('\x1b[1A'));
+  check('redrawing wrapped line clears screen down', out.includes('\x1b[0J'));
+  press(undefined, 'return');
+  const multilineResult = await pending;
+  check('submitted wrapped input intact', multilineResult === 'abcdefghijklmnopqrstuvwxy');
 
   (process.stdout as any).write = realWrite;
   log(failures === 0 ? '\nALL TTY TESTS PASSED ✅' : `\n${failures} TTY FAILURES ❌`);
