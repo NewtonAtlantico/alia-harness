@@ -32,7 +32,8 @@
     "test:askuser": "tsx scripts/smoke-askuser.ts",
     "test:pipeline": "tsx scripts/smoke-pipeline.ts",
     "test:resume": "tsx scripts/smoke-resume.ts",
-    "test:issues": "tsx scripts/smoke-issues.ts"
+    "test:issues": "tsx scripts/smoke-issues.ts",
+    "test:e2e": "tsx scripts/smoke-e2e.ts"
   },
   "keywords": ["ai", "agent", "alia", "llm", "cli", "harness"],
   "author": "",

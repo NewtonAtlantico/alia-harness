@@ -56,8 +56,14 @@ src/
 ```
 
 Other front-ends (VS Code extension, standalone app) become sibling folders of `cli/` that depend only on
-`core/`. A UI plugs in by implementing the `AgentUI` interface (`core/agent/agentUI.ts`) and a safety-approval
-callback, then driving `AliaAgent`.
+`core/`. A front-end creates one `createSession({ workspace, config, ... })` per conversation (`core/session.ts`) and
+renders the typed `AgentEvent` stream it emits (`onEvent`). Everything else a UI needs is on the session: cancellation
+(`run(prompt, { signal })`), approvals (`onConfirm`, with an allowlist per project), saved conversations (`sessionStore`,
+`resume`), the slash-command list (`commands`), `/compact`, file changes with diff and undo (`changes`), structured
+questions (`onAskUser`), reading PDF / Word / PowerPoint documents, and the requirements-to-tasks pipeline state
+(`pipelineStatus()`, `resumePipelinePrompt()`) and issue-publishing check (`issuePublishing()`).
+Design and behavior of each piece: [docs/backlog/002-desktop-prereqs.md](docs/backlog/002-desktop-prereqs.md).
+`npm run test:e2e` runs them together as one story; the per-feature suites are the `test:*` scripts in `package.json`.
 
 ---
 

@@ -537,10 +537,16 @@ None at the moment. Resolved: a ready `gh`/`glab` CLI counts as a tracker connec
 
 ## 9. Definition of done
 
-- `npm run typecheck`, `test:skills`, `test:agent`, `test:subagents` pass, plus new smoke tests for
-  D1 to D13 using the fake-model harness (no network or API key).
-- The CLI behaves as before (same prompts, same output) after being migrated to `createSession`.
-- A scripted run proves, without any UI: a session is created, streams typed events, is cancelled
-  mid-command, persists and resumes, records and reverts a file change, reads a PDF, asks a gate
-  question and records the answer in `state.json` with a rendered `STATE.md`.
-- Backlog 003 (Electron app) is written against these APIs, not against `cli/`.
+- [x] `npm run typecheck`, `build` and every suite pass (`test:skills`, `agent`, `subagents`, `mentions`, plus `session`, `events`,
+  `cancel`, `permissions`, `store`, `commands`, `changes`, `documents`, `office`, `askuser`, `pipeline`, `resume`, `issues` and
+  `e2e`), using the fake-model harness (no network or API key). The suites were also mutation-checked: each safety and
+  correctness rule was deliberately broken to confirm a test fails.
+- [x] The CLI behaves as before (same prompts, same output) after being migrated to `createSession`. D2 compared its terminal output byte
+  for byte across 11 scenarios before and after the event refactor. The CLI gained `/compact`, `ask_user` and the shared slash menu.
+- [x] A scripted run proves, without any UI (`npm run test:e2e`): a session is created, streams typed events, reads a PDF and writes a
+  file (tracked and reverted), is cancelled mid-command (the process tree is gone), persists, is resumed by a new session after a
+  simulated restart, asks a gate question and records the answer in `state.json` with a rendered `STATE.md`.
+- [ ] Backlog 003 (Electron app) is written against these APIs, not against `cli/`. **Next step.**
+
+Left out on purpose: D14 (streaming of assistant text, optional) and what the design also shows but is not core work: the Terminal tab's
+log, the settings screen, secret storage for the API key, and packaging (all backlog 003).
