@@ -37,7 +37,7 @@ export const WORDMARK_WIDTH = (() => {
 function readVersion(): string | undefined {
   try {
     const require = createRequire(import.meta.url);
-    return require('../../package.json').version as string;
+    return require('../../../package.json').version as string;
   } catch {
     return undefined;
   }

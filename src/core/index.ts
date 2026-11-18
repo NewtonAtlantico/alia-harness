@@ -11,3 +11,4 @@ export * from './tools/runSubagent.js';
 export * from './tools/useSkill.js';
 export * from './client.js';
 export * from './config.js';
+export * from './context/fileIndex.js';

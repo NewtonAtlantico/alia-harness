@@ -5,8 +5,8 @@
  */
 import { EventEmitter } from 'node:events';
 import readline from 'node:readline';
-import { DynamicPrompt } from '../src/ui/prompt.js';
-import { FileIndex } from '../src/ui/fileIndex.js';
+import { DynamicPrompt } from '../src/cli/ui/prompt.js';
+import { FileIndex } from '../src/core/context/fileIndex.js';
 
 class FakeStdin extends EventEmitter {
   isTTY = true;
@@ -89,12 +89,12 @@ async function main() {
 
   log('\n=== directory drill-down ===');
   pending = begin();
-  type('@src/to');
-  press(undefined, 'tab'); // inserts '@src/tools/' (dir) and keeps menu open
+  type('@src/core/to');
+  press(undefined, 'tab'); // inserts '@src/core/tools/' (dir) and keeps menu open
   check('dir insert keeps children preview', out.includes('readFile.ts') && out.includes('grepSearch.ts'));
   press(undefined, 'return');
   press(undefined, 'return');
-  check('submitted mention is the directory', (await pending) === '@src/tools/');
+  check('submitted mention is the directory', (await pending) === '@src/core/tools/');
 
   log('\n=== Esc dismisses preview ===');
   pending = begin();
@@ -115,10 +115,10 @@ async function main() {
 
   log('\n=== multiple mentions in one prompt ===');
   pending = begin();
-  type('compare @README.md and @src/tools/readFile.ts');
+  type('compare @README.md and @src/core/tools/readFile.ts');
   check('mention after whitespace stays active', out.includes('Files'));
   press(undefined, 'return');
-  check('multi-mention prompt submitted intact', (await pending) === 'compare @README.md and @src/tools/readFile.ts');
+  check('multi-mention prompt submitted intact', (await pending) === 'compare @README.md and @src/core/tools/readFile.ts');
 
   log('\n=== slash commands still work ===');
   pending = begin();

@@ -1,7 +1,7 @@
 import readline from 'node:readline';
 import { stripVTControlCharacters } from 'node:util';
 import pc from 'picocolors';
-import { FileIndex, WorkspaceEntry, FILE_PREVIEW_LIMIT } from './fileIndex.js';
+import { FileIndex, WorkspaceEntry, FILE_PREVIEW_LIMIT } from '../../core/context/fileIndex.js';
 import { accent, brandLight } from './theme.js';
 
 export interface SlashCommandInfo {

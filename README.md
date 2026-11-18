@@ -45,6 +45,20 @@ A TypeScript CLI harness and autonomous AI agent loop designed for custom OpenAI
                      └──────────► (Repeat While Loop)
 ```
 
+### Folder layout
+
+```
+src/
+├── core/   UI-agnostic engine (agent loop, tools, skills, safety, context, client, config).
+│           Public entry: `alia-harness/core`. Must never import from a UI folder.
+└── cli/    Terminal experience (arg parsing, REPL, slash commands, prompt, banner, spinner).
+            Entry point of the `alia-agent` binary.
+```
+
+Other front-ends (VS Code extension, standalone app) become sibling folders of `cli/` that depend only on
+`core/`. A UI plugs in by implementing the `AgentUI` interface (`core/agent/agentUI.ts`) and a safety-approval
+callback, then driving `AliaAgent`.
+
 ---
 
 ## Key Features
@@ -129,7 +143,7 @@ npm run build
 ```bash
 npm start
 # or:
-npx tsx src/index.ts
+npx tsx src/cli/index.ts
 ```
 
 ### 3. Run Single Prompt (Non-Interactive / Scripting)
@@ -178,7 +192,7 @@ files appears beneath your cursor, filtering as you type.
 - **`@`** — opens the file preview (workspace files and directories, ranked by relevance:
   exact match > basename > path prefix > substring > fuzzy subsequence).
 - **`Tab`** — inserts the highlighted file into the prompt as `@path/to/file`.
-  Inserting a directory (`@src/tools/`) keeps the preview open so you can drill down.
+  Inserting a directory (`@src/core/tools/`) keeps the preview open so you can drill down.
 - **`↑ / ↓`** — navigate the preview; **`Enter`** confirms the highlighted file.
   Without navigation, `Enter` submits the prompt as usual.
 - **`Esc`** — dismisses the preview until you edit the mention again.
@@ -189,8 +203,8 @@ entries). Mentioned files are shown with a `📎 Attached:` summary, and the age
 work with them without spending tool calls on `read_file` first.
 
 ```text
-user > review @src/ui/prompt.ts and @src/tools/editFile.ts for bugs
-📎 Attached: @src/ui/prompt.ts (625 lines), @src/tools/editFile.ts (143 lines)
+user > review @src/cli/ui/prompt.ts and @src/core/tools/editFile.ts for bugs
+📎 Attached: @src/cli/ui/prompt.ts (625 lines), @src/core/tools/editFile.ts (143 lines)
 ```
 
 Details and guardrails:

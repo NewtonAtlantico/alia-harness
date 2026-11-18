@@ -3,17 +3,17 @@
   "version": "1.0.0",
   "description": "CLI agent harness for Alia LLMs with custom endpoints and tool calling",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/core/index.js",
   "exports": {
-    ".": "./dist/index.js",
-    "./core": "./dist/core.js"
+    ".": "./dist/core/index.js",
+    "./core": "./dist/core/index.js"
   },
   "bin": {
-    "alia-agent": "dist/index.js"
+    "alia-agent": "dist/cli/index.js"
   },
   "scripts": {
-    "start": "tsx src/index.ts",
-    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/cli/index.ts",
+    "dev": "tsx watch src/cli/index.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test:mentions": "tsx scripts/smoke-mentions.ts && tsx scripts/tty-mentions.ts",

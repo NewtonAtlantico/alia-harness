@@ -9,12 +9,12 @@ import {
   buildSkillCatalog,
   buildSkillInvocationPrompt,
   formatSkillForModel,
-} from '../src/skills/skillLoader.js';
-import { createUseSkillTool } from '../src/tools/useSkill.js';
-import { ToolRegistry } from '../src/tools/index.js';
-import { ContextManager } from '../src/context/contextManager.js';
-import { SafetyChecker } from '../src/safety/safetyChecker.js';
-import { SLASH_COMMANDS, registerSkillCommands } from '../src/ui/prompt.js';
+} from '../src/core/skills/skillLoader.js';
+import { createUseSkillTool } from '../src/core/tools/useSkill.js';
+import { ToolRegistry } from '../src/core/tools/index.js';
+import { ContextManager } from '../src/core/context/contextManager.js';
+import { SafetyChecker } from '../src/core/safety/safetyChecker.js';
+import { SLASH_COMMANDS, registerSkillCommands } from '../src/cli/ui/prompt.js';
 
 let failures = 0;
 function check(name: string, cond: boolean, extra = '') {

@@ -1,22 +1,22 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { AliaAgent } from '../src/agent/agentLoop.js';
-import { ToolRegistry, ToolDefinition } from '../src/tools/index.js';
-import { SkillRegistry, bundledSkillsDir } from '../src/skills/skillLoader.js';
-import { TerminalUI } from '../src/ui/terminal.js';
+import { AliaAgent } from '../src/core/agent/agentLoop.js';
+import { ToolRegistry, ToolDefinition } from '../src/core/tools/index.js';
+import { SkillRegistry, bundledSkillsDir } from '../src/core/skills/skillLoader.js';
+import { TerminalUI } from '../src/cli/ui/terminal.js';
 import {
   createRunSubagentTool,
   SUBAGENT_PROMPT_BLOCK,
   MAX_SUBAGENT_STEPS,
-} from '../src/tools/runSubagent.js';
-import { SafetyChecker } from '../src/safety/safetyChecker.js';
-import { ContextManager } from '../src/context/contextManager.js';
+} from '../src/core/tools/runSubagent.js';
+import { SafetyChecker } from '../src/core/safety/safetyChecker.js';
+import { ContextManager } from '../src/core/context/contextManager.js';
 import {
   parseSubagentReport,
   formatSubagentReport,
   MAX_RESULT_CHARS,
-} from '../src/agent/subagentResult.js';
+} from '../src/core/agent/subagentResult.js';
 import { FakeModel, ScriptedTurn, RecordedRequest } from './lib/fakeModel.js';
 import { quiet, capture } from './lib/testUtils.js';
 

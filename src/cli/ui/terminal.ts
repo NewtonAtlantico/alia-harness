@@ -1,17 +1,17 @@
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import pc from 'picocolors';
-import { AttachedFile } from '../context/fileMentions.js';
+import { AttachedFile } from '../../core/context/fileMentions.js';
 import { renderBanner } from './logo.js';
 import { ThinkingAnimation } from './thinking.js';
 import { brand, brandLight, danger, muted, success } from './theme.js';
-import { setDefaultAgentUI } from '../agent/agentUI.js';
+import { setDefaultAgentUI } from '../../core/agent/agentUI.js';
 import {
   SafetyConfirmationContext,
   setDefaultSafetyConfirmationHandler,
   setDefaultScopeLabelProvider,
   setDefaultAutoApproveHandler,
-} from '../safety/safetyChecker.js';
+} from '../../core/safety/safetyChecker.js';
 
 interface OutputScope {
   indent: string;

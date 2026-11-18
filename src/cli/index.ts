@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 import pc from 'picocolors';
-import { loadConfig, AliaConfig } from './config.js';
-import { createAliaClient, fetchAvailableModels } from './client.js';
-import { ToolRegistry } from './tools/index.js';
-import { SafetyChecker } from './safety/safetyChecker.js';
-import { ContextManager } from './context/contextManager.js';
-import { AliaAgent, DEFAULT_SYSTEM_PROMPT } from './agent/agentLoop.js';
+import { loadConfig, AliaConfig } from '../core/config.js';
+import { createAliaClient, fetchAvailableModels } from '../core/client.js';
+import { ToolRegistry } from '../core/tools/index.js';
+import { SafetyChecker } from '../core/safety/safetyChecker.js';
+import { ContextManager } from '../core/context/contextManager.js';
+import { AliaAgent, DEFAULT_SYSTEM_PROMPT } from '../core/agent/agentLoop.js';
 import { TerminalUI } from './ui/terminal.js';
 import { DynamicPrompt, registerSkillCommands } from './ui/prompt.js';
-import { SkillRegistry, buildSkillCatalog, buildSkillInvocationPrompt } from './skills/skillLoader.js';
-import { createUseSkillTool } from './tools/useSkill.js';
-import { createRunSubagentTool } from './tools/runSubagent.js';
-import { FileIndex } from './ui/fileIndex.js';
-import { resolveFileMentions } from './context/fileMentions.js';
+import { SkillRegistry, buildSkillCatalog, buildSkillInvocationPrompt } from '../core/skills/skillLoader.js';
+import { createUseSkillTool } from '../core/tools/useSkill.js';
+import { createRunSubagentTool } from '../core/tools/runSubagent.js';
+import { FileIndex } from '../core/context/fileIndex.js';
+import { resolveFileMentions } from '../core/context/fileMentions.js';
 
 interface CliArgs {
   prompt?: string;
@@ -46,8 +46,8 @@ function printHelp() {
 ${pc.bold(pc.cyan('ALIA HARNESS - AI Agent CLI'))}
 
 ${pc.bold('USAGE:')}
-  npx tsx src/index.ts [options]
-  node dist/index.js [options]
+  npx tsx src/cli/index.ts [options]
+  node dist/cli/index.js [options]
 
 ${pc.bold('OPTIONS:')}
   -p, --prompt <string>    Execute a single prompt and exit (non-interactive mode)

@@ -103,7 +103,7 @@ function parseList(value: string | undefined): string[] {
 /** `skills/` folder shipped next to the harness (works from both src/ and dist/). */
 export function bundledSkillsDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(here, '..', '..', 'skills');
+  return path.resolve(here, '..', '..', '..', 'skills');
 }
 
 /**

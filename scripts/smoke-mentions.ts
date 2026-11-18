@@ -1,6 +1,6 @@
-import { FileIndex } from '../src/ui/fileIndex.js';
-import { resolveFileMentions, hasFileMentions } from '../src/context/fileMentions.js';
-import { DynamicPrompt } from '../src/ui/prompt.js';
+import { FileIndex } from '../src/core/context/fileIndex.js';
+import { resolveFileMentions, hasFileMentions } from '../src/core/context/fileMentions.js';
+import { DynamicPrompt } from '../src/cli/ui/prompt.js';
 import pc from 'picocolors';
 
 const cwd = process.cwd();
@@ -30,41 +30,41 @@ check(
 
 const r1 = idx.search('prompt');
 console.log(`  search('prompt') -> ${r1.matches.map((m) => m.path).join(', ')}`);
-check('finds prompt.ts by basename', r1.matches.some((e) => e.path === 'src/ui/prompt.ts'));
+check('finds prompt.ts by basename', r1.matches.some((e) => e.path === 'src/cli/ui/prompt.ts'));
 
-const r2 = idx.search('src/to');
-console.log(`  search('src/to') -> ${r2.matches.slice(0, 3).map((m) => m.path).join(', ')}`);
-check('prefix path search ranks src/tools first', r2.matches[0]?.path.startsWith('src/to') === true);
-check('directories are indexed', r2.matches.some((e) => e.isDir && e.path === 'src/tools'));
+const r2 = idx.search('src/core/to');
+console.log(`  search('src/core/to') -> ${r2.matches.slice(0, 3).map((m) => m.path).join(', ')}`);
+check('prefix path search ranks src/core/tools first', r2.matches[0]?.path.startsWith('src/core/to') === true);
+check('directories are indexed', r2.matches.some((e) => e.isDir && e.path === 'src/core/tools'));
 
 const r3 = idx.search('agtlp');
 console.log(`  search('agtlp') (fuzzy) -> ${r3.matches.slice(0, 3).map((m) => m.path).join(', ')}`);
-check('fuzzy subsequence matches agentLoop', r3.matches.some((e) => e.path === 'src/agent/agentLoop.ts'));
+check('fuzzy subsequence matches agentLoop', r3.matches.some((e) => e.path === 'src/core/agent/agentLoop.ts'));
 
 const r4 = idx.search('README');
 check('basename match for README', r4.matches.some((e) => e.path === 'README.md'));
 
-check('exactFileMatch full path', idx.exactFileMatch('src/index.ts') === true);
+check('exactFileMatch full path', idx.exactFileMatch('src/cli/index.ts') === true);
 check('exactFileMatch dir path is false', idx.exactFileMatch('src') === false);
 check('exactFileMatch bogus is false', idx.exactFileMatch('nope.xyz') === false);
 
 console.log('\n=== resolveFileMentions ===');
-const res1 = resolveFileMentions('Review @src/tools/types.ts and @README.md please', cwd);
+const res1 = resolveFileMentions('Review @src/core/tools/types.ts and @README.md please', cwd);
 check('resolves two file mentions', res1.attachments.length === 2);
 check('errors empty', res1.errors.length === 0, JSON.stringify(res1.errors));
 check(
   'prompt embeds file contents',
   res1.prompt.includes('<file_attachments>') &&
-    res1.prompt.includes('<file path="src/tools/types.ts"') &&
+    res1.prompt.includes('<file path="src/core/tools/types.ts"') &&
     res1.prompt.includes('interface ToolDefinition')
 );
-check('original text preserved', res1.prompt.startsWith('Review @src/tools/types.ts and @README.md please'));
+check('original text preserved', res1.prompt.startsWith('Review @src/core/tools/types.ts and @README.md please'));
 
-const res2 = resolveFileMentions('What is in @src/tools/?', cwd);
+const res2 = resolveFileMentions('What is in @src/core/tools/?', cwd);
 check('directory mention attaches listing', res2.attachments.length === 1 && res2.attachments[0].isDir);
 check(
   'listing includes known files',
-  res2.prompt.includes('readFile.ts') && res2.prompt.includes('<directory path="src/tools"')
+  res2.prompt.includes('readFile.ts') && res2.prompt.includes('<directory path="src/core/tools"')
 );
 
 const res3 = resolveFileMentions('fix @does/not/exist.ts', cwd);

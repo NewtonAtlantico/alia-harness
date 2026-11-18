@@ -1,8 +1,8 @@
 import OpenAI from 'openai';
-import { AliaAgent } from '../src/agent/agentLoop.js';
-import { ToolRegistry, ToolDefinition } from '../src/tools/index.js';
-import { SafetyChecker } from '../src/safety/safetyChecker.js';
-import { ContextManager } from '../src/context/contextManager.js';
+import { AliaAgent } from '../src/core/agent/agentLoop.js';
+import { ToolRegistry, ToolDefinition } from '../src/core/tools/index.js';
+import { SafetyChecker } from '../src/core/safety/safetyChecker.js';
+import { ContextManager } from '../src/core/context/contextManager.js';
 import { FakeModel, ScriptedTurn } from './lib/fakeModel.js';
 import { quiet } from './lib/testUtils.js';
 
