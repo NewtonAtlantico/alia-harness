@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`), D5 (session store; `npm run test:store`), D6 (command registry, `/compact`; `npm run test:commands`), D7 (change tracking and undo; `npm run test:changes`), D8 (PDF reading; `npm run test:documents`), D9 (DOCX and PPTX; `npm run test:office`), D10 (`ask_user`; `npm run test:askuser`). Next: D11 (pipeline state). Phase 0 of the desktop app; the app itself will be backlog 003. |
+| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`), D5 (session store; `npm run test:store`), D6 (command registry, `/compact`; `npm run test:commands`), D7 (change tracking and undo; `npm run test:changes`), D8 (PDF reading; `npm run test:documents`), D9 (DOCX and PPTX; `npm run test:office`), D10 (`ask_user`; `npm run test:askuser`), D11 (pipeline state; `npm run test:pipeline`). Next: D12 (pipeline status and resume). Phase 0 of the desktop app; the app itself will be backlog 003. |
 | **Depends on** | `src/core` as it is today (decoupled from `cli/`); subagents S1-S5 (done) |
 | **Design** | `alia Harness Desktop.pdf` (chat, changes panel, permission card, pipeline wizard, slash and `@` menus) |
 | **Primary consumer** | The standalone Electron app (backlog 003), plus the CLI, which must keep working unchanged |
@@ -405,22 +405,42 @@ As built in D10:
 
 ### 5.10 Pipeline state (D11, D12)
 
-`STATE.md` is prose that a model writes freely, so a UI cannot rely on it. Make the machine-readable
-file the source of truth and render the prose from it:
+`STATE.md` is prose that a model writes freely, so a UI cannot rely on it. The machine-readable file is the source of truth and
+the prose is rendered from it:
 
-- `docs/pipeline/state.json` holds inputs (with kind and handling skill), stages (status, artifact,
-  gate), gate questions (`open | answered | deferred`, answer, by, date, source), decisions,
-  assumptions (with owner and stage), ADRs, and a free `notes` list.
-- A `pipeline_state` tool (`get`, `update` with a patch) reads and writes it, validates the schema,
-  and **regenerates `STATE.md`** deterministically after each update. Skills keep working without
-  the tool: the pipeline skill gets one added line, "use `pipeline_state` when available, otherwise
-  write `STATE.md` by hand".
-- Derived numbers (specs, tasks, points, per-spec totals, dependencies) are parsed from
-  `docs/tasks/*-tasks.md` by a function in core, tested against the `spec-to-tasks` output format with
-  a golden file, instead of asking the model to count.
-- Resume (D12): `getPipelineStatus(workspace)` returns the first incomplete stage or open gate, and
-  flags a changed input (hash mismatch vs the manifest) as `stale`, as the skill already requires.
-  `createSession` can seed a "resume the pipeline" prompt from it.
+- `docs/pipeline/state.json` (version 1) holds: `inputs` (name, version, kind, handling skill, and, when a path is given, the
+  file's SHA-256 and size at the time it was inventoried), the four `stages` (skill, status `pending | running | done | blocked | stale`,
+  artifact, reasons), the three `gates` (`pending | open | passed`) with their **questions** (id, prompt, kind, category
+  `open_question | contradiction | low_confidence | blocker`, options with sources, confidence, status `open | answered | deferred`,
+  answer, label, by, date, owner), `specReviews` (the human review behind gate 3), `decisions`, `assumptions` (owner, stage, the
+  question they came from), `adrs`, and `notes`.
+- **`pipeline_state` tool** (`action: "get" | "update"`). `get` returns the state, the gates' progress, what is waiting, and the task
+  counts. `update` applies a list of **operations** in order, all or nothing (the input is never touched, and a failing batch changes
+  nothing): `set_project`, `add_input`, `set_stage`, `add_question`, `answer_question`, `defer_question`, `reopen_question`, `set_gate`,
+  `set_spec_review`, `add_assumption`, `add_decision`, `add_adr`, `add_note`, `mark_stale`. (The first draft said "update with a
+  patch". Typed operations are used instead: a small model is far more reliable filling in "answer this question" than producing a
+  merge patch over a nested document, and every operation can be validated with an error that says what to fix.) The tool is
+  offered in every session; its description limits it to the pipeline.
+- **It enforces the skill's rules**: a stage cannot start or finish until the previous stage is `done` **and its gate has passed**; a
+  gate cannot pass while a question is open (the error names them), and gate 3 also needs every spec reviewed; a blocked or stale stage needs
+  a reason; **a deferred question needs an owner and becomes an assumption automatically** (answering or reopening it removes the
+  assumption); a new question reopens a gate that had passed; `mark_stale` marks the stages after a changed artifact as stale, with the reason,
+  and makes their gates pass again. These are the rules from `SKILL.md`, now refused in code instead of hoped for.
+- **STATE.md is regenerated on every update**, by a pure function (the same state always gives the same text), including the stage-4
+  row `docs/tasks/ (11 tasks, 45 points)`, the open questions, the decisions and answers, the assumptions with owners, spec reviews,
+  ADRs, and any backlog problems. `state.json` is always written in one canonical layout (no reshuffling in a committed file). A damaged
+  `state.json` is an error and is never overwritten. The files are written atomically.
+- **Task numbers are computed, not counted by the model.** `summarizeTasks()` reads `docs/tasks/*-tasks.md` in the format `spec-to-tasks`
+  writes (`### <title>` blocks with `**Slice:**`, `**Story points:**`, `**Depends on:**`) and returns tasks, points and per-spec totals. It copes
+  with the ways titles carry ids (`1.2 Title`, `T1.2 — Title`, `Task 1.2: Title`), `5 pts`, Windows line endings, and code blocks (an
+  example inside a task is not a task), and it reports **problems**: points missing, off the Fibonacci sequence or above 8, duplicate ids,
+  dependencies on things that are not tasks (resolved by id or title, in the same file or another), dependency cycles, files with no tasks.
+  It is tested against a golden backlog (4 specs, 11 tasks, 45 points) and a golden `STATE.md`.
+- `SKILL.md` for the pipeline now says: use `pipeline_state` when available (inputs with a `path`, questions before asking, answers and
+  deferrals after), otherwise write `STATE.md` by hand.
+- **Resume (D12):** `getPipelineStatus(workspace)` returns the first incomplete stage or open gate, and flags a changed input (hash
+  mismatch against the manifest) as `stale`, as the skill already requires. `createSession` can seed a "resume the pipeline" prompt from it.
+  It will also report drift between `STATE.md` and the state it should be rendered from.
 
 ### 5.11 Tracker detection (D13)
 
@@ -455,7 +475,7 @@ Points are Fibonacci, capped at 8, matching `spec-to-tasks`.
 | D8 | **Done.** `readDocument` for PDF with page markers; integrate into `read_file` and `@` mentions | 5 | A sample multi-page PDF reads with `[p. N]` markers; `pages` argument works; a scanned PDF returns the no-text-layer message; audio/video return the transcript message; `@file.pdf` attaches text. |
 | D9 | **Done.** `readDocument` for DOCX and PPTX (slides and speaker notes) | 3 | Sample DOCX keeps headings and tables as readable text; PPTX output has `[slide N]` markers and includes notes; both work through `read_file` and `@`. |
 | D10 | **Done.** `ask_user` tool, `onAskUser` handler, HARNESS_NOTES mapping | 5 | With a handler, questions round-trip as structured answers (including a deferral with owner); without one the tool errors with the plain-text fallback instruction; it is absent in subagents; the CLI implements a basic handler. |
-| D11 | `pipeline_state` tool, `state.json` schema, `STATE.md` rendering, derived task stats | 5 | Updates validate against the schema and re-render `STATE.md`; stats (tasks, points, per spec) match a golden `spec-to-tasks` sample; the pipeline skill carries the one-line instruction and still works without the tool. |
+| D11 | **Done.** `pipeline_state` tool, `state.json` schema, `STATE.md` rendering, derived task stats | 5 | Updates validate against the schema and re-render `STATE.md`; stats (tasks, points, per spec) match a golden `spec-to-tasks` sample; the pipeline skill carries the one-line instruction and still works without the tool. |
 | D12 | Pipeline status and resume, with stale-input detection | 3 | Given a state file stopped at Gate 1 (3 of 5 answered), `getPipelineStatus` reports that, and a resumed session continues from the open questions. A modified input file is flagged `stale`. |
 | D13 | `detectIssuePublishing()` with the warning | 3 | Registry with an MCP issue tool resolves to `publish`; a ready `gh`/`glab` CLI resolves to `publish`; neither resolves to `drafts` with the warning text; verified with a fake registry and a stubbed CLI probe. |
 | D14 | *(optional)* Streaming of assistant text and reasoning | 5 | `assistant_delta` and `thinking_delta` events during a run, final message unchanged; falls back to non-streaming when the endpoint does not support it. Can ship after the app's v1. |

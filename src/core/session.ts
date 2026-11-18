@@ -6,6 +6,7 @@ import { ToolRegistry } from './tools/index.js';
 import { createUseSkillTool } from './tools/useSkill.js';
 import { createRunSubagentTool } from './tools/runSubagent.js';
 import { AskUserHandler, createAskUserTool } from './tools/askUser.js';
+import { createPipelineStateTool } from './tools/pipelineState.js';
 import {
   PermissionMode,
   SafetyChecker,
@@ -190,6 +191,7 @@ export class AliaSession {
     });
     this.skills.load();
     this.tools.register(createUseSkillTool(this.skills));
+    this.tools.register(createPipelineStateTool());
     if (options.onAskUser) {
       const handler = options.onAskUser;
       this.tools.register(createAskUserTool({ getHandler: () => handler }));

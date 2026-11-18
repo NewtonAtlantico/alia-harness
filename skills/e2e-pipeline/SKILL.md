@@ -50,6 +50,10 @@ If the project already uses different locations, follow them and record the path
 
 1. If `docs/pipeline/STATE.md` exists, read it and **resume at the first incomplete stage or
    open gate**. Do not redo completed stages unless the user asks or an input changed.
+   If the `pipeline_state` tool is available, call it with `action: "get"` instead: it returns the
+   stages, the gates, the open questions and the task counts (computed from `docs/tasks`, never count
+   them yourself). `docs/pipeline/state.json` is the source of truth there, and STATE.md is generated
+   from it.
 2. Otherwise, inventory the inputs the user gave (paths, links, pasted text) and classify each:
 
    | Input kind | Handling |
@@ -61,7 +65,8 @@ If the project already uses different locations, follow them and record the path
    | Scanned PDF / PPT with speaker notes only | Proceed, but carry the skill's OCR / lost-context flags into the open questions |
 
 3. Write `STATE.md` with the input manifest (name, version/date, kind, which skill handles it)
-   before running anything. If it is unclear which version of a document is authoritative, ask —
+   before running anything. With `pipeline_state`: one `add_input` per input (give its `path`, so a
+   later change to the file is noticed) and `set_project`. If it is unclear which version of a document is authoritative, ask —
    do not pick silently.
 
 ## Calling a skill
@@ -87,7 +92,11 @@ Skills may call sibling skills themselves (e.g. `architecture-from-requirements`
 3. Save to `docs/requirements/requirements.md`.
 
 **GATE 1 (mandatory).** Collect every open question, contradiction, and low-confidence item
-from the document. Ask the user (`AskUserQuestion` for choice-type questions, plain list
+from the document. With `pipeline_state`, record each one first (`add_question`, with its `source`,
+and a `category` of `contradiction`, `low_confidence` or `blocker` where it applies), then ask the user;
+record each answer with `answer_question`, and each deferral with `defer_question` (an `owner` is required;
+it becomes an assumption). Pass the gate with `set_gate` only when none is open. The same applies to
+gates 2 and 3. Ask the user (`AskUserQuestion` for choice-type questions, plain list
 otherwise). If you cannot ask interactively (running as a background/non-interactive subagent),
 **stop here**: write the questions into the *Open questions* section of `requirements.md`, set
 `STATE.md` to `blocked: awaiting answers (gate 1)`, and return the questions as your final message.
@@ -158,6 +167,12 @@ anything blocked, and the suggested next step (`issue-writer` to publish tasks).
   plainly in `STATE.md` and the final report.
 
 ## STATE.md template
+
+**When the `pipeline_state` tool is available, use it for every state change** (`set_stage`, `add_question`,
+`answer_question`, `defer_question`, `set_gate`, `set_spec_review`, `add_adr`, `add_assumption`, `mark_stale`):
+it writes `docs/pipeline/state.json` and regenerates STATE.md for you, and it refuses a stage that starts
+before the previous one is done and its gate has passed. **Otherwise, write STATE.md by hand** following the
+template below.
 
 ```markdown
 # Pipeline state

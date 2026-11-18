@@ -15,6 +15,7 @@ export { listFilesTool } from './listFiles.js';
 export { editFileTool } from './editFile.js';
 export { grepSearchTool } from './grepSearch.js';
 export * from './askUser.js';
+export * from './pipelineState.js';
 
 export class ToolRegistry {
   private tools: Map<string, ToolDefinition> = new Map();

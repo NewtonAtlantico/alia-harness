@@ -29,7 +29,8 @@
     "test:changes": "tsx scripts/smoke-changes.ts",
     "test:documents": "tsx scripts/smoke-documents.ts",
     "test:office": "tsx scripts/smoke-office.ts",
-    "test:askuser": "tsx scripts/smoke-askuser.ts"
+    "test:askuser": "tsx scripts/smoke-askuser.ts",
+    "test:pipeline": "tsx scripts/smoke-pipeline.ts"
   },
   "keywords": ["ai", "agent", "alia", "llm", "cli", "harness"],
   "author": "",

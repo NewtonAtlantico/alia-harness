@@ -1,0 +1,151 @@
+{
+  "files": [
+    {
+      "file": "docs/tasks/01-login-sso-tasks.md",
+      "slug": "01-login-sso",
+      "title": "Tasks: login-sso",
+      "tasks": [
+        {
+          "id": "1.1",
+          "title": "Configurar cliente OIDC",
+          "dependsOn": [],
+          "unresolvedDependsOn": [],
+          "slice": "Slice 1 — login corporativo ponta a ponta",
+          "points": 3
+        },
+        {
+          "id": "1.2",
+          "title": "Fluxo de login e callback",
+          "dependsOn": [
+            "1.1"
+          ],
+          "unresolvedDependsOn": [],
+          "slice": "Slice 1 — login corporativo ponta a ponta",
+          "points": 5
+        },
+        {
+          "id": "1.3",
+          "title": "Sessão e logout",
+          "dependsOn": [
+            "1.2"
+          ],
+          "unresolvedDependsOn": [],
+          "slice": "Slice 2 — ciclo de vida da sessão",
+          "points": 3
+        }
+      ],
+      "taskCount": 3,
+      "points": 11
+    },
+    {
+      "file": "docs/tasks/02-consultar-pedidos-tasks.md",
+      "slug": "02-consultar-pedidos",
+      "title": "Tasks: consultar-pedidos",
+      "tasks": [
+        {
+          "id": "T2.1",
+          "title": "GET /v1/orders com paginação por cursor",
+          "dependsOn": [
+            "1.2"
+          ],
+          "unresolvedDependsOn": [],
+          "slice": "Slice 1 — listar pedidos",
+          "points": 5
+        },
+        {
+          "id": "T2.2",
+          "title": "Lista de pedidos na UI",
+          "dependsOn": [
+            "T2.1"
+          ],
+          "unresolvedDependsOn": [],
+          "slice": "Slice 1 — listar pedidos",
+          "points": 3
+        },
+        {
+          "id": "T2.3",
+          "title": "Detalhe do pedido",
+          "dependsOn": [
+            "2.1"
+          ],
+          "unresolvedDependsOn": [],
+          "slice": "Slice 2 — detalhe",
+          "points": 3
+        }
+      ],
+      "taskCount": 3,
+      "points": 11
+    },
+    {
+      "file": "docs/tasks/03-abrir-chamado-tasks.md",
+      "slug": "03-abrir-chamado",
+      "title": "Tasks: abrir-chamado",
+      "tasks": [
+        {
+          "id": "3.1",
+          "title": "POST /v1/tickets com Idempotency-Key",
+          "dependsOn": [
+            "1.2"
+          ],
+          "unresolvedDependsOn": [],
+          "slice": "Slice 1 — abrir chamado ponta a ponta",
+          "points": 5
+        },
+        {
+          "id": "3.2",
+          "title": "Formulário de chamado",
+          "dependsOn": [
+            "3.1"
+          ],
+          "unresolvedDependsOn": [],
+          "slice": "Slice 1 — abrir chamado ponta a ponta",
+          "points": 3
+        },
+        {
+          "id": "3.3",
+          "title": "E-mail de confirmação e notificação",
+          "dependsOn": [
+            "3.1",
+            "Formulário de chamado"
+          ],
+          "unresolvedDependsOn": [],
+          "slice": "Slice 2 — confirmação",
+          "points": 2
+        }
+      ],
+      "taskCount": 3,
+      "points": 10
+    },
+    {
+      "file": "docs/tasks/04-acesso-parceiros-tasks.md",
+      "slug": "04-acesso-parceiros",
+      "title": "Tasks: acesso-parceiros",
+      "tasks": [
+        {
+          "title": "Perfis e permissões de parceiro",
+          "dependsOn": [
+            "1.2",
+            "2.1"
+          ],
+          "unresolvedDependsOn": [],
+          "slice": "Slice 1 — perfis",
+          "points": 8
+        },
+        {
+          "title": "Convite de parceiro",
+          "dependsOn": [
+            "Perfis e permissões de parceiro"
+          ],
+          "unresolvedDependsOn": [],
+          "slice": "Slice 2 — convite",
+          "points": 5
+        }
+      ],
+      "taskCount": 2,
+      "points": 13
+    }
+  ],
+  "taskCount": 11,
+  "points": 45,
+  "problems": []
+}
