@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 import { ToolRegistry, ToolContext } from '../tools/index.js';
 import { SafetyChecker } from '../safety/safetyChecker.js';
 import { ContextManager } from '../context/contextManager.js';
-import { AgentUI, getDefaultAgentUI } from './agentUI.js';
+import { AgentUI } from './agentUI.js';
 import { AliaModelConfig } from '../config.js';
 
 export interface AgentOptions {
@@ -12,7 +12,8 @@ export interface AgentOptions {
   toolRegistry: ToolRegistry;
   safetyChecker: SafetyChecker;
   contextManager: ContextManager;
-  workingDirectory?: string;
+  /** Absolute workspace root. Required: core never falls back to the process working directory. */
+  workingDirectory: string;
   systemPrompt?: string;
   maxSteps?: number;
   ui?: AgentUI;
@@ -63,10 +64,10 @@ export class AliaAgent {
     this.toolRegistry = options.toolRegistry;
     this.safetyChecker = options.safetyChecker;
     this.contextManager = options.contextManager;
-    this.workingDirectory = options.workingDirectory || process.cwd();
+    this.workingDirectory = options.workingDirectory;
     this.systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     this.maxSteps = options.maxSteps || 30;
-    this.ui = options.ui ?? getDefaultAgentUI();
+    this.ui = options.ui;
 
     this.reset();
   }

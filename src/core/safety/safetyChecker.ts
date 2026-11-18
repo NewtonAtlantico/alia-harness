@@ -50,34 +50,10 @@ export interface SafetyCheckerOptions {
   onAutoApprove?: (command: string) => void;
 }
 
-let defaultConfirmationHandler: SafetyConfirmationHandler | undefined;
-let defaultScopeLabelProvider: (() => string | undefined) | undefined;
-let defaultAutoApproveHandler: ((command: string) => void) | undefined;
-
-export function setDefaultSafetyConfirmationHandler(handler: SafetyConfirmationHandler | undefined): void {
-  defaultConfirmationHandler = handler;
-}
-
-export function getDefaultSafetyConfirmationHandler(): SafetyConfirmationHandler | undefined {
-  return defaultConfirmationHandler;
-}
-
-export function setDefaultScopeLabelProvider(provider: (() => string | undefined) | undefined): void {
-  defaultScopeLabelProvider = provider;
-}
-
-export function getDefaultScopeLabelProvider(): (() => string | undefined) | undefined {
-  return defaultScopeLabelProvider;
-}
-
-export function setDefaultAutoApproveHandler(handler: ((command: string) => void) | undefined): void {
-  defaultAutoApproveHandler = handler;
-}
-
-export function getDefaultAutoApproveHandler(): ((command: string) => void) | undefined {
-  return defaultAutoApproveHandler;
-}
-
+/**
+ * Handlers are per instance (no process-wide defaults). Without `onConfirm`, a dangerous
+ * command is denied rather than run unprompted.
+ */
 export class SafetyChecker {
   private autoApprove: boolean;
   private onConfirm?: SafetyConfirmationHandler;
@@ -125,13 +101,12 @@ export class SafetyChecker {
     }
 
     if (this.autoApprove) {
-      const autoApproveHandler = this.onAutoApproveFn ?? defaultAutoApproveHandler;
-      autoApproveHandler?.(command);
+      this.onAutoApproveFn?.(command);
       return { approved: true };
     }
 
-    const requester = this.getScopeLabelFn ? this.getScopeLabelFn() : defaultScopeLabelProvider?.();
-    const handler = this.onConfirm ?? defaultConfirmationHandler;
+    const requester = this.getScopeLabelFn?.();
+    const handler = this.onConfirm;
 
     if (!handler) {
       return {

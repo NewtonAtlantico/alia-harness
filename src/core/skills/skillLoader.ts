@@ -36,10 +36,11 @@ export interface SkillRoot {
 }
 
 export interface SkillRegistryOptions {
-  /** Roots to scan, lowest precedence first. Defaults to {@link defaultSkillRoots}. */
+  /** Roots to scan, lowest precedence first. Defaults to {@link defaultSkillRoots}(cwd). */
   roots?: SkillRoot[];
   /** Returns the currently registered tool names (used to evaluate `requires`). */
   getToolNames?: () => string[];
+  /** Workspace root. Required unless `roots` is given (it locates `<cwd>/.alia/skills`). */
   cwd?: string;
 }
 
@@ -110,7 +111,7 @@ export function bundledSkillsDir(): string {
  * Lowest to highest precedence: bundled < user (~/.alia/skills) < project
  * (<cwd>/.alia/skills) < ALIA_SKILLS_DIR (path-delimited list).
  */
-export function defaultSkillRoots(cwd: string = process.cwd()): SkillRoot[] {
+export function defaultSkillRoots(cwd: string): SkillRoot[] {
   const roots: SkillRoot[] = [
     { label: 'bundled', dir: bundledSkillsDir() },
     { label: 'user', dir: path.join(os.homedir(), '.alia', 'skills') },
@@ -134,7 +135,10 @@ export class SkillRegistry {
   readonly warnings: string[] = [];
 
   constructor(options: SkillRegistryOptions = {}) {
-    this.roots = options.roots ?? defaultSkillRoots(options.cwd);
+    if (!options.roots && !options.cwd) {
+      throw new Error('SkillRegistry needs either "roots" or "cwd" (the workspace root).');
+    }
+    this.roots = options.roots ?? defaultSkillRoots(options.cwd!);
     this.getToolNames = options.getToolNames ?? (() => []);
   }
 

@@ -1,18 +1,10 @@
 #!/usr/bin/env node
 import pc from 'picocolors';
 import { loadConfig, AliaConfig } from '../core/config.js';
-import { createAliaClient, fetchAvailableModels } from '../core/client.js';
-import { ToolRegistry } from '../core/tools/index.js';
-import { SafetyChecker } from '../core/safety/safetyChecker.js';
-import { ContextManager } from '../core/context/contextManager.js';
-import { AliaAgent, DEFAULT_SYSTEM_PROMPT } from '../core/agent/agentLoop.js';
-import { TerminalUI } from './ui/terminal.js';
+import { createSession, AliaSession } from '../core/session.js';
+import { TerminalUI, cliConfirmDangerousCommand, cliAutoApproveNotice } from './ui/terminal.js';
 import { DynamicPrompt, registerSkillCommands } from './ui/prompt.js';
-import { SkillRegistry, buildSkillCatalog, buildSkillInvocationPrompt } from '../core/skills/skillLoader.js';
-import { createUseSkillTool } from '../core/tools/useSkill.js';
-import { createRunSubagentTool } from '../core/tools/runSubagent.js';
 import { FileIndex } from '../core/context/fileIndex.js';
-import { resolveFileMentions } from '../core/context/fileMentions.js';
 
 interface CliArgs {
   prompt?: string;
@@ -78,67 +70,35 @@ ${pc.bold('SLASH COMMANDS (type "/" for live interactive preview):')}
 
 async function main() {
   const cliArgs = parseArgs(process.argv.slice(2));
+  // The CLI's workspace is the directory it was started in. Core never reads cwd itself.
+  const workspace = process.cwd();
 
   let config: AliaConfig;
   try {
-    config = loadConfig(cliArgs.config);
+    config = loadConfig({ baseDir: workspace, configPath: cliArgs.config });
   } catch (err: any) {
     TerminalUI.printError(`Configuration error: ${err.message}`);
     process.exit(1);
   }
 
-  const toolRegistry = new ToolRegistry();
-
-  // Skills: scan folders, expose the use_skill tool, and advertise a catalog in the system prompt.
-  const skills = new SkillRegistry({
-    getToolNames: () => toolRegistry.getAll().map((t) => t.name),
-    cwd: process.cwd(),
-  });
-  skills.load();
-  toolRegistry.register(createUseSkillTool(skills));
-  const catalog = buildSkillCatalog(skills);
-  const systemPrompt = catalog ? `${DEFAULT_SYSTEM_PROMPT}\n\n${catalog}` : DEFAULT_SYSTEM_PROMPT;
-
-  const safetyChecker = new SafetyChecker(cliArgs.autoApprove ?? false);
-
-  const selectedModelId = cliArgs.model || config.models[0].id;
-  let clientInstance;
+  let session: AliaSession;
   try {
-    clientInstance = createAliaClient(config, selectedModelId);
+    session = createSession({
+      workspace,
+      config,
+      modelId: cliArgs.model,
+      ui: TerminalUI,
+      autoApprove: cliArgs.autoApprove ?? false,
+      onConfirm: cliConfirmDangerousCommand,
+      onAutoApprove: cliAutoApproveNotice,
+    });
   } catch (err: any) {
     TerminalUI.printError(err.message);
     process.exit(1);
   }
 
-  const contextManager = new ContextManager({
-    maxInputTokens: clientInstance.modelConfig.maxInputTokens || 128000,
-  });
-
-  const agent = new AliaAgent({
-    client: clientInstance.client,
-    model: clientInstance.model,
-    modelConfig: clientInstance.modelConfig,
-    toolRegistry,
-    safetyChecker,
-    contextManager,
-    workingDirectory: process.cwd(),
-    systemPrompt,
-  });
-
-  // Subagents: registered after the agent exists so the tool can read the live model/client.
-  // Callers see it in the tool list; a child gets a copy of the registry without it.
-  toolRegistry.register(
-    createRunSubagentTool({
-      getClient: () => clientInstance.client,
-      getModel: () => ({ id: agent.getModel(), config: agent.getModelConfig() }),
-      getRegistry: () => toolRegistry,
-      systemPrompt,
-      getSkills: () => skills,
-    })
-  );
-
-  const skippedSkills = registerSkillCommands(skills.available());
-  for (const w of skills.warnings) TerminalUI.printInfo(`skills: ${w}`);
+  const skippedSkills = registerSkillCommands(session.skills.available());
+  for (const w of session.skills.warnings) TerminalUI.printInfo(`skills: ${w}`);
   for (const name of skippedSkills) {
     TerminalUI.printInfo(`skills: "${name}" clashes with a built-in command; use it via use_skill only.`);
   }
@@ -148,25 +108,21 @@ async function main() {
    * the command is not a skill (errors for known-but-unavailable skills are printed).
    */
   const resolveSkillCommand = (cmd: string, input: string): string | null => {
-    const skill = skills.get(cmd);
-    if (!skill) return null;
-    const missing = skills.missingRequirements(skill);
-    if (missing.length > 0) {
-      TerminalUI.printError(
-        `Skill "${skill.name}" is unavailable: it requires ${missing.join(', ')} (no matching tool is registered in this harness).`
-      );
+    const resolved = session.resolveSkill(cmd, input);
+    if (resolved.status === 'not_a_skill') return null;
+    if (resolved.status === 'unavailable') {
+      TerminalUI.printError(resolved.message);
       return '';
     }
-    const { prompt, attachments, errors } = resolveFileMentions(input, process.cwd());
-    TerminalUI.printAttachedFiles(attachments);
-    for (const err of errors) console.log(pc.yellow(`⚠️  ${err}`));
-    TerminalUI.printInfo(`Skill loaded: ${skill.name}`);
-    return buildSkillInvocationPrompt(skill, skills, prompt);
+    TerminalUI.printAttachedFiles(resolved.attachments);
+    for (const err of resolved.errors) console.log(pc.yellow(`⚠️  ${err}`));
+    TerminalUI.printInfo(`Skill loaded: ${resolved.skill.name}`);
+    return resolved.prompt;
   };
 
   // Non-interactive single-prompt mode
   if (cliArgs.prompt) {
-    console.log(pc.bold(pc.cyan(`\nExecuting prompt with model [${agent.getModel()}]:`)));
+    console.log(pc.bold(pc.cyan(`\nExecuting prompt with model [${session.getModel()}]:`)));
     console.log(pc.white(`> ${cliArgs.prompt}\n`));
 
     if (cliArgs.prompt.startsWith('/')) {
@@ -174,26 +130,26 @@ async function main() {
       const skillPrompt = resolveSkillCommand(cmd, cliArgs.prompt.trim().slice(cmd.length));
       if (skillPrompt === '') process.exit(1);
       if (skillPrompt !== null) {
-        await agent.run(skillPrompt);
+        await session.run(skillPrompt);
         return;
       }
     }
 
-    const { prompt, attachments, errors } = resolveFileMentions(cliArgs.prompt, process.cwd());
+    const { prompt, attachments, errors } = session.prepareInput(cliArgs.prompt);
     TerminalUI.printAttachedFiles(attachments);
     for (const err of errors) console.log(pc.yellow(`⚠️  ${err}`));
-    await agent.run(prompt);
+    await session.run(prompt);
     return;
   }
 
   // Interactive REPL mode
   TerminalUI.printBanner(
-    agent.getModel(),
+    session.getModel(),
     config.vendor || config.name,
-    clientInstance.modelConfig.url
+    session.getModelConfig().url
   );
 
-  const fileIndex = new FileIndex(process.cwd());
+  const fileIndex = new FileIndex(workspace);
   const prompt = new DynamicPrompt(TerminalUI.printUserPrompt(), fileIndex);
 
   const askPrompt = async () => {
@@ -218,7 +174,7 @@ async function main() {
             process.exit(0);
 
           case '/clear':
-            agent.reset();
+            session.reset();
             TerminalUI.printSuccess('Conversation history cleared.');
             continue;
 
@@ -228,7 +184,7 @@ async function main() {
 
           case '/tools': {
             console.log(pc.bold('\nRegistered Tools:'));
-            for (const tool of toolRegistry.getAll()) {
+            for (const tool of session.tools.getAll()) {
               console.log(`• ${pc.bold(pc.cyan(tool.name))}: ${tool.description}`);
               console.log(`  Parameters: ${JSON.stringify(tool.parameters.properties, null, 2)}`);
             }
@@ -237,14 +193,14 @@ async function main() {
           }
 
           case '/skills': {
-            const all = skills.all();
+            const all = session.skills.all();
             if (all.length === 0) {
               console.log(pc.yellow('\nNo skills found. Add folders with a SKILL.md to ./skills, ~/.alia/skills or ./.alia/skills.\n'));
               continue;
             }
             console.log(pc.bold(`\nSkills (${all.length}) — run with /<name> [input], or the model loads them via use_skill:`));
             for (const s of all) {
-              const missing = skills.missingRequirements(s);
+              const missing = session.skills.missingRequirements(s);
               const status = missing.length === 0 ? '' : pc.red(` [unavailable: needs ${missing.join(', ')}]`);
               const desc = s.description.replace(/\s+/g, ' ');
               console.log(`• ${pc.bold(pc.cyan('/' + s.name))} ${pc.dim(`(${s.source})`)}${status}`);
@@ -257,48 +213,28 @@ async function main() {
           case '/models':
           case '/model': {
             if (cmdArgs.length > 0) {
-              const newModel = cmdArgs[0];
-              const foundInConfig = config.models.find(
-                (m) => m.id === newModel || m.name === newModel
-              );
-              if (foundInConfig) {
-                agent.setModel(foundInConfig.id, foundInConfig);
-                TerminalUI.printSuccess(`Switched active model to: ${pc.bold(foundInConfig.id)}`);
+              const switched = await session.switchModel(cmdArgs[0]);
+              if (switched.ok) {
+                TerminalUI.printSuccess(`Switched active model to: ${pc.bold(switched.id)}`);
               } else {
-                // Dynamically allow switching to any remote model
-                const remoteModels = await fetchAvailableModels(clientInstance.client);
-                if (remoteModels.includes(newModel)) {
-                  agent.setModel(newModel, {
-                    id: newModel,
-                    name: newModel,
-                    url: clientInstance.modelConfig.url,
-                    toolCalling: true,
-                    maxInputTokens: 128000,
-                    maxOutputTokens: 16000,
-                  });
-                  TerminalUI.printSuccess(`Switched active model to: ${pc.bold(newModel)}`);
-                } else {
-                  TerminalUI.printError(
-                    `Model "${newModel}" not found. Available on endpoint: ${remoteModels.join(', ')}`
-                  );
-                }
+                TerminalUI.printError(
+                  `Model "${cmdArgs[0]}" not found. Available on endpoint: ${switched.available.join(', ')}`
+                );
               }
             } else {
               console.log(pc.bold('\nConfigured Models:'));
               for (const m of config.models) {
-                const active = m.id === agent.getModel() ? pc.green(' (active)') : '';
+                const active = m.id === session.getModel() ? pc.green(' (active)') : '';
                 console.log(`• ${pc.bold(m.id)} - ${m.name}${active}`);
               }
 
               const loading = TerminalUI.startThinking('Loading models');
-              const remoteModels = await fetchAvailableModels(clientInstance.client).finally(() =>
-                loading.stop()
-              );
+              const { remote: remoteModels } = await session.listModels().finally(() => loading.stop());
 
               if (remoteModels.length > 0) {
                 console.log(pc.bold('\nEndpoint Models (switch with /model <id>):'));
                 for (const rModel of remoteModels) {
-                  const active = rModel === agent.getModel() ? pc.green(' (active)') : '';
+                  const active = rModel === session.getModel() ? pc.green(' (active)') : '';
                   console.log(`• ${pc.cyan(rModel)}${active}`);
                 }
               }
@@ -308,12 +244,10 @@ async function main() {
           }
 
           case '/tokens': {
-            const tokens = contextManager.estimateMessagesTokens(agent.getMessages());
-            const limit = clientInstance.modelConfig.maxInputTokens || 128000;
-            const pct = ((tokens / limit) * 100).toFixed(1);
+            const usage = session.getContextUsage();
             console.log(
               pc.cyan(
-                `Estimated Context Window: ${tokens} / ${limit} tokens (${pct}%) across ${agent.getMessages().length} messages.`
+                `Estimated Context Window: ${usage.tokens} / ${usage.limit} tokens (${usage.percent.toFixed(1)}%) across ${usage.messages} messages.`
               )
             );
             continue;
@@ -328,7 +262,7 @@ async function main() {
             }
             if (skillPrompt === '') continue;
             try {
-              await agent.run(skillPrompt);
+              await session.run(skillPrompt);
             } catch (err: any) {
               TerminalUI.printError(`Execution error: ${err.message}`);
             }
@@ -340,13 +274,10 @@ async function main() {
       // Execute prompt in the agent loop
       try {
         // Resolve @file mentions into attached context, then run the agent loop
-        const { prompt: enrichedPrompt, attachments, errors } = resolveFileMentions(
-          trimmed,
-          process.cwd()
-        );
+        const { prompt: enrichedPrompt, attachments, errors } = session.prepareInput(trimmed);
         TerminalUI.printAttachedFiles(attachments);
         for (const err of errors) console.log(pc.yellow(`⚠️  ${err}`));
-        await agent.run(enrichedPrompt);
+        await session.run(enrichedPrompt);
       } catch (err: any) {
         TerminalUI.printError(`Execution error: ${err.message}`);
       }

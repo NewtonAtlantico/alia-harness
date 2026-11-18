@@ -20,13 +20,14 @@ export interface AliaConfig {
 }
 
 /**
- * Loads environment variables from a local .env file.
+ * Loads environment variables from a `.env` file in `baseDir` (or its parent).
  * Uses Node's native process.loadEnvFile() when available, with a safe fallback parser.
+ * Opt-in and explicit: core never reads the process working directory.
  */
-export function loadEnv(): void {
+export function loadEnv(baseDir: string): void {
   const envCandidates = [
-    path.resolve(process.cwd(), '.env'),
-    path.resolve(process.cwd(), '../.env'),
+    path.resolve(baseDir, '.env'),
+    path.resolve(baseDir, '../.env'),
   ];
 
   for (const envFile of envCandidates) {
@@ -63,19 +64,30 @@ function parseAndInjectEnv(envFile: string): void {
   } catch {}
 }
 
-export function findConfigFile(customPath?: string): string {
-  if (customPath && fs.existsSync(customPath)) {
-    return path.resolve(customPath);
+export interface LoadConfigOptions {
+  /** Directory that relative paths and the default `alia-config.json` / `.env` lookups start from. */
+  baseDir: string;
+  /** Explicit config file (absolute, or relative to `baseDir`). */
+  configPath?: string;
+  /** Also read a `.env` next to the config lookup (default true). Hosts that keep secrets elsewhere pass false. */
+  loadEnvFile?: boolean;
+}
+
+export function findConfigFile(baseDir: string, customPath?: string): string {
+  if (customPath) {
+    const resolved = path.resolve(baseDir, customPath);
+    if (fs.existsSync(resolved)) return resolved;
   }
 
   const envPath = process.env.ALIA_CONFIG;
-  if (envPath && fs.existsSync(envPath)) {
-    return path.resolve(envPath);
+  if (envPath) {
+    const resolved = path.resolve(baseDir, envPath);
+    if (fs.existsSync(resolved)) return resolved;
   }
 
   const defaultLocations = [
-    path.resolve(process.cwd(), 'alia-config.json'),
-    path.resolve(process.cwd(), '../alia-config.json'),
+    path.resolve(baseDir, 'alia-config.json'),
+    path.resolve(baseDir, '../alia-config.json'),
   ];
 
   for (const loc of defaultLocations) {
@@ -90,11 +102,26 @@ export function findConfigFile(customPath?: string): string {
   );
 }
 
-export function loadConfig(configPath?: string): AliaConfig {
-  // Always load .env file before reading config
-  loadEnv();
+/**
+ * Checks an in-memory config (for hosts that build it themselves, e.g. a desktop app that keeps
+ * the API key in the OS secret store). Throws a readable error when it cannot be used.
+ */
+export function validateConfig(config: AliaConfig): AliaConfig {
+  if (!config.apiKey) {
+    throw new Error(
+      'Missing API key. Please define ALIA_API_KEY in your .env file or environment variables.'
+    );
+  }
+  if (!config.models || !Array.isArray(config.models) || config.models.length === 0) {
+    throw new Error('Config file must specify at least one model in "models" array.');
+  }
+  return config;
+}
 
-  const resolvedPath = findConfigFile(configPath);
+export function loadConfig(options: LoadConfigOptions): AliaConfig {
+  if (options.loadEnvFile !== false) loadEnv(options.baseDir);
+
+  const resolvedPath = findConfigFile(options.baseDir, options.configPath);
   try {
     const raw = fs.readFileSync(resolvedPath, 'utf-8');
     const parsed = JSON.parse(raw) as AliaConfig;
@@ -105,17 +132,7 @@ export function loadConfig(configPath?: string): AliaConfig {
       parsed.apiKey = envApiKey;
     }
 
-    if (!parsed.apiKey) {
-      throw new Error(
-        'Missing API key. Please define ALIA_API_KEY in your .env file or environment variables.'
-      );
-    }
-
-    if (!parsed.models || !Array.isArray(parsed.models) || parsed.models.length === 0) {
-      throw new Error('Config file must specify at least one model in "models" array.');
-    }
-
-    return parsed;
+    return validateConfig(parsed);
   } catch (err: any) {
     throw new Error(`Failed to load configuration from ${resolvedPath}: ${err.message}`);
   }

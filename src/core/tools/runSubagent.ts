@@ -6,7 +6,7 @@ import { ToolRegistry } from './index.js';
 import { AliaAgent } from '../agent/agentLoop.js';
 import { ContextManager } from '../context/contextManager.js';
 import { AliaModelConfig } from '../config.js';
-import { AgentUI, getDefaultAgentUI } from '../agent/agentUI.js';
+import { AgentUI } from '../agent/agentUI.js';
 import { SkillRegistry, buildSkillInvocationPrompt } from '../skills/skillLoader.js';
 import { resolveFileMentions } from '../context/fileMentions.js';
 import {
@@ -46,7 +46,7 @@ export interface SubagentDeps {
    * Defaults to the ALIA_SUBAGENT_VERBOSE=1 environment variable.
    */
   verbose?: boolean;
-  /** Custom UI / observer for subagent logging and scopes. */
+  /** The parent's UI / observer, so a child's output is nested under it. */
   ui?: AgentUI;
 }
 
@@ -146,7 +146,7 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
 
       const maxSteps = clampSteps(args.max_steps);
       const { id, config } = deps.getModel();
-      const ui = deps.ui ?? getDefaultAgentUI();
+      const ui = deps.ui;
 
       const child = new AliaAgent({
         client: deps.getClient(),

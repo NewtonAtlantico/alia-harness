@@ -9,6 +9,7 @@ export * from './skills/skillLoader.js';
 export * from './tools/index.js';
 export * from './tools/runSubagent.js';
 export * from './tools/useSkill.js';
+export * from './session.js';
 export * from './client.js';
 export * from './config.js';
 export * from './context/fileIndex.js';

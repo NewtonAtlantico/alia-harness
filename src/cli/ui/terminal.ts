@@ -5,13 +5,7 @@ import { AttachedFile } from '../../core/context/fileMentions.js';
 import { renderBanner } from './logo.js';
 import { ThinkingAnimation } from './thinking.js';
 import { brand, brandLight, danger, muted, success } from './theme.js';
-import { setDefaultAgentUI } from '../../core/agent/agentUI.js';
-import {
-  SafetyConfirmationContext,
-  setDefaultSafetyConfirmationHandler,
-  setDefaultScopeLabelProvider,
-  setDefaultAutoApproveHandler,
-} from '../../core/safety/safetyChecker.js';
+import { SafetyConfirmationContext } from '../../core/safety/safetyChecker.js';
 
 interface OutputScope {
   indent: string;
@@ -239,9 +233,7 @@ export async function cliConfirmDangerousCommand(ctx: SafetyConfirmationContext)
   }
 }
 
-setDefaultAgentUI(TerminalUI);
-setDefaultScopeLabelProvider(() => TerminalUI.getScopeLabel());
-setDefaultSafetyConfirmationHandler(cliConfirmDangerousCommand);
-setDefaultAutoApproveHandler((command) => {
+/** Audit line shown when `--auto-approve` lets a destructive command through. */
+export function cliAutoApproveNotice(command: string): void {
   console.log(pc.yellow(`⚠️  [Auto-Approved Dangerous Command]: ${command}`));
-});
+}

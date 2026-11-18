@@ -52,6 +52,7 @@ function setup(
       systemPrompt: PARENT_PROMPT,
       getSkills: opts.skills ? () => opts.skills! : undefined,
       verbose: opts.verbose ?? false,
+      ui: TerminalUI, // no global default UI any more: pass it explicitly
     })
   );
   const parent = new AliaAgent({
@@ -63,6 +64,7 @@ function setup(
     contextManager: new ContextManager(),
     workingDirectory: tmp,
     systemPrompt: PARENT_PROMPT,
+    ui: TerminalUI,
   });
   return { model, tools, parent };
 }

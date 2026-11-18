@@ -2,6 +2,10 @@ export interface ThinkingHandle {
   stop: () => void;
 }
 
+/**
+ * How a front-end observes a run. Passed explicitly to `createSession` / `AliaAgent`; there is
+ * no process-wide default, so several sessions in one process never share a UI.
+ */
 export interface AgentUI {
   startThinking?(label?: string): ThinkingHandle | void;
   printThinking?(reasoning: string): void;
@@ -14,14 +18,4 @@ export interface AgentUI {
   pushScope?(opts: { label: string; quiet?: boolean }): void;
   popScope?(): void;
   getScopeLabel?(): string | undefined;
-}
-
-let defaultAgentUI: AgentUI | undefined;
-
-export function setDefaultAgentUI(ui: AgentUI | undefined): void {
-  defaultAgentUI = ui;
-}
-
-export function getDefaultAgentUI(): AgentUI | undefined {
-  return defaultAgentUI;
 }
