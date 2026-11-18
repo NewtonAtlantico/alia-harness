@@ -1,7 +1,7 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { projectFolderName } from '../projectKey.js';
 
 /**
  * Per-project allowlist behind "Always allow in this project".
@@ -56,11 +56,7 @@ export class PermissionStore {
   constructor(workspace: string, options: PermissionStoreOptions = {}) {
     this.workspace = path.resolve(workspace);
     const dir = options.dir ?? path.join(os.homedir(), '.alia', 'permissions');
-    // Case-insensitive file systems (Windows) treat C:\Proj and c:\proj as one project.
-    const key = process.platform === 'win32' ? this.workspace.toLowerCase() : this.workspace;
-    const hash = crypto.createHash('sha1').update(key).digest('hex').slice(0, 10);
-    const name = path.basename(this.workspace).replace(/[^\w.-]+/g, '_') || 'workspace';
-    this.filePath = path.join(dir, `${name}-${hash}.json`);
+    this.filePath = path.join(dir, `${projectFolderName(this.workspace)}.json`);
   }
 
   /** Reads the file every time, so several sessions on one project always agree. */

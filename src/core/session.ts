@@ -12,6 +12,8 @@ import {
   normalizeAnswer,
 } from './safety/safetyChecker.js';
 import { PermissionStore } from './safety/permissionStore.js';
+import { SessionRecorder, SessionStore, newSessionId } from './sessions/sessionStore.js';
+import { sameWorkspace } from './projectKey.js';
 import { ContextManager } from './context/contextManager.js';
 import { AttachedFile, resolveFileMentions } from './context/fileMentions.js';
 import { AgentResult, AliaAgent, DEFAULT_SYSTEM_PROMPT, RunOptions } from './agent/agentLoop.js';
@@ -55,6 +57,20 @@ export interface SessionOptions {
   permissionStore?: PermissionStore;
   /** Folder for the default permission store (tests, or a host that keeps its data elsewhere). */
   permissionsDir?: string;
+  /**
+   * Saves the conversation (to `~/.alia/sessions` by default) so it can be listed, searched and
+   * resumed. Opt-in: without it nothing is written. The files appear with the first message.
+   */
+  sessionStore?: SessionStore;
+  /** Id for a new saved session (default: generated). Needs `sessionStore`. */
+  sessionId?: string;
+  /**
+   * Continues a saved session: its history is loaded and the conversation carries on in the same
+   * files. The system prompt is refreshed (skills may have changed); everything else is as it was.
+   * The model it used is restored unless `modelId` is given. Needs `sessionStore`, and the session
+   * must belong to this workspace.
+   */
+  resume?: string;
   /** Skill folders to scan, lowest precedence first. Default: bundled, user, project (`<workspace>/.alia/skills`), env. */
   skillRoots?: SkillRoot[];
   /** Show a subagent's full transcript instead of one line per tool call. */
@@ -110,6 +126,9 @@ export class AliaSession {
   readonly contextManager: ContextManager;
   /** The project's allowlist ("always allow"): list, remove and clear rules from a settings screen. */
   readonly permissions: PermissionStore;
+  /** Id of the saved session; undefined when no `sessionStore` was given. */
+  readonly id: string | undefined;
+  private recorder?: SessionRecorder;
   readonly systemPrompt: string;
   private readonly client: OpenAI;
 
@@ -117,7 +136,19 @@ export class AliaSession {
     this.workspace = path.resolve(options.workspace);
     this.config = validateConfig(options.config);
 
-    const selected = createAliaClient(this.config, options.modelId);
+    // Resuming: load first, so the saved model and history are known before the agent exists.
+    let resumed: ReturnType<SessionStore['load']>;
+    if (options.resume) {
+      if (!options.sessionStore) throw new Error('"resume" needs a "sessionStore".');
+      resumed = options.sessionStore.load(options.resume);
+      if (!resumed) throw new Error(`Session "${options.resume}" not found.`);
+      if (!sameWorkspace(resumed.info.workspace, this.workspace)) {
+        throw new Error(`Session "${options.resume}" belongs to ${resumed.info.workspace}, not ${this.workspace}.`);
+      }
+    }
+    const savedModel = resumed && this.config.models.some((m) => m.id === resumed!.info.model) ? resumed.info.model : undefined;
+
+    const selected = createAliaClient(this.config, options.modelId ?? savedModel);
     this.client = options.client ?? selected.client;
 
     this.tools = new ToolRegistry();
@@ -185,7 +216,24 @@ export class AliaSession {
       systemPrompt: this.systemPrompt,
       maxSteps: options.maxSteps,
       onEvent: emit,
+      onHistory: (messages) => this.recorder?.sync(messages),
     });
+
+    if (options.sessionStore) {
+      this.id = options.resume ?? options.sessionId ?? newSessionId();
+      this.recorder = options.sessionStore.recorder(this.id, {
+        workspace: this.workspace,
+        getModel: () => this.agent.getModel(),
+        initial: resumed?.messages,
+      });
+      if (resumed) {
+        // Same conversation, current system prompt.
+        const rest = resumed.messages[0]?.role === 'system' ? resumed.messages.slice(1) : resumed.messages;
+        this.agent.setMessages([{ role: 'system', content: this.systemPrompt }, ...rest]);
+      }
+    } else {
+      this.id = undefined;
+    }
 
     // Registered after the agent exists so the tool reads the live model. A child gets a copy
     // of the registry without it (depth 1 only).
@@ -255,6 +303,7 @@ export class AliaSession {
     const configured = this.config.models.find((m) => m.id === idOrName || m.name === idOrName);
     if (configured) {
       this.agent.setModel(configured.id, configured);
+      this.recorder?.setModel(configured.id);
       return { ok: true, id: configured.id };
     }
     // Any model served by the endpoint can be selected, with the default limits.
@@ -268,6 +317,7 @@ export class AliaSession {
       maxInputTokens: 128000,
       maxOutputTokens: 16000,
     });
+    this.recorder?.setModel(idOrName);
     return { ok: true, id: idOrName };
   }
 

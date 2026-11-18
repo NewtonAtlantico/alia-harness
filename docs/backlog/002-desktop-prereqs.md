@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`). Next: D5 (session store). Phase 0 of the desktop app; the app itself will be backlog 003. |
+| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`), D5 (session store; `npm run test:store`). Next: D6 (command registry, `/compact`). Phase 0 of the desktop app; the app itself will be backlog 003. |
 | **Depends on** | `src/core` as it is today (decoupled from `cli/`); subagents S1-S5 (done) |
 | **Design** | `alia Harness Desktop.pdf` (chat, changes panel, permission card, pipeline wizard, slash and `@` menus) |
 | **Primary consumer** | The standalone Electron app (backlog 003), plus the CLI, which must keep working unchanged |
@@ -207,17 +207,47 @@ As built in D4:
 
 ### 5.5 Session store (D5)
 
-- Location: `~/.alia/sessions/<workspace-hash>/<sessionId>.jsonl` plus a small `meta.json`
-  (`title`, `workspace`, `model`, `createdAt`, `updatedAt`). It lives outside the project on purpose,
-  so conversation content is never committed with the repo.
-- Content: the OpenAI-format `messages`, appended per message. A UI renders a past conversation from
-  them (tool calls and results are already in there); diffs come from the change store (D7).
-- API: `create`, `append`, `load`, `list({ workspace? })`, `search(text)` (substring over titles and
-  messages, no index in v1), `rename`, `delete`.
-- Resume: `createSession({ resume: sessionId })` seeds `agent.messages`. Auto-title from the first
-  user message.
-- Pinned skill blocks and archived tool outputs are persisted as they are in memory, so a resumed
-  session sees exactly what the model saw.
+- Location: `~/.alia/sessions/<project>-<hash>/<id>.jsonl` plus `<id>.meta.json` (`title`, `titleSource`,
+  `workspace`, `model`, `createdAt`; `updatedAt` is the file's modified time). It lives outside the project
+  on purpose, so conversation content is never committed with the repo. The project folder name is the
+  same helper the permission store uses (`projectFolderName`).
+- Content: the OpenAI-format `messages` array, stored as it is in memory. A UI renders a past
+  conversation from it (tool calls and results are already in there); diffs come from the change
+  store (D7). The file is append-only, with three kinds of line, which cover every way the history
+  changes: `msg` (a message was added), `set` (an older message was rewritten, which is how archived
+  tool output is saved) and `replace` (the history was cleared or replaced).
+- The agent reports every change through a new `onHistory` hook, and a `SessionRecorder` compares
+  the live array with what it last saved (by reference) and writes only the difference.
+- **Opt-in.** A session saves only when given a `sessionStore`; the CLI does not, so nothing new is
+  written to a CLI user's home. The files are created with the first real message, so opening a window
+  leaves nothing behind.
+- API: `create`, `info`, `load` (returns `messages` and a `skipped` count), `list({ workspace?, limit? })`
+  (newest first), `search(text, { workspace?, limit? })`, `rename`, `update({ model })`, `delete`, and
+  `recorder`. Ids are checked (`[\w.-]+`), so an id can never name a path.
+- Resume: `createSession({ sessionStore, resume: id })`. It loads the history and carries on in the same
+  files. The session must belong to the same workspace. The model it used is restored unless `modelId`
+  is given. **The system prompt is refreshed** (skills may have changed since); everything after it is
+  exactly as it was, including pinned skill blocks and archived tool output. A new session can take a
+  `sessionId`; `session.id` exposes the id.
+- Titles: automatic, from the first user message (first line, at most 60 characters, cut at a word). A
+  `/skill input` invocation becomes `/skill input` instead of the skill's boilerplate. `rename` marks a
+  title as the user's, and an automatic title never replaces it.
+- `/clear` really erases: a shorter history rewrites the file (atomically) instead of appending, and an
+  automatic title that came from the erased text is dropped (a title the user chose stays).
+- Search is a case-insensitive substring match over titles and over the text of user and assistant
+  messages. Tool output and pinned skill text are left out (file dumps and playbooks would match almost
+  everything). It reads each session file; there is no index in v1.
+- Damage is contained: a line that cannot be read (a write cut short by a crash, or corruption) is
+  skipped and counted, and after resuming, new entries start on a fresh line so they stay readable.
+  A damaged meta file hides that one session from `list`, not the whole list. A store that cannot be
+  written never stops the conversation.
+
+Known limitations:
+
+- Two processes writing to the same session are not coordinated (one window per session is assumed).
+- `list` and `search` read files directly, so they will slow down with thousands of long sessions; an
+  index can be added later without changing the API.
+- A session records the model in use, but a model that is no longer in the config is not restored.
 
 ### 5.6 Command registry and `/compact` (D6)
 
@@ -329,7 +359,7 @@ Points are Fibonacci, capped at 8, matching `spec-to-tasks`.
 | D2 | **Done.** Typed `AgentEvent` stream + `eventsToAgentUI` adapter | 5 | Every `AgentUI` call has an event equivalent with stable tool-call ids and `durationMs`. CLI output is identical to before. A test records the event sequence for a run with two tool calls and a subagent. |
 | D3 | **Done.** Cancellation via `AbortSignal` (loop, API call, `run_bash`, subagents) | 3 | Aborting mid-API-call and mid-`run_bash` ends the run with `cancelled` within a second, kills the child process, and leaves history valid (no dangling `tool_call_id`). A following `run()` works. |
 | D4 | **Done.** Permission model v2: decisions, modes, per-project allowlist | 5 | `allow_always` persists and applies on the next session; dangerous commands still prompt in `ask-dangerous` and `ask-commands`; `auto` skips prompts; legacy boolean handler still works; the permission event carries the tool-call id. |
-| D5 | Session store (JSONL), resume, list, search, rename | 5 | A run is persisted and `resume` reproduces the same `messages`. `list` filters by workspace; `search` finds text in titles and messages. A corrupted last line is skipped, not fatal. Nothing is written inside the workspace. |
+| D5 | **Done.** Session store (JSONL), resume, list, search, rename | 5 | A run is persisted and `resume` reproduces the same `messages`. `list` filters by workspace; `search` finds text in titles and messages. A corrupted last line is skipped, not fatal. Nothing is written inside the workspace. |
 | D6 | `CommandRegistry`, `/compact`, `getContextUsage()` | 3 | CLI prompt and a test consumer read the same command list (built-ins plus skills). `/compact` shrinks a long history, keeps system prompt, pinned skills and recent turns, and the run continues correctly afterwards. |
 | D7 | `ChangeTracker`: record, diff, revert, keep | 5 | `edit_file` and `write_file` record before/after; `diff` returns a unified diff; `revert` restores or deletes; revert skips a file modified after the agent's change and reports it; `keep` clears the list. |
 | D8 | `readDocument` for PDF with page markers; integrate into `read_file` and `@` mentions | 5 | A sample multi-page PDF reads with `[p. N]` markers; `pages` argument works; a scanned PDF returns the no-text-layer message; audio/video return the transcript message; `@file.pdf` attaches text. |
@@ -365,7 +395,7 @@ Within the foundation, D2 before D3 because cancellation adds an event and a sta
 | PDF or DOCX parsers misread complex layouts. | Spike before choosing (D8); keep page markers so the model can cite and the human can verify; scanned and low-text files are flagged, not guessed. |
 | `allow_always` becomes a hole. | Dangerous patterns are never allowlistable (even by hand-editing the file); rules are exact commands by default, prefix rules refuse shell operators; the allowlist is per user and project, kept outside the repo, human-readable JSON, and shown in the settings screen (backlog 003) through `session.permissions`. |
 | Revert overwrites user edits. | D7 compares disk content with `after` first and skips conflicts. |
-| Session files hold sensitive document content. | Stored under `~/.alia`, outside the repo; delete is a first-class operation (D5). |
+| Session files hold sensitive document content. | Stored under `~/.alia`, outside the repo; opt-in (the CLI writes nothing); `delete` is a first-class operation; `/clear` rewrites the file so erased text is really gone (D5). |
 
 ## 8. Open items
 

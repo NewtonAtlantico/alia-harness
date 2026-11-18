@@ -21,6 +21,12 @@ export interface AgentOptions {
   maxSteps?: number;
   /** Receives every {@link AgentEvent} of this agent's runs (the primary way to observe a run). */
   onEvent?: EventSink;
+  /**
+   * Called after every change to the conversation history (a message added, older tool output
+   * archived, history cleared or replaced), with the live array. Used to persist sessions; the
+   * array must be treated as read-only.
+   */
+  onHistory?: (messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]) => void;
   /** Legacy observer: adapted from the event stream (see `eventsToAgentUI`). May be combined with `onEvent`. */
   ui?: AgentUI;
 }
@@ -70,6 +76,7 @@ export class AliaAgent {
   private systemPrompt: string;
   private maxSteps: number;
   private emit: EventSink;
+  private onHistory?: AgentOptions['onHistory'];
   private messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
 
   constructor(options: AgentOptions) {
@@ -82,6 +89,7 @@ export class AliaAgent {
     this.workingDirectory = options.workingDirectory;
     this.systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     this.maxSteps = options.maxSteps || 30;
+    this.onHistory = options.onHistory;
     this.emit = combineSinks(options.ui ? eventsToAgentUI(options.ui) : undefined, options.onEvent);
 
     this.reset();
@@ -94,10 +102,25 @@ export class AliaAgent {
         content: this.systemPrompt,
       },
     ];
+    this.onHistory?.(this.messages);
   }
 
   getMessages() {
     return this.messages;
+  }
+
+  /**
+   * Replaces the whole history (resuming a saved conversation). The first message should be the
+   * system prompt; callers that resume are expected to have refreshed it.
+   */
+  setMessages(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]) {
+    this.messages = messages;
+    this.onHistory?.(this.messages);
+  }
+
+  private pushMessage(message: OpenAI.Chat.Completions.ChatCompletionMessageParam) {
+    this.messages.push(message);
+    this.onHistory?.(this.messages);
   }
 
   getModel() {
@@ -150,7 +173,7 @@ export class AliaAgent {
 
   private async runLoop(userPrompt: string, signal?: AbortSignal): Promise<AgentResult> {
     // 1. Append user prompt to message history
-    this.messages.push({
+    this.pushMessage({
       role: 'user',
       content: userPrompt,
     });
@@ -165,6 +188,7 @@ export class AliaAgent {
       const { messages: prunedMessages, pruned } = this.contextManager.pruneMessages(this.messages);
       if (pruned) {
         this.messages = prunedMessages;
+        this.onHistory?.(this.messages);
         this.emit({ type: 'context_compacted' });
       }
 
@@ -222,13 +246,13 @@ export class AliaAgent {
       if (!toolCalls || toolCalls.length === 0) {
         // No tool calls: model has concluded and produced a final text response
         const content = assistantMessage.content || '';
-        this.messages.push(assistantMessage);
+        this.pushMessage(assistantMessage);
         this.emit({ type: 'assistant_message', text: content, final: true });
         return { status: 'completed', text: content, steps: step };
       }
 
       // Model returned tool calls: append assistant's tool-call request to messages
-      this.messages.push(assistantMessage);
+      this.pushMessage(assistantMessage);
       if (assistantMessage.content) {
         this.emit({ type: 'assistant_message', text: assistantMessage.content, final: false });
       }
@@ -261,7 +285,7 @@ export class AliaAgent {
         this.emit({ type: 'tool_call_finished', id: toolCall.id, name: fnName, result, isError, durationMs });
 
         // Feedback: Append tool result back into message history as a tool role message
-        this.messages.push({
+        this.pushMessage({
           role: 'tool',
           tool_call_id: toolCall.id,
           content: result,
@@ -274,7 +298,7 @@ export class AliaAgent {
         // rejected for a dangling tool_call_id. Tell it they did not run.
         for (const toolCall of toolCalls) {
           if (answered.has(toolCall.id)) continue;
-          this.messages.push({
+          this.pushMessage({
             role: 'tool',
             tool_call_id: toolCall.id,
             content: `${CANCELLED_OUTPUT_PREFIX} Tool call was not run because the run was cancelled.`,
