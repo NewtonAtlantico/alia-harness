@@ -209,6 +209,11 @@ export class SkillRegistry {
     );
   }
 
+  /** The tools registered right now. */
+  toolNames(): string[] {
+    return this.getToolNames();
+  }
+
   isAvailable(skill: Skill): boolean {
     return this.missingRequirements(skill).length === 0;
   }
@@ -236,22 +241,41 @@ export class SkillRegistry {
 // Prompt formatting
 // ---------------------------------------------------------------------------
 
-const HARNESS_NOTES = [
-  'You are running inside the Alia harness, not Claude Code. Adapt this skill as follows:',
-  '- Tools: read_file, write_file, edit_file, list_files, grep_search, run_bash, use_skill. Map any other tool named below onto these.',
-  '- The `Skill` tool is `use_skill`. To run another skill this one mentions, call use_skill with its name.',
-  '- There is no AskUserQuestion, Task/subagent or MCP tool. Ask the user plain-text questions, then end your turn and wait for the answer. Never invent answers.',
-  '- Paths inside this skill (references/, scripts/, assets/, templates) are relative to the skill folder shown in `dir`. Read them with read_file only when a step needs them.',
-].join('\n');
+const BASE_TOOLS = ['read_file', 'write_file', 'edit_file', 'list_files', 'grep_search', 'run_bash', 'use_skill'];
+const TOOL_ORDER = [...BASE_TOOLS, 'run_subagent', 'ask_user'];
+
+/**
+ * How this harness differs from Claude Code, which most skills were written for. It describes the
+ * tools that actually exist for whoever will follow the skill, so a skill is never told to use a
+ * tool that is missing (a subagent cannot ask the user or start subagents).
+ */
+export function harnessNotes(toolNames: string[]): string {
+  const names = toolNames.length > 0 ? toolNames : BASE_TOOLS;
+  const has = (n: string) => names.includes(n);
+  const ordered = [...TOOL_ORDER.filter(has), ...names.filter((n) => !TOOL_ORDER.includes(n))];
+  return [
+    'You are running inside the Alia harness, not Claude Code. Adapt this skill as follows:',
+    `- Tools: ${ordered.join(', ')}. Map any other tool named below onto these.`,
+    '- The `Skill` tool is `use_skill`. To run another skill this one mentions, call use_skill with its name.',
+    has('ask_user')
+      ? '- `AskUserQuestion` is `ask_user`: use it for open questions, gate questions and choices (kinds choice, text, confirm; allowDefer lets the user record a question as an assumption with an owner). If it returns `unanswered` questions, stop at that gate and wait. Never invent answers.'
+      : '- There is no AskUserQuestion tool. Ask the user plain-text questions, then end your turn and wait for the answer. Never invent answers.',
+    has('run_subagent')
+      ? '- `Task` / subagent calls are `run_subagent`: one fresh, isolated agent per call, which cannot ask the user.'
+      : '- There is no Task/subagent tool: do the work yourself.',
+    names.some((n) => n.startsWith('mcp__')) ? '- MCP tools are available under their `mcp__` names.' : '- There is no MCP tool.',
+    '- Paths inside this skill (references/, scripts/, assets/, templates) are relative to the skill folder shown in `dir`. Read them with read_file only when a step needs them.',
+  ].join('\n');
+}
 
 /**
  * Full skill text handed to the model. Starts with {@link SKILL_TAG_PREFIX} so the
  * context manager never prunes it mid-task.
  */
-export function formatSkillForModel(skill: Skill, registry: SkillRegistry): string {
+export function formatSkillForModel(skill: Skill, registry: SkillRegistry, toolNames?: string[]): string {
   return [
     `${SKILL_TAG_PREFIX}name="${skill.name}" dir="${toPosix(skill.dir)}">`,
-    HARNESS_NOTES,
+    harnessNotes(toolNames ?? registry.toolNames()),
     '',
     registry.renderBody(skill),
     '</skill>',
@@ -262,7 +286,9 @@ export function formatSkillForModel(skill: Skill, registry: SkillRegistry): stri
 export function buildSkillInvocationPrompt(
   skill: Skill,
   registry: SkillRegistry,
-  input: string
+  input: string,
+  /** The tools of whoever will follow the skill. Default: all of the registry's. */
+  toolNames?: string[]
 ): string {
   const request = input.trim()
     ? input.trim()
@@ -270,7 +296,7 @@ export function buildSkillInvocationPrompt(
   return [
     `I invoked the "${skill.name}" skill. It is already loaded below, so do not call use_skill for it again. Follow it for this request.`,
     '',
-    formatSkillForModel(skill, registry),
+    formatSkillForModel(skill, registry, toolNames),
     '',
     `Request / input: ${request}`,
   ].join('\n');

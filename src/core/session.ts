@@ -5,6 +5,7 @@ import { createAliaClient, fetchAvailableModels } from './client.js';
 import { ToolRegistry } from './tools/index.js';
 import { createUseSkillTool } from './tools/useSkill.js';
 import { createRunSubagentTool } from './tools/runSubagent.js';
+import { AskUserHandler, createAskUserTool } from './tools/askUser.js';
 import {
   PermissionMode,
   SafetyChecker,
@@ -56,6 +57,12 @@ export interface SessionOptions {
   onConfirm?: SafetyConfirmationHandler;
   /** Called when `auto` lets a destructive command through (for an audit line). */
   onAutoApprove?: (command: string) => void;
+  /**
+   * Shows the user structured questions (the `ask_user` tool): cards in the desktop app, prompts in
+   * the terminal. The tool exists only when this is given, so without it skills fall back to asking
+   * in plain text. Subagents never get it.
+   */
+  onAskUser?: AskUserHandler;
   /** Where "always allow" is remembered. Default: a per-project file under `~/.alia/permissions`. */
   permissionStore?: PermissionStore;
   /** Folder for the default permission store (tests, or a host that keeps its data elsewhere). */
@@ -183,6 +190,10 @@ export class AliaSession {
     });
     this.skills.load();
     this.tools.register(createUseSkillTool(this.skills));
+    if (options.onAskUser) {
+      const handler = options.onAskUser;
+      this.tools.register(createAskUserTool({ getHandler: () => handler }));
+    }
     const catalog = buildSkillCatalog(this.skills);
     this.systemPrompt = catalog ? `${DEFAULT_SYSTEM_PROMPT}\n\n${catalog}` : DEFAULT_SYSTEM_PROMPT;
 
@@ -355,7 +366,7 @@ export class AliaSession {
     return {
       status: 'ready',
       skill,
-      prompt: buildSkillInvocationPrompt(skill, this.skills, prompt),
+      prompt: buildSkillInvocationPrompt(skill, this.skills, prompt, this.tools.getAll().map((t) => t.name)),
       attachments,
       errors,
     };

@@ -26,7 +26,7 @@ export function createUseSkillTool(registry: SkillRegistry): ToolDefinition<UseS
       },
       required: ['name'],
     },
-    execute: async (args) => {
+    execute: async (args, ctx) => {
       if (!args?.name) return 'Error: Parameter "name" is required.';
 
       const skill = registry.get(args.name);
@@ -40,7 +40,8 @@ export function createUseSkillTool(registry: SkillRegistry): ToolDefinition<UseS
         return `Error: Skill "${skill.name}" is unavailable in this harness: it requires ${missing.join(', ')} (no matching tool is registered).`;
       }
 
-      return formatSkillForModel(skill, registry);
+      // The notes must describe the tools of whoever is calling (a subagent cannot ask the user).
+      return formatSkillForModel(skill, registry, ctx?.toolNames);
     },
   };
 }

@@ -26,6 +26,8 @@ export interface ToolContext {
   toolCallId?: string;
   /** Aborts when the user cancels the run. Long-running tools must stop work and return promptly. */
   signal?: AbortSignal;
+  /** The tools available to whoever is making this call (a subagent has fewer than its parent). */
+  toolNames?: string[];
   /** The id of the run this call belongs to. */
   runId?: string;
   /** Tools that write files report each write here, so it can be shown as a diff and undone. */

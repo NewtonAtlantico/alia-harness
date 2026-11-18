@@ -2,7 +2,7 @@
 import pc from 'picocolors';
 import { loadConfig, AliaConfig } from '../core/config.js';
 import { createSession, AliaSession } from '../core/session.js';
-import { TerminalUI, cliConfirmDangerousCommand, cliAutoApproveNotice } from './ui/terminal.js';
+import { TerminalUI, cliConfirmDangerousCommand, cliAutoApproveNotice, cliAskUser } from './ui/terminal.js';
 import { DynamicPrompt, setSlashCommands } from './ui/prompt.js';
 import { FileIndex } from '../core/context/fileIndex.js';
 
@@ -92,6 +92,7 @@ async function main() {
       autoApprove: cliArgs.autoApprove ?? false,
       onConfirm: cliConfirmDangerousCommand,
       onAutoApprove: cliAutoApproveNotice,
+      onAskUser: (request) => cliAskUser(request),
     });
   } catch (err: any) {
     TerminalUI.printError(err.message);

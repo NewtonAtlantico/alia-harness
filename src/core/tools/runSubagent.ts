@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import OpenAI from 'openai';
 import { ToolDefinition } from './types.js';
-import { ToolRegistry } from './index.js';
+import { ToolRegistry, ASK_USER_TOOL_NAME } from './index.js';
 import { AliaAgent } from '../agent/agentLoop.js';
 import { ContextManager } from '../context/contextManager.js';
 import { AliaModelConfig } from '../config.js';
@@ -128,6 +128,18 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
         }
       }
 
+      // A child cannot start subagents or ask the user. Built first: the pre-loaded skill describes these tools.
+      const childRegistry = deps
+        .getRegistry()
+        .without(
+          [RUN_SUBAGENT_TOOL_NAME],
+          'Tool "run_subagent" is not available inside a subagent: subagents cannot start other subagents. Do the work yourself.'
+        )
+        .without(
+          [ASK_USER_TOOL_NAME],
+          'Tool "ask_user" is not available inside a subagent: there is no user to ask. Decide, or stop at the gate and write the open questions into the artifact (STATUS: blocked).'
+        );
+
       if (args.skill) {
         const skills = deps.getSkills?.();
         if (!skills) return 'Error: Skills are not available in this harness, so "skill" cannot be used.';
@@ -141,7 +153,7 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
         if (missing.length > 0) {
           return `Error: Skill "${skill.name}" is unavailable in this harness: it requires ${missing.join(', ')} (no matching tool is registered).`;
         }
-        firstMessage = buildSkillInvocationPrompt(skill, skills, firstMessage);
+        firstMessage = buildSkillInvocationPrompt(skill, skills, firstMessage, childRegistry.getAll().map((t) => t.name));
       }
 
       const maxSteps = clampSteps(args.max_steps);
@@ -153,10 +165,7 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
         client: deps.getClient(),
         model: id,
         modelConfig: config,
-        toolRegistry: deps.getRegistry().without(
-          [RUN_SUBAGENT_TOOL_NAME],
-          'Tool "run_subagent" is not available inside a subagent: subagents cannot start other subagents. Do the work yourself.'
-        ),
+        toolRegistry: childRegistry,
         safetyChecker: ctx.safetyChecker,
         contextManager: new ContextManager({ maxInputTokens: config.maxInputTokens || 128000 }),
         workingDirectory: ctx.workingDirectory,

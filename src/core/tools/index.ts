@@ -14,6 +14,7 @@ export { writeFileTool } from './writeFile.js';
 export { listFilesTool } from './listFiles.js';
 export { editFileTool } from './editFile.js';
 export { grepSearchTool } from './grepSearch.js';
+export * from './askUser.js';
 
 export class ToolRegistry {
   private tools: Map<string, ToolDefinition> = new Map();
@@ -93,7 +94,7 @@ export class ToolRegistry {
     }
 
     try {
-      return await tool.execute(parsedArgs, context);
+      return await tool.execute(parsedArgs, { ...context, toolNames: this.getAll().map((t) => t.name) });
     } catch (err: any) {
       return `Error executing tool "${name}": ${err.message}`;
     }

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`), D5 (session store; `npm run test:store`), D6 (command registry, `/compact`; `npm run test:commands`), D7 (change tracking and undo; `npm run test:changes`), D8 (PDF reading; `npm run test:documents`), D9 (DOCX and PPTX; `npm run test:office`). Next: D10 (`ask_user`). Phase 0 of the desktop app; the app itself will be backlog 003. |
+| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`), D5 (session store; `npm run test:store`), D6 (command registry, `/compact`; `npm run test:commands`), D7 (change tracking and undo; `npm run test:changes`), D8 (PDF reading; `npm run test:documents`), D9 (DOCX and PPTX; `npm run test:office`), D10 (`ask_user`; `npm run test:askuser`). Next: D11 (pipeline state). Phase 0 of the desktop app; the app itself will be backlog 003. |
 | **Depends on** | `src/core` as it is today (decoupled from `cli/`); subagents S1-S5 (done) |
 | **Design** | `alia Harness Desktop.pdf` (chat, changes panel, permission card, pipeline wizard, slash and `@` menus) |
 | **Primary consumer** | The standalone Electron app (backlog 003), plus the CLI, which must keep working unchanged |
@@ -364,20 +364,44 @@ ask_user({ questions: [{
   id: string,
   kind: 'choice' | 'text' | 'confirm',
   prompt: string,
-  options?: [{ id, label, detail?, source? }],   // source: "BRD_v2.pdf · p. 14"
+  options?: [{ id, label, detail?, source? }],   // choice only, at least two; source: "BRD_v2.pdf · p. 14"
+  allowOther?: boolean,                           // choice: also accept an answer that is not an option
   allowDefer?: boolean,                           // "Adiar: registrar como suposição"
   confidence?: 'low' | 'medium' | 'high',
 }] })
-// -> JSON: [{ id, answer?, deferred?, owner? }]
+// -> { "answers": [{ id, answer, label? } | { id, deferred: true, owner }],
+//      "unanswered"?: [ids], "note"?: "..." }
 ```
 
-- Session option `onAskUser` renders the questions (desktop: gate cards; CLI: a simple readline
-  prompt). With no handler, the tool returns an `Error:` that tells the model to ask in plain text,
-  so every other host keeps today's behavior.
-- The tool is withheld from subagents (`without`), since they cannot ask.
-- `HARNESS_NOTES` stops saying there is no AskUserQuestion: it maps `AskUserQuestion` to `ask_user`
-  when the tool is registered. The pipeline skill already lists `AskUserQuestion`, so it needs no edit.
-- A deferred answer must carry an owner. The pipeline records it as an assumption (D11).
+As built in D10:
+
+- `createSession({ onAskUser })`: the handler receives `{ questions, toolCallId, signal }` and returns `UserAnswer[]`
+  (`{ id, answer?, deferred?, owner? }`). **The tool exists only when a handler is given**, so a host without one never
+  offers it and skills fall back to asking in plain text. A hand-built registry with no handler gets an error that tells
+  the model to ask in plain text and never invent answers.
+- **The model's questions are validated** (1 to 10; unique ids; a choice needs two or more options with ids and labels;
+  options only on choices), and an invalid set is an error for the model **without ever bothering the user**.
+- **The front-end's answers are validated too**: a choice answer must be one of the options (or free text if `allowOther`), a confirm
+  must be a boolean, text must not be blank, deferral needs `allowDefer`, unknown ids are refused. A mistake in a front-end becomes a
+  visible error, not a silently wrong answer.
+- **Partial answers are normal** (the design's "Responder depois"): questions left out come back in `unanswered`, with a note
+  telling the model to stop at that gate and say what is waiting. A deferral without an owner is passed on with `owner: null` and a note to
+  ask who owns the assumption before recording it (the pipeline skill records deferrals as assumptions with an owner).
+- A choice answer carries its option `label`, so the model does not have to map ids back.
+- **Cancelling closes the questions**: the run does not wait on them, and the front-end gets the `signal` so it can dismiss its cards.
+- **Subagents never get it** (`without`): a child that calls it gets an error that says to decide or stop at the gate (`STATUS: blocked`).
+- **The skill notes follow the real tools.** `HARNESS_NOTES` is now generated from the tools that exist for whoever will follow
+  the skill: with `ask_user`, `AskUserQuestion` maps onto it (with the "stop on unanswered" rule); with `run_subagent`, `Task` maps onto it;
+  otherwise it says plainly that neither exists. This also fixes a stale line that told the model there was no subagent tool.
+  Because a subagent has fewer tools than its parent, `ToolContext.toolNames` tells each tool which tools its caller has, so a skill
+  pre-loaded into a child, or loaded by the child through `use_skill`, is described correctly (no `ask_user`, no `run_subagent`).
+  The pipeline skill already lists `AskUserQuestion`, so it needed no edit.
+- **Terminal:** `cliAskUser` asks the questions one at a time (a number or option name; `y/n`; text; `d` to defer, then the owner;
+  Enter skips). It reads lines through a queue because `readline`'s `question()` drops lines that arrive while no question is pending,
+  which is what piped input does; input that ends early leaves the rest open instead of hanging; three invalid tries leave a question open.
+  The CLI now offers `ask_user`, so `/requirements-to-tasks-pipeline` asks its gate questions as structured questions in the terminal.
+- Not done: an event for "questions asked / answered" (the tool call and its JSON result already appear in the stream, and a front-end
+  receives the questions directly through the handler).
 
 ### 5.10 Pipeline state (D11, D12)
 
@@ -430,7 +454,7 @@ Points are Fibonacci, capped at 8, matching `spec-to-tasks`.
 | D7 | **Done.** `ChangeTracker`: record, diff, revert, keep | 5 | `edit_file` and `write_file` record before/after; `diff` returns a unified diff; `revert` restores or deletes; revert skips a file modified after the agent's change and reports it; `keep` clears the list. |
 | D8 | **Done.** `readDocument` for PDF with page markers; integrate into `read_file` and `@` mentions | 5 | A sample multi-page PDF reads with `[p. N]` markers; `pages` argument works; a scanned PDF returns the no-text-layer message; audio/video return the transcript message; `@file.pdf` attaches text. |
 | D9 | **Done.** `readDocument` for DOCX and PPTX (slides and speaker notes) | 3 | Sample DOCX keeps headings and tables as readable text; PPTX output has `[slide N]` markers and includes notes; both work through `read_file` and `@`. |
-| D10 | `ask_user` tool, `onAskUser` handler, HARNESS_NOTES mapping | 5 | With a handler, questions round-trip as structured answers (including a deferral with owner); without one the tool errors with the plain-text fallback instruction; it is absent in subagents; the CLI implements a basic handler. |
+| D10 | **Done.** `ask_user` tool, `onAskUser` handler, HARNESS_NOTES mapping | 5 | With a handler, questions round-trip as structured answers (including a deferral with owner); without one the tool errors with the plain-text fallback instruction; it is absent in subagents; the CLI implements a basic handler. |
 | D11 | `pipeline_state` tool, `state.json` schema, `STATE.md` rendering, derived task stats | 5 | Updates validate against the schema and re-render `STATE.md`; stats (tasks, points, per spec) match a golden `spec-to-tasks` sample; the pipeline skill carries the one-line instruction and still works without the tool. |
 | D12 | Pipeline status and resume, with stale-input detection | 3 | Given a state file stopped at Gate 1 (3 of 5 answered), `getPipelineStatus` reports that, and a resumed session continues from the open questions. A modified input file is flagged `stale`. |
 | D13 | `detectIssuePublishing()` with the warning | 3 | Registry with an MCP issue tool resolves to `publish`; a ready `gh`/`glab` CLI resolves to `publish`; neither resolves to `drafts` with the warning text; verified with a fake registry and a stubbed CLI probe. |
