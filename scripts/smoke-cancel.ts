@@ -73,9 +73,14 @@ function abortAfter(ms: number) {
   return { controller, sinceAbort: () => Date.now() - abortedAt };
 }
 
-// A long-running process that records its pid, so we can prove it really died.
+// A long-running process that proves it is alive by touching a heartbeat file every 100 ms.
+// "Dead" means the heartbeat stopped. (Checking the pid instead is unreliable: Windows reuses pids
+// quickly, so a dead process's number can belong to something else a moment later.)
 const hangScript = path.join(tmp, 'hang.js');
-fs.writeFileSync(hangScript, `require('fs').writeFileSync(process.argv[2], String(process.pid)); setInterval(() => {}, 1000);`);
+fs.writeFileSync(
+  hangScript,
+  "const fs = require('fs'); const hb = process.argv[2] + '.hb'; fs.writeFileSync(process.argv[2], String(process.pid)); setInterval(() => fs.writeFileSync(hb, String(Date.now())), 100);"
+);
 async function readPid(file: string): Promise<number> {
   for (let i = 0; i < 100; i++) {
     if (fs.existsSync(file) && fs.readFileSync(file, 'utf8').trim()) return Number(fs.readFileSync(file, 'utf8'));
@@ -83,21 +88,22 @@ async function readPid(file: string): Promise<number> {
   }
   throw new Error(`pid file ${file} never appeared`);
 }
-const isAlive = (pid: number) => {
+const STALE_MS = 700;
+const heartbeatAge = (pidFile: string): number => {
   try {
-    process.kill(pid, 0);
-    return true;
+    return Date.now() - Number(fs.readFileSync(`${pidFile}.hb`, 'utf8'));
   } catch {
-    return false;
+    return Infinity;
   }
 };
-async function diesWithin(pid: number, ms: number): Promise<boolean> {
+const isRunning = (pidFile: string) => heartbeatAge(pidFile) < STALE_MS;
+async function diesWithin(pidFile: string, ms: number): Promise<boolean> {
   const end = Date.now() + ms;
   while (Date.now() < end) {
-    if (!isAlive(pid)) return true;
+    if (!isRunning(pidFile)) return true;
     await sleep(50);
   }
-  return !isAlive(pid);
+  return !isRunning(pidFile);
 }
 const hangCommand = (pidFile: string) => `node "${hangScript.replace(/\\/g, '/')}" "${pidFile.replace(/\\/g, '/')}"`;
 
@@ -154,14 +160,15 @@ console.log('\n=== cancel in the middle of run_bash: the whole process tree dies
   const controller = new AbortController();
   const running = agent.runDetailed('start the server', { signal: controller.signal });
   const pid = await readPid(pidFile);
-  check('the command is really running', isAlive(pid));
+  await sleep(250); // let the first heartbeats land
+  check('the command is really running', isRunning(pidFile));
   const abortedAt = Date.now();
   controller.abort();
   const r = await running;
   const took = Date.now() - abortedAt;
 
   check('run ends cancelled within a second', r.status === 'cancelled' && took < 1000, `${r.status} ${took}ms`);
-  check('the process is dead (grandchild of the shell, not just the shell)', await diesWithin(pid, 3000), `pid ${pid} still alive`);
+  check('the process is dead (grandchild of the shell, not just the shell)', await diesWithin(pidFile, 4000), `pid ${pid} still beating`);
 
   const finished = events.filter((e) => e.type === 'tool_call_finished') as any[];
   check('the interrupted call is reported as a failed tool call', finished.length === 1 && finished[0].id === 'call_hang' && finished[0].isError === true && finished[0].result.startsWith(CANCELLED_OUTPUT_PREFIX), JSON.stringify(finished));
@@ -261,14 +268,15 @@ console.log('\n=== a subagent is cancelled with its parent ===');
   });
   const controller = new AbortController();
   const running = session.run('delegate', { signal: controller.signal });
-  const pid = await readPid(pidFile);
+  await readPid(pidFile);
+  await sleep(250);
   const abortedAt = Date.now();
   controller.abort();
   const r = await running;
   const took = Date.now() - abortedAt;
 
   check('parent run is cancelled within a second', r.status === 'cancelled' && took < 1000, `${r.status} ${took}ms`);
-  check("the child's process is dead", await diesWithin(pid, 3000));
+  check("the child's process is dead", await diesWithin(pidFile, 4000));
   const fin = events.find((e) => e.type === 'subagent_finished') as any;
   check('subagent_finished reports cancelled', fin?.status === 'cancelled', JSON.stringify(fin));
   check('no model call happened after the cancel', model.callCount === 2, `calls=${model.callCount}`);

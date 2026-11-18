@@ -111,8 +111,8 @@ async function main() {
    * Turns `/skill-name <input>` into the prompt for the agent loop, or returns null when
    * the command is not a skill (errors for known-but-unavailable skills are printed).
    */
-  const resolveSkillCommand = (cmd: string, input: string): string | null => {
-    const resolved = session.resolveSkill(cmd, input);
+  const resolveSkillCommand = async (cmd: string, input: string): Promise<string | null> => {
+    const resolved = await session.resolveSkill(cmd, input);
     if (resolved.status === 'not_a_skill') return null;
     if (resolved.status === 'unavailable') {
       TerminalUI.printError(resolved.message);
@@ -131,7 +131,7 @@ async function main() {
 
     if (cliArgs.prompt.startsWith('/')) {
       const cmd = cliArgs.prompt.trim().split(/\s+/)[0];
-      const skillPrompt = resolveSkillCommand(cmd, cliArgs.prompt.trim().slice(cmd.length));
+      const skillPrompt = await resolveSkillCommand(cmd, cliArgs.prompt.trim().slice(cmd.length));
       if (skillPrompt === '') process.exit(1);
       if (skillPrompt !== null) {
         await session.run(skillPrompt);
@@ -139,7 +139,7 @@ async function main() {
       }
     }
 
-    const { prompt, attachments, errors } = session.prepareInput(cliArgs.prompt);
+    const { prompt, attachments, errors } = await session.prepareInput(cliArgs.prompt);
     TerminalUI.printAttachedFiles(attachments);
     for (const err of errors) console.log(pc.yellow(`⚠️  ${err}`));
     await session.run(prompt);
@@ -270,7 +270,7 @@ async function main() {
 
           default: {
             // `/skill-name [input]` runs a skill directly
-            const skillPrompt = resolveSkillCommand(cmd, trimmed.slice(cmd.length));
+            const skillPrompt = await resolveSkillCommand(cmd, trimmed.slice(cmd.length));
             if (skillPrompt === null) {
               TerminalUI.printError(`Unknown command "${cmd}". Type /help for assistance.`);
               continue;
@@ -289,7 +289,7 @@ async function main() {
       // Execute prompt in the agent loop
       try {
         // Resolve @file mentions into attached context, then run the agent loop
-        const { prompt: enrichedPrompt, attachments, errors } = session.prepareInput(trimmed);
+        const { prompt: enrichedPrompt, attachments, errors } = await session.prepareInput(trimmed);
         TerminalUI.printAttachedFiles(attachments);
         for (const err of errors) console.log(pc.yellow(`⚠️  ${err}`));
         await session.run(enrichedPrompt);

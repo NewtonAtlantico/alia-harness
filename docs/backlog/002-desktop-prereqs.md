@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`), D5 (session store; `npm run test:store`), D6 (command registry, `/compact`; `npm run test:commands`), D7 (change tracking and undo; `npm run test:changes`). Next: D8 (PDF reading). Phase 0 of the desktop app; the app itself will be backlog 003. |
+| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`), D5 (session store; `npm run test:store`), D6 (command registry, `/compact`; `npm run test:commands`), D7 (change tracking and undo; `npm run test:changes`), D8 (PDF reading; `npm run test:documents`). Next: D9 (DOCX and PPTX). Phase 0 of the desktop app; the app itself will be backlog 003. |
 | **Depends on** | `src/core` as it is today (decoupled from `cli/`); subagents S1-S5 (done) |
 | **Design** | `alia Harness Desktop.pdf` (chat, changes panel, permission card, pipeline wizard, slash and `@` menus) |
 | **Primary consumer** | The standalone Electron app (backlog 003), plus the CLI, which must keep working unchanged |
@@ -315,18 +315,32 @@ Known limitations:
 
 ### 5.8 Document readers (D8, D9)
 
-- `readDocument(path, { pages? })` returns text for `.pdf`, `.docx`, `.pptx` using pure-JS libraries
-  (no native binaries, so Electron packaging stays simple). Chosen at implementation time with a spike
-  comparing `unpdf`/`pdfjs-dist` for PDF and `mammoth` for DOCX; PPTX is read from the zip's slide XML.
-- Output keeps provenance the pipeline needs: `[p. 14]` page markers for PDF, `[slide 7]` for PPTX
-  including **speaker notes** (the stage 1 skills care about notes-only decks).
-- A PDF with no text layer returns a clear message ("scanned document: no text layer, OCR is not
-  available") instead of empty text, so the skill carries it into the open questions.
-- Audio and video extensions return "recordings cannot be read, send a transcript", matching the
-  design's input row.
-- `read_file` and `resolveFileMentions` both go through it. `BINARY_EXTENSIONS` keeps rejecting what
-  is truly binary. Output still passes `truncateToolOutput`; `read_file` gains a `pages` argument so
-  a long BRD can be read in chunks.
+- `readDocument(path, { pages?, maxChars?, maxLines? })` returns `{ ok: true, text, totalPages, pagesShown, nextPage?, warnings }`
+  or `{ ok: false, error }`; it never throws. Pure JavaScript (no native binaries), so Electron packaging stays simple.
+- **PDF (D8, done):** read with `unpdf` (pdf.js), chosen after a spike on real PDFs: correct Portuguese accents, about
+  half a second for an 8-page, 5.5 MB file. Pages are extracted one at a time, so reading a chunk of a long BRD does
+  not parse the whole file.
+- **Provenance:** each page starts with `[p. N]` (the real page number, also when a range is selected), so a requirement
+  can cite where it came from. PPTX will use `[slide N]` with speaker notes (D9).
+- **Chunks, never a silent cut:** a long document is returned page by page up to a budget (characters and lines), and the
+  result says where to continue. `read_file` sizes the budget to the tool-output limits (16,000 characters / 250 lines by
+  default), so the generic head-and-tail truncation, which would drop the middle of a document without saying so, never
+  applies. The result ends with an exact instruction, for example `[Showing pages 1-4 of 8. Continue with pages: "5-8".]`;
+  following it reads every page exactly once. A single page over the budget is cut and says so.
+- `read_file` gained `pages` (`"3"`, `"3-5"`, `"1,4-6"`, `"7-"`, or a number).
+- **Scanned PDFs are refused, not guessed:** no text layer on any page returns an error that says so and that OCR is not
+  available (an error result, so the model and the UI see a failure). A mixed document is read, with `(no text)` for the
+  empty pages and a warning listing them, so the pipeline skills can carry the gap into their open questions.
+- **Recordings** (audio and video extensions) return "send a transcript (text) instead", from both `read_file` and `@`
+  mentions, instead of the generic "binary file" message. A corrupt, empty, password-protected or oversized (over 60 MB)
+  file is a clear error.
+- **`@` mentions:** a new `resolveFileMentionsAsync` attaches a PDF as `<document ... type="pdf" pages="N" shown="1-30">`
+  (up to the 100,000-character per-file limit, cut at a page boundary, with the pages left out named so they can be read
+  with `read_file`). `session.prepareInput`, `session.resolveSkill` and a subagent's `inputs` use it, so they are now
+  asynchronous. The synchronous `resolveFileMentions` is unchanged and still treats a PDF as a binary file.
+- **Paths with spaces** (real documents have them) can now be mentioned with quotes: `@"Proposta Técnica 2026.pdf"`.
+  Unquoted mentions behave as before (they end at the first space). A subagent's `inputs` quotes such paths
+  automatically, so the desktop wizard can hand it any file name.
 
 ### 5.9 `ask_user` and gate questions (D10)
 
@@ -399,7 +413,7 @@ Points are Fibonacci, capped at 8, matching `spec-to-tasks`.
 | D5 | **Done.** Session store (JSONL), resume, list, search, rename | 5 | A run is persisted and `resume` reproduces the same `messages`. `list` filters by workspace; `search` finds text in titles and messages. A corrupted last line is skipped, not fatal. Nothing is written inside the workspace. |
 | D6 | **Done.** `CommandRegistry`, `/compact`, `getContextUsage()` | 3 | CLI prompt and a test consumer read the same command list (built-ins plus skills). `/compact` shrinks a long history, keeps system prompt, pinned skills and recent turns, and the run continues correctly afterwards. |
 | D7 | **Done.** `ChangeTracker`: record, diff, revert, keep | 5 | `edit_file` and `write_file` record before/after; `diff` returns a unified diff; `revert` restores or deletes; revert skips a file modified after the agent's change and reports it; `keep` clears the list. |
-| D8 | `readDocument` for PDF with page markers; integrate into `read_file` and `@` mentions | 5 | A sample multi-page PDF reads with `[p. N]` markers; `pages` argument works; a scanned PDF returns the no-text-layer message; audio/video return the transcript message; `@file.pdf` attaches text. |
+| D8 | **Done.** `readDocument` for PDF with page markers; integrate into `read_file` and `@` mentions | 5 | A sample multi-page PDF reads with `[p. N]` markers; `pages` argument works; a scanned PDF returns the no-text-layer message; audio/video return the transcript message; `@file.pdf` attaches text. |
 | D9 | `readDocument` for DOCX and PPTX (slides and speaker notes) | 3 | Sample DOCX keeps headings and tables as readable text; PPTX output has `[slide N]` markers and includes notes; both work through `read_file` and `@`. |
 | D10 | `ask_user` tool, `onAskUser` handler, HARNESS_NOTES mapping | 5 | With a handler, questions round-trip as structured answers (including a deferral with owner); without one the tool errors with the plain-text fallback instruction; it is absent in subagents; the CLI implements a basic handler. |
 | D11 | `pipeline_state` tool, `state.json` schema, `STATE.md` rendering, derived task stats | 5 | Updates validate against the schema and re-render `STATE.md`; stats (tasks, points, per spec) match a golden `spec-to-tasks` sample; the pipeline skill carries the one-line instruction and still works without the tool. |

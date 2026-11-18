@@ -2,17 +2,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ToolDefinition } from './types.js';
 import { detectBinaryFile } from './fileUtils.js';
+import { describePages, documentKind, readDocument } from '../documents/readDocument.js';
 
 interface ReadFileArgs {
   path: string;
   start_line?: number;
   line_count?: number;
+  pages?: string | number;
 }
 
 export const readFileTool: ToolDefinition<ReadFileArgs> = {
   name: 'read_file',
   description:
-    'Reads text content from a given file path. Can optionally read a specific line range. Binary files are rejected (detected by extension or NUL bytes).',
+    'Reads text content from a given file path. Can optionally read a specific line range. Also reads PDF documents as text, with [p. N] page markers: a long document is returned in chunks, so use "pages" (e.g. "7-12") to continue where the previous result stopped. Audio/video and scanned PDFs cannot be read. Other binary files are rejected (detected by extension or NUL bytes).',
   parameters: {
     type: 'object',
     properties: {
@@ -27,6 +29,10 @@ export const readFileTool: ToolDefinition<ReadFileArgs> = {
       line_count: {
         type: 'integer',
         description: 'Optional number of lines to read starting from start_line.',
+      },
+      pages: {
+        type: 'string',
+        description: 'For PDF documents: which pages to read, e.g. "3", "3-5", "1,4-6" or "7-". Default: from the start.',
       },
     },
     required: ['path'],
@@ -48,6 +54,30 @@ export const readFileTool: ToolDefinition<ReadFileArgs> = {
       const stat = fs.statSync(resolvedPath);
       if (stat.isDirectory()) {
         return `Error: Path "${args.path}" is a directory, not a file. Use list_files or run_bash to inspect directory contents.`;
+      }
+
+      // PDFs (and recordings, which get a clear "send a transcript" error) are documents, not text files.
+      if (documentKind(resolvedPath)) {
+        const limits = context.contextManager.getLimits();
+        // Sized to what one tool result may hold, so the middle of a document is never silently dropped.
+        const doc = await readDocument(resolvedPath, {
+          pages: args.pages,
+          maxChars: limits.maxToolOutputChars - 700,
+          maxLines: limits.maxToolOutputLines - 8,
+        });
+        if (!doc.ok) return `Error: ${doc.error}`;
+
+        const notes = doc.warnings.map((w) => `[Note: ${w}]`);
+        if (doc.nextPage !== undefined) {
+          const span = Math.max(1, doc.pagesShown.length);
+          const last = Math.min(doc.totalPages, doc.nextPage + span - 1);
+          notes.push(
+            `[Showing pages ${describePages(doc.pagesShown)} of ${doc.totalPages}. Continue with pages: "${doc.nextPage}-${last}".]`
+          );
+        } else if (doc.pagesShown.length < doc.totalPages) {
+          notes.push(`[Showing pages ${describePages(doc.pagesShown)} of ${doc.totalPages}.]`);
+        }
+        return [`--- Document: ${args.path} (PDF, ${doc.totalPages} page${doc.totalPages === 1 ? '' : 's'}) ---`, doc.text, ...notes].join('\n');
       }
 
       // Reject binary files instead of dumping unreadable garbage into the context window.

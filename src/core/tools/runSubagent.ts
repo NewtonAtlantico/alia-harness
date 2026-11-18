@@ -9,7 +9,7 @@ import { ContextManager } from '../context/contextManager.js';
 import { AliaModelConfig } from '../config.js';
 import { AgentEvent } from '../agent/events.js';
 import { SkillRegistry, buildSkillInvocationPrompt } from '../skills/skillLoader.js';
-import { resolveFileMentions } from '../context/fileMentions.js';
+import { resolveFileMentionsAsync } from '../context/fileMentions.js';
 import {
   SubagentReport,
   formatSubagentReport,
@@ -116,8 +116,9 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
           return 'Error: Parameter "inputs" must be an array of file or directory paths.';
         }
         if (args.inputs.length > 0) {
-          const resolved = resolveFileMentions(
-            `Input files: ${args.inputs.map((p) => `@${p.trim()}`).join(' ')}`,
+          const resolved = await resolveFileMentionsAsync(
+            // A path with spaces must be quoted to stay one mention.
+            `Input files: ${args.inputs.map((p) => (/\s/.test(p.trim()) ? `@"${p.trim()}"` : `@${p.trim()}`)).join(' ')}`,
             ctx.workingDirectory
           );
           if (resolved.errors.length > 0) {

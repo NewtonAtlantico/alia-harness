@@ -222,15 +222,15 @@ console.log('\n=== skills through the session ===');
 
   const { session, model } = makeSession(ws, [{ content: 'hello' }], { skillRoots: [{ label: 'test', dir: skillsDir }] });
 
-  const ready = session.resolveSkill('/alpha', 'summarize @notes.txt');
+  const ready = await session.resolveSkill('/alpha', 'summarize @notes.txt');
   check('known skill -> ready', ready.status === 'ready');
   if (ready.status === 'ready') {
     check('prompt carries the skill body and the user input', ready.prompt.includes('BODY-OF-alpha') && ready.prompt.includes('summarize'));
     check('@mentions resolve against the session workspace', ready.attachments.length === 1 && ready.prompt.includes('attached contents'), JSON.stringify(ready.errors));
   }
-  const gated = session.resolveSkill('gated', '');
+  const gated = await session.resolveSkill('gated', '');
   check('requires: unmet -> unavailable with a message', gated.status === 'unavailable' && gated.message.includes('tool_that_does_not_exist'));
-  check('unknown command -> not_a_skill', session.resolveSkill('/nope', '').status === 'not_a_skill');
+  check('unknown command -> not_a_skill', (await session.resolveSkill('/nope', '')).status === 'not_a_skill');
 
   await session.run('hi');
   const advertised = model.requests[0].toolNames;

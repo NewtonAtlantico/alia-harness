@@ -18,7 +18,7 @@ import { CommandRegistry } from './commands/commandRegistry.js';
 import { ChangeTracker } from './changes/changeTracker.js';
 import { compactHistory } from './context/compactor.js';
 import { ContextManager } from './context/contextManager.js';
-import { AttachedFile, resolveFileMentions } from './context/fileMentions.js';
+import { AttachedFile, resolveFileMentionsAsync } from './context/fileMentions.js';
 import { AgentResult, AliaAgent, DEFAULT_SYSTEM_PROMPT, RunOptions } from './agent/agentLoop.js';
 import { randomUUID } from 'node:crypto';
 import { AgentUI } from './agent/agentUI.js';
@@ -331,15 +331,15 @@ export class AliaSession {
   }
 
   /** Expands `@path` mentions in user text into attached file contents. */
-  prepareInput(text: string): PreparedInput {
-    return resolveFileMentions(text, this.workspace);
+  prepareInput(text: string): Promise<PreparedInput> {
+    return resolveFileMentionsAsync(text, this.workspace);
   }
 
   /**
    * Turns `/skill-name <input>` into the prompt for `run()`. `not_a_skill` means the host
    * should treat the command as its own (or unknown).
    */
-  resolveSkill(command: string, input: string): SkillResolution {
+  async resolveSkill(command: string, input: string): Promise<SkillResolution> {
     const skill = this.skills.get(command);
     if (!skill) return { status: 'not_a_skill' };
     const missing = this.skills.missingRequirements(skill);
@@ -351,7 +351,7 @@ export class AliaSession {
         message: `Skill "${skill.name}" is unavailable: it requires ${missing.join(', ')} (no matching tool is registered in this harness).`,
       };
     }
-    const { prompt, attachments, errors } = this.prepareInput(input);
+    const { prompt, attachments, errors } = await this.prepareInput(input);
     return {
       status: 'ready',
       skill,

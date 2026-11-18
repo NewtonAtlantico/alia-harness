@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { detectBinaryFile } from '../tools/fileUtils.js';
+import { DocumentResult, describePages, documentKind, readDocument } from '../documents/readDocument.js';
 
 export interface AttachedFile {
   /** The mention as typed by the user (e.g. `@src/index.ts`). */
@@ -45,7 +46,20 @@ const LANGUAGE_BY_EXT: Record<string, string> = {
  * (start of string or preceded by whitespace) so emails like `user@host`
  * are not mistaken for file mentions.
  */
-const MENTION_REGEX = /(?<!\S)@([^\s@]+)/g;
+const MENTION_REGEX = /(?<!\S)@(?:"([^"\r\n]+)"|([^\s@]+))/g;
+
+/**
+ * The path a mention refers to. `@"my file.pdf"` (quoted) may contain spaces and is taken as written;
+ * a plain `@path` has its trailing punctuation stripped (see {@link cleanMention}).
+ */
+function mentionPath(match: RegExpExecArray): string {
+  if (match[1] !== undefined) {
+    let quoted = match[1].trim();
+    while (quoted.startsWith('./')) quoted = quoted.slice(2);
+    return quoted;
+  }
+  return cleanMention(match[2]);
+}
 
 /** Quick check used to skip resolution work entirely when no mentions exist. */
 export function hasFileMentions(input: string): boolean {
@@ -58,7 +72,12 @@ export function hasFileMentions(input: string): boolean {
  * listing for directories). The original text is preserved verbatim so the
  * model can see which files the user explicitly referenced.
  */
-export function resolveFileMentions(input: string, cwd: string): MentionResolution {
+export function resolveFileMentions(
+  input: string,
+  cwd: string,
+  /** Pre-read documents by lower-cased absolute path (see {@link resolveFileMentionsAsync}). */
+  documents?: Map<string, DocumentResult>
+): MentionResolution {
   const attachments: AttachedFile[] = [];
   const errors: string[] = [];
   const blocks: string[] = [];
@@ -68,8 +87,7 @@ export function resolveFileMentions(input: string, cwd: string): MentionResoluti
   MENTION_REGEX.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = MENTION_REGEX.exec(input)) !== null) {
-    const raw = match[1];
-    const cleaned = cleanMention(raw);
+    const cleaned = mentionPath(match);
     if (!cleaned) continue;
 
     const abs = path.isAbsolute(cleaned) ? path.normalize(cleaned) : path.resolve(cwd, cleaned);
@@ -111,6 +129,33 @@ export function resolveFileMentions(input: string, cwd: string): MentionResoluti
           truncated: omitted > 0,
           isDir: true,
         });
+      } else if (documents?.has(abs.toLowerCase())) {
+        // A document (PDF) that was read ahead of time.
+        const doc = documents.get(abs.toLowerCase())!;
+        if (!doc.ok) {
+          errors.push(`@${cleaned}: ${doc.error}`);
+          continue;
+        }
+        const truncated = doc.nextPage !== undefined;
+        const notes = [...doc.warnings.map((w) => `[Note: ${w}]`)];
+        if (truncated) {
+          notes.push(
+            `[Pages ${doc.nextPage}-${doc.totalPages} are not attached (attachment size limit). Read them with read_file, pages "${doc.nextPage}-${doc.totalPages}".]`
+          );
+        }
+        const content = [doc.text, ...notes].join('\n');
+        if (content.length > budget) {
+          errors.push(
+            `@${cleaned}: skipped — total attachment size would exceed the ${MAX_TOTAL_CHARS} character context budget`
+          );
+          continue;
+        }
+        budget -= content.length;
+        const lines = content.split('\n').length;
+        blocks.push(
+          `<document path="${displayPath}" type="pdf" pages="${doc.totalPages}" shown="${describePages(doc.pagesShown)}">\n${content}\n</document>`
+        );
+        attachments.push({ mention: `@${cleaned}`, displayPath, lines, chars: content.length, truncated, isDir: false });
       } else {
         const binaryCheck = detectBinaryFile(abs);
         if (binaryCheck.binary) {
@@ -171,6 +216,34 @@ ${blocks.join('\n\n')}
 </file_attachments>`;
 
   return { prompt, attachments, errors };
+}
+
+/**
+ * Like {@link resolveFileMentions}, but also attaches PDF documents as text (with `[p. N]` markers)
+ * and gives a clear message for recordings and scanned PDFs. Reading a document is asynchronous,
+ * hence the separate function; the synchronous one still treats a document as a binary file.
+ */
+export async function resolveFileMentionsAsync(input: string, cwd: string): Promise<MentionResolution> {
+  const documents = new Map<string, DocumentResult>();
+  MENTION_REGEX.lastIndex = 0;
+  const targets: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = MENTION_REGEX.exec(input)) !== null) {
+    const cleaned = mentionPath(match);
+    if (!cleaned) continue;
+    targets.push(path.isAbsolute(cleaned) ? path.normalize(cleaned) : path.resolve(cwd, cleaned));
+  }
+  for (const abs of targets) {
+    const key = abs.toLowerCase();
+    if (documents.has(key) || !documentKind(abs)) continue;
+    try {
+      if (!fs.statSync(abs).isFile()) continue;
+    } catch {
+      continue; // not found: the resolver reports it
+    }
+    documents.set(key, await readDocument(abs, { maxChars: MAX_FILE_CHARS }));
+  }
+  return resolveFileMentions(input, cwd, documents);
 }
 
 /** Strips surrounding quotes/brackets and trailing punctuation from a mention. */

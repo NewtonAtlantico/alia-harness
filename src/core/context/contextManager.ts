@@ -36,6 +36,11 @@ export class ContextManager {
     this.limits = { ...this.limits, maxInputTokens };
   }
 
+  /** A copy of the current limits (e.g. to size a document read to what a tool result may hold). */
+  getLimits(): ContextLimits {
+    return { ...this.limits };
+  }
+
   getMaxInputTokens(): number {
     return this.limits.maxInputTokens;
   }
