@@ -7,6 +7,7 @@ export * from './safety/safetyChecker.js';
 export * from './safety/permissionStore.js';
 export * from './sessions/sessionStore.js';
 export * from './commands/commandRegistry.js';
+export * from './changes/changeTracker.js';
 export * from './context/compactor.js';
 export * from './context/contextManager.js';
 export * from './context/fileMentions.js';

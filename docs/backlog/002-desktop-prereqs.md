@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`), D5 (session store; `npm run test:store`), D6 (command registry, `/compact`; `npm run test:commands`). Next: D7 (change tracking). Phase 0 of the desktop app; the app itself will be backlog 003. |
+| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`), D5 (session store; `npm run test:store`), D6 (command registry, `/compact`; `npm run test:commands`), D7 (change tracking and undo; `npm run test:changes`). Next: D8 (PDF reading). Phase 0 of the desktop app; the app itself will be backlog 003. |
 | **Depends on** | `src/core` as it is today (decoupled from `cli/`); subagents S1-S5 (done) |
 | **Design** | `alia Harness Desktop.pdf` (chat, changes panel, permission card, pipeline wizard, slash and `@` menus) |
 | **Primary consumer** | The standalone Electron app (backlog 003), plus the CLI, which must keep working unchanged |
@@ -105,7 +105,7 @@ type AgentEvent = (
   | { type: 'thinking'; text: string }                                   // reasoning text
   | { type: 'assistant_message'; text: string; final: boolean }
   | { type: 'tool_call_started'; id: string; name: string; args: string }
-  | { type: 'tool_call_finished'; id: string; name: string; result: string; isError: boolean; durationMs: number }
+  | { type: 'tool_call_finished'; id: string; name: string; result: string; isError: boolean; durationMs: number; changes?: FileChangeSummary[] }
   | { type: 'permission_requested'; id: string; toolCallId?: string; command: string; reasons: string[]; dangerous: boolean; canAlwaysAllow: boolean; requester?: string }
   | { type: 'permission_resolved'; id: string; toolCallId?: string; decision: 'allow_once' | 'allow_always' | 'deny' | 'cancelled' }
   | { type: 'context_compacted' }
@@ -128,7 +128,7 @@ As built in D2:
   the design shows and the terminal never did. The adapter keeps hiding it, so CLI output is unchanged.
 - `permission_requested` is emitted by the session just before it calls `onConfirm`, and
   `permission_resolved` when it is answered or the run is cancelled with the card open (D4).
-- `changes?: FileChange[]` on `tool_call_finished` is added by D7.
+- `tool_call_finished.changes` (D7) lists the files that call wrote as `{ path, kind, added, removed }`, with no file content, so it stays small across IPC; fetch the diff from `session.changes`.
 - Observers are isolated: `combineSinks` catches a throwing sink so it can neither fail the run nor
   starve the others.
 - `ToolContext` gained `toolCallId` and `emit`; `SubagentDeps.ui` is gone, because a child now reports
@@ -282,19 +282,36 @@ Known limitations:
 
 ### 5.7 Change tracking and undo (D7)
 
-```ts
-interface FileChange { path: string; before: string | null; after: string | null; runId: string }
-```
+- `write_file` and `edit_file` report each write through `ToolContext.recordChange`. `session.changes` (a
+  `ChangeTracker`) keeps **one entry per file**: its content from before the agent first touched it, and as
+  it is now, so several edits show as one diff. Subagents record into the same tracker.
+- API: `list()` (order of first touch), `get(path)`, `diff(path)`, `revert(paths?)`, `keep(paths?)`, `size`.
+  Paths may be written relative, `./`-prefixed, absolute, or (on Windows) in any case.
+- `diff(path)` is a unified diff in `git diff` style (`--- a/x`, `+++ b/x`, `@@` hunks; `/dev/null` for a created
+  file; "No newline at end of file" handled). It is computed with the small `diff` package, and the tests apply
+  every generated patch with `git apply` to a copy of the original and require the result to equal what the
+  agent wrote.
+- `revert()` restores the old content byte for byte (CRLF included), or deletes a file the agent created along with
+  the folders the write had to create, **if they are empty** (a folder that already existed, or that now holds
+  someone else's file, stays). It returns `{ reverted, skipped }`.
+- **It never overwrites work done after the agent.** A file whose content on disk is no longer what the agent
+  wrote (edited or deleted since) is skipped as `modified` and stays pending. If someone else edits a file
+  *between* two agent writes, their version becomes the new baseline, so Undo restores it and never discards it.
+- `keep()` accepts changes (forgets them, files untouched); with paths, just those. Editing a file back to its
+  original, or re-writing identical content, leaves nothing to review.
+- **Not tracked, but shown:** a binary file, or one over 1,000,000 characters, is listed as `untracked`
+  (no content kept, so no diff or undo; `revert` reports it as skipped). Files outside the workspace are tracked
+  by absolute path.
+- Without a tracker, tool events still carry the `changes` summary.
+- Also fixed here: tool failures worded `Error writing file ...` (not `Error:`) are now reported as `isError`
+  (`isToolErrorResult`), so the UI marks them as failed.
 
-- `write_file` and `edit_file` call `context.changes?.record(...)` with the content before and after
-  writing. `ChangeTracker` keeps a per-session list; the finished tool event carries the change.
-- API: `list()`, `diff(path)` (unified diff computed in core; add the small `diff` package),
-  `revert(paths?)` (writes `before` back; deletes the file if it was created), `keep()` (clears the
-  pending list, so the "Desfazer / Manter alterações" bar goes away).
-- `revert` refuses a file whose content on disk no longer equals `after` (the user edited it
-  meanwhile) and reports it, instead of clobbering their work.
-- **Known limitation:** changes made by commands run with `run_bash` (formatters, `sed`, build output)
-  are not tracked. The Changes panel says so; a git-snapshot fallback can come later.
+Known limitations:
+
+- **`run_bash` writes are not tracked** (formatters, `sed`, build output, a file created with `>`). The Changes
+  panel should say so; a git-snapshot fallback could cover it later.
+- The tracker is **in memory**: pending changes do not survive restarting the app, so Undo is available for the
+  current session only.
 
 ### 5.8 Document readers (D8, D9)
 
@@ -381,7 +398,7 @@ Points are Fibonacci, capped at 8, matching `spec-to-tasks`.
 | D4 | **Done.** Permission model v2: decisions, modes, per-project allowlist | 5 | `allow_always` persists and applies on the next session; dangerous commands still prompt in `ask-dangerous` and `ask-commands`; `auto` skips prompts; legacy boolean handler still works; the permission event carries the tool-call id. |
 | D5 | **Done.** Session store (JSONL), resume, list, search, rename | 5 | A run is persisted and `resume` reproduces the same `messages`. `list` filters by workspace; `search` finds text in titles and messages. A corrupted last line is skipped, not fatal. Nothing is written inside the workspace. |
 | D6 | **Done.** `CommandRegistry`, `/compact`, `getContextUsage()` | 3 | CLI prompt and a test consumer read the same command list (built-ins plus skills). `/compact` shrinks a long history, keeps system prompt, pinned skills and recent turns, and the run continues correctly afterwards. |
-| D7 | `ChangeTracker`: record, diff, revert, keep | 5 | `edit_file` and `write_file` record before/after; `diff` returns a unified diff; `revert` restores or deletes; revert skips a file modified after the agent's change and reports it; `keep` clears the list. |
+| D7 | **Done.** `ChangeTracker`: record, diff, revert, keep | 5 | `edit_file` and `write_file` record before/after; `diff` returns a unified diff; `revert` restores or deletes; revert skips a file modified after the agent's change and reports it; `keep` clears the list. |
 | D8 | `readDocument` for PDF with page markers; integrate into `read_file` and `@` mentions | 5 | A sample multi-page PDF reads with `[p. N]` markers; `pages` argument works; a scanned PDF returns the no-text-layer message; audio/video return the transcript message; `@file.pdf` attaches text. |
 | D9 | `readDocument` for DOCX and PPTX (slides and speaker notes) | 3 | Sample DOCX keeps headings and tables as readable text; PPTX output has `[slide N]` markers and includes notes; both work through `read_file` and `@`. |
 | D10 | `ask_user` tool, `onAskUser` handler, HARNESS_NOTES mapping | 5 | With a handler, questions round-trip as structured answers (including a deferral with owner); without one the tool errors with the plain-text fallback instruction; it is absent in subagents; the CLI implements a basic handler. |

@@ -1,6 +1,7 @@
 import type { AgentResult } from './agentLoop.js';
 import type { AgentUI, ThinkingHandle } from './agentUI.js';
 import type { PermissionDecision } from '../safety/safetyChecker.js';
+import type { FileChangeSummary } from '../changes/changeTracker.js';
 
 /**
  * Everything a front-end needs to render a run, as plain serializable data.
@@ -24,7 +25,11 @@ export type AgentEventBody =
    */
   | { type: 'assistant_message'; text: string; final: boolean }
   | { type: 'tool_call_started'; id: string; name: string; args: string }
-  | { type: 'tool_call_finished'; id: string; name: string; result: string; isError: boolean; durationMs: number }
+  /**
+   * `changes` lists the files this call wrote (path, created/modified, lines added/removed; no content).
+   * Fetch the diff from the session's change tracker.
+   */
+  | { type: 'tool_call_finished'; id: string; name: string; result: string; isError: boolean; durationMs: number; changes?: FileChangeSummary[] }
   /**
    * A command is waiting for the user's decision. `toolCallId` is the tool call that wants to run it.
    * `canAlwaysAllow` is false for a dangerous command: offer "allow once" and "deny" only.

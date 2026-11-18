@@ -15,6 +15,7 @@ import { PermissionStore } from './safety/permissionStore.js';
 import { SessionRecorder, SessionStore, newSessionId } from './sessions/sessionStore.js';
 import { sameWorkspace } from './projectKey.js';
 import { CommandRegistry } from './commands/commandRegistry.js';
+import { ChangeTracker } from './changes/changeTracker.js';
 import { compactHistory } from './context/compactor.js';
 import { ContextManager } from './context/contextManager.js';
 import { AttachedFile, resolveFileMentions } from './context/fileMentions.js';
@@ -139,6 +140,11 @@ export class AliaSession {
   readonly permissions: PermissionStore;
   /** Id of the saved session; undefined when no `sessionStore` was given. */
   readonly id: string | undefined;
+  /**
+   * Files the agent has written (including through subagents) and not yet kept or undone: list them,
+   * show a diff, `revert()` (Undo) or `keep()`. In memory only: it does not survive a restart.
+   */
+  readonly changes: ChangeTracker;
   /** The slash commands to offer: built-ins, the front-end's own (`register`), and one per available skill. */
   readonly commands: CommandRegistry;
   private recorder?: SessionRecorder;
@@ -183,6 +189,7 @@ export class AliaSession {
     const ui = options.ui;
     const emit = combineSinks(ui ? eventsToAgentUI(ui) : undefined, options.onEvent);
     this.emit = emit;
+    this.changes = new ChangeTracker(this.workspace);
     this.commands = new CommandRegistry(() => this.skills);
     const onConfirm = options.onConfirm;
     this.permissions = options.permissionStore ?? new PermissionStore(this.workspace, { dir: options.permissionsDir });
@@ -235,6 +242,7 @@ export class AliaSession {
       maxSteps: options.maxSteps,
       onEvent: emit,
       onHistory: (messages) => this.recorder?.sync(messages),
+      changeTracker: this.changes,
     });
 
     if (options.sessionStore) {

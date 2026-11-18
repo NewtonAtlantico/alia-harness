@@ -25,12 +25,14 @@
     "test:cancel": "tsx scripts/smoke-cancel.ts",
     "test:permissions": "tsx scripts/smoke-permissions.ts",
     "test:store": "tsx scripts/smoke-store.ts",
-    "test:commands": "tsx scripts/smoke-commands.ts"
+    "test:commands": "tsx scripts/smoke-commands.ts",
+    "test:changes": "tsx scripts/smoke-changes.ts"
   },
   "keywords": ["ai", "agent", "alia", "llm", "cli", "harness"],
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "diff": "^9.0.0",
     "openai": "^7.54.0",
     "picocolors": "^1.1.1"
   },

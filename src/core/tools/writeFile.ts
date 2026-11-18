@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ToolDefinition } from './types.js';
+import { MAX_TRACKED_CHARS, missingDirs, readBeforeState } from '../changes/changeTracker.js';
 
 interface WriteFileArgs {
   path: string;
@@ -38,6 +39,11 @@ export const writeFileTool: ToolDefinition<WriteFileArgs> = {
         ? args.path
         : path.resolve(context.workingDirectory, args.path);
 
+      // For the Changes panel: what is there now, and which folders this write will create.
+      const tracking = context.recordChange
+        ? { before: readBeforeState(resolvedPath), createdDirs: missingDirs(resolvedPath) }
+        : undefined;
+
       const parentDir = path.dirname(resolvedPath);
       if (!fs.existsSync(parentDir)) {
         fs.mkdirSync(parentDir, { recursive: true });
@@ -45,6 +51,17 @@ export const writeFileTool: ToolDefinition<WriteFileArgs> = {
 
       const existed = fs.existsSync(resolvedPath);
       fs.writeFileSync(resolvedPath, args.content, 'utf-8');
+
+      if (tracking) {
+        const untracked = tracking.before.untracked ?? (args.content.length > MAX_TRACKED_CHARS ? 'too_large' : undefined);
+        context.recordChange!({
+          absPath: resolvedPath,
+          before: tracking.before.content,
+          after: untracked ? null : args.content,
+          createdDirs: tracking.createdDirs,
+          untracked,
+        });
+      }
 
       const byteSize = Buffer.byteLength(args.content, 'utf-8');
       const action = existed ? 'overwritten' : 'created';

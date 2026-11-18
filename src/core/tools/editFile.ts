@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ToolDefinition } from './types.js';
+import { MAX_TRACKED_CHARS } from '../changes/changeTracker.js';
 
 interface EditOperation {
   target: string;
@@ -161,7 +162,12 @@ export const editFileTool: ToolDefinition<EditFileArgs> = {
         }
       }
 
+      const original = fs.readFileSync(resolvedPath, 'utf-8');
       fs.writeFileSync(resolvedPath, content, 'utf-8');
+      if (context.recordChange) {
+        const untracked = original.length > MAX_TRACKED_CHARS || content.length > MAX_TRACKED_CHARS ? 'too_large' : undefined;
+        context.recordChange({ absPath: resolvedPath, before: untracked ? null : original, after: untracked ? null : content, untracked });
+      }
 
       if (operations.length === 1) {
         return `Successfully edited "${args.path}" — ${applied[0]}.`;

@@ -163,6 +163,7 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
         maxSteps,
         // Everything the child reports reaches the parent's observers, tagged with this child's id.
         onEvent: emit ? (e) => emit({ subagentId, ...e } as AgentEvent) : undefined,
+        changeTracker: ctx.changes,
       });
 
       const label = args.task.trim().split('\n')[0].slice(0, 100);

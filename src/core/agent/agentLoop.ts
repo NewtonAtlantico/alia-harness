@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
-import { ToolRegistry, ToolContext, CANCELLED_OUTPUT_PREFIX } from '../tools/index.js';
+import { ToolRegistry, ToolContext, CANCELLED_OUTPUT_PREFIX, isToolErrorResult } from '../tools/index.js';
 import { raceAbort } from '../abort.js';
+import { ChangeTracker, FileChangeSummary, RecordedChange } from '../changes/changeTracker.js';
 import { SafetyChecker } from '../safety/safetyChecker.js';
 import { ContextManager } from '../context/contextManager.js';
 import { randomUUID } from 'node:crypto';
@@ -26,6 +27,8 @@ export interface AgentOptions {
    * archived, history cleared or replaced), with the live array. Used to persist sessions; the
    * array must be treated as read-only.
    */
+  /** Where file writes are recorded for diff and undo. Shared with subagents. Without one, writes are only summarized in events. */
+  changeTracker?: ChangeTracker;
   onHistory?: (messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]) => void;
   /** Legacy observer: adapted from the event stream (see `eventsToAgentUI`). May be combined with `onEvent`. */
   ui?: AgentUI;
@@ -77,6 +80,7 @@ export class AliaAgent {
   private maxSteps: number;
   private emit: EventSink;
   private onHistory?: AgentOptions['onHistory'];
+  private changeTracker?: ChangeTracker;
   private messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
 
   constructor(options: AgentOptions) {
@@ -90,6 +94,7 @@ export class AliaAgent {
     this.systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     this.maxSteps = options.maxSteps || 30;
     this.onHistory = options.onHistory;
+    this.changeTracker = options.changeTracker;
     this.emit = combineSinks(options.ui ? eventsToAgentUI(options.ui) : undefined, options.onEvent);
 
     this.reset();
@@ -156,7 +161,7 @@ export class AliaAgent {
     this.emit({ type: 'run_started', runId });
     let result: AgentResult;
     try {
-      result = await this.runLoop(userPrompt, options.signal);
+      result = await this.runLoop(userPrompt, options.signal, runId);
     } catch (err: any) {
       // Unexpected exception: still close the run for observers, then let the caller see it.
       this.emit({ type: 'run_finished', runId, result: { status: 'failed', text: String(err?.message ?? err), steps: 0 } });
@@ -171,7 +176,7 @@ export class AliaAgent {
     return { status: 'cancelled', text: 'Run cancelled by user.', steps: step };
   }
 
-  private async runLoop(userPrompt: string, signal?: AbortSignal): Promise<AgentResult> {
+  private async runLoop(userPrompt: string, signal: AbortSignal | undefined, runId: string): Promise<AgentResult> {
     // 1. Append user prompt to message history
     this.pushMessage({
       role: 'user',
@@ -263,6 +268,8 @@ export class AliaAgent {
         safetyChecker: this.safetyChecker,
         contextManager: this.contextManager,
         signal,
+        runId,
+        changes: this.changeTracker,
         emit: this.emit,
       };
       const answered = new Set<string>();
@@ -277,12 +284,30 @@ export class AliaAgent {
 
         this.emit({ type: 'tool_call_started', id: toolCall.id, name: fnName, args: fnArgs });
 
+        // Files this call writes: kept by the tracker (if any) and summarized for the event.
+        const changes: FileChangeSummary[] = [];
+        const recordChange = (change: RecordedChange) => {
+          changes.push(
+            this.changeTracker
+              ? this.changeTracker.record({ ...change, runId, toolCallId: toolCall.id })
+              : new ChangeTracker(this.workingDirectory).summarize(change)
+          );
+        };
+
         const startTime = Date.now();
-        const result = await this.toolRegistry.execute(fnName, fnArgs, { ...baseContext, toolCallId: toolCall.id });
+        const result = await this.toolRegistry.execute(fnName, fnArgs, { ...baseContext, toolCallId: toolCall.id, recordChange });
         const durationMs = Date.now() - startTime;
 
-        const isError = result.startsWith('Error:') || result.startsWith(CANCELLED_OUTPUT_PREFIX);
-        this.emit({ type: 'tool_call_finished', id: toolCall.id, name: fnName, result, isError, durationMs });
+        const isError = isToolErrorResult(result) || result.startsWith(CANCELLED_OUTPUT_PREFIX);
+        this.emit({
+          type: 'tool_call_finished',
+          id: toolCall.id,
+          name: fnName,
+          result,
+          isError,
+          durationMs,
+          ...(changes.length > 0 ? { changes } : {}),
+        });
 
         // Feedback: Append tool result back into message history as a tool role message
         this.pushMessage({
