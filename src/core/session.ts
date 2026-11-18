@@ -9,7 +9,9 @@ import { SafetyChecker, SafetyConfirmationHandler } from './safety/safetyChecker
 import { ContextManager } from './context/contextManager.js';
 import { AttachedFile, resolveFileMentions } from './context/fileMentions.js';
 import { AgentResult, AliaAgent, DEFAULT_SYSTEM_PROMPT } from './agent/agentLoop.js';
+import { randomUUID } from 'node:crypto';
 import { AgentUI } from './agent/agentUI.js';
+import { EventSink, combineSinks, eventsToAgentUI } from './agent/events.js';
 import {
   Skill,
   SkillRegistry,
@@ -25,7 +27,9 @@ export interface SessionOptions {
   config: AliaConfig;
   /** Model id or name from the config (or any id served by the endpoint). Default: first configured model. */
   modelId?: string;
-  /** Observer for this session only. No UI means a silent session. */
+  /** Receives every `AgentEvent` of this session, including those of its subagents. The primary way to render a run. */
+  onEvent?: EventSink;
+  /** Legacy `AgentUI` observer (the terminal), adapted from the same event stream. Optional; a session with neither is silent. */
   ui?: AgentUI;
   /** Run potentially destructive commands without asking. */
   autoApprove?: boolean;
@@ -110,9 +114,22 @@ export class AliaSession {
     this.systemPrompt = catalog ? `${DEFAULT_SYSTEM_PROMPT}\n\n${catalog}` : DEFAULT_SYSTEM_PROMPT;
 
     const ui = options.ui;
+    const emit = combineSinks(ui ? eventsToAgentUI(ui) : undefined, options.onEvent);
+    const onConfirm = options.onConfirm;
     const safetyChecker = new SafetyChecker({
       autoApprove: options.autoApprove ?? false,
-      onConfirm: options.onConfirm,
+      onConfirm: onConfirm
+        ? (ctx) => {
+            emit({
+              type: 'permission_requested',
+              id: randomUUID(),
+              command: ctx.command,
+              reasons: ctx.reasons,
+              requester: ctx.requester,
+            });
+            return onConfirm(ctx);
+          }
+        : undefined,
       onAutoApprove: options.onAutoApprove,
       getScopeLabel: () => ui?.getScopeLabel?.(),
     });
@@ -131,7 +148,7 @@ export class AliaSession {
       workingDirectory: this.workspace,
       systemPrompt: this.systemPrompt,
       maxSteps: options.maxSteps,
-      ui,
+      onEvent: emit,
     });
 
     // Registered after the agent exists so the tool reads the live model. A child gets a copy
@@ -144,7 +161,6 @@ export class AliaSession {
         systemPrompt: this.systemPrompt,
         getSkills: () => this.skills,
         verbose: options.subagentVerbose,
-        ui,
       })
     );
   }

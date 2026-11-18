@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import OpenAI from 'openai';
@@ -6,7 +7,7 @@ import { ToolRegistry } from './index.js';
 import { AliaAgent } from '../agent/agentLoop.js';
 import { ContextManager } from '../context/contextManager.js';
 import { AliaModelConfig } from '../config.js';
-import { AgentUI } from '../agent/agentUI.js';
+import { AgentEvent } from '../agent/events.js';
 import { SkillRegistry, buildSkillInvocationPrompt } from '../skills/skillLoader.js';
 import { resolveFileMentions } from '../context/fileMentions.js';
 import {
@@ -46,8 +47,6 @@ export interface SubagentDeps {
    * Defaults to the ALIA_SUBAGENT_VERBOSE=1 environment variable.
    */
   verbose?: boolean;
-  /** The parent's UI / observer, so a child's output is nested under it. */
-  ui?: AgentUI;
 }
 
 interface RunSubagentArgs {
@@ -146,7 +145,8 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
 
       const maxSteps = clampSteps(args.max_steps);
       const { id, config } = deps.getModel();
-      const ui = deps.ui;
+      const subagentId = randomUUID();
+      const emit = ctx.emit;
 
       const child = new AliaAgent({
         client: deps.getClient(),
@@ -161,18 +161,27 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
         workingDirectory: ctx.workingDirectory,
         systemPrompt: `${deps.systemPrompt}\n\n${SUBAGENT_PROMPT_BLOCK}`,
         maxSteps,
-        ui,
+        // Everything the child reports reaches the parent's observers, tagged with this child's id.
+        onEvent: emit ? (e) => emit({ subagentId, ...e } as AgentEvent) : undefined,
       });
 
       const label = args.task.trim().split('\n')[0].slice(0, 100);
-      ui?.printInfo?.(`Subagent started (max ${maxSteps} steps${args.skill ? `, skill ${args.skill}` : ''}): ${label}`);
       const verbose = deps.verbose ?? process.env.ALIA_SUBAGENT_VERBOSE === '1';
-      ui?.pushScope?.({ label, quiet: !verbose });
+      emit?.({
+        type: 'subagent_started',
+        id: subagentId,
+        parentToolCallId: ctx.toolCallId,
+        label,
+        maxSteps,
+        skill: args.skill,
+        quiet: !verbose,
+      });
       let result;
       try {
         result = await child.runDetailed(firstMessage);
-      } finally {
-        ui?.popScope?.();
+      } catch (err) {
+        emit?.({ type: 'subagent_finished', id: subagentId, label, status: 'failed', steps: 0, maxSteps });
+        throw err;
       }
 
       let report: SubagentReport;
@@ -190,7 +199,7 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
         report = { status: result.status === 'max_steps' ? 'max_steps' : 'failed', summary: result.text, artifacts: [], questions: '' };
       }
 
-      ui?.printInfo?.(`Subagent finished: ${report.status} (${result.steps}/${maxSteps} steps)`);
+      emit?.({ type: 'subagent_finished', id: subagentId, label, status: report.status, steps: result.steps, maxSteps });
       return formatSubagentReport(report, { steps: result.steps, maxSteps });
     },
   };

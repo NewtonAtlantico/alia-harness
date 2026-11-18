@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`). Next: D2 (event stream). Phase 0 of the desktop app; the app itself will be backlog 003. |
+| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`). Next: D3 (cancellation). Phase 0 of the desktop app; the app itself will be backlog 003. |
 | **Depends on** | `src/core` as it is today (decoupled from `cli/`); subagents S1-S5 (done) |
 | **Design** | `alia Harness Desktop.pdf` (chat, changes panel, permission card, pipeline wizard, slash and `@` menus) |
 | **Primary consumer** | The standalone Electron app (backlog 003), plus the CLI, which must keep working unchanged |
@@ -99,24 +99,40 @@ process-wide default for any of them; `loadConfig({ baseDir, configPath?, loadEn
 ### 5.2 Typed event stream (D2)
 
 ```ts
-type AgentEvent =
+type AgentEvent = (
   | { type: 'run_started'; runId: string }
-  | { type: 'thinking'; text: string }
-  | { type: 'assistant_message'; text: string }
-  | { type: 'tool_call_started'; id: string; name: string; args: string; scope?: string }
-  | { type: 'tool_call_finished'; id: string; result: string; isError: boolean; durationMs: number; changes?: FileChange[] }
-  | { type: 'permission_requested'; id: string; toolCallId?: string; command: string; reasons: string[] }
+  | { type: 'model_started' | 'model_finished'; step: number }          // the "thinking" spinner
+  | { type: 'thinking'; text: string }                                   // reasoning text
+  | { type: 'assistant_message'; text: string; final: boolean }
+  | { type: 'tool_call_started'; id: string; name: string; args: string }
+  | { type: 'tool_call_finished'; id: string; name: string; result: string; isError: boolean; durationMs: number }
+  | { type: 'permission_requested'; id: string; toolCallId?: string; command: string; reasons: string[]; requester?: string }
   | { type: 'context_compacted' }
-  | { type: 'subagent_started' | 'subagent_finished'; id: string; label: string; status?: string }
+  | { type: 'subagent_started'; id: string; parentToolCallId?: string; label: string; maxSteps: number; skill?: string; quiet: boolean }
+  | { type: 'subagent_finished'; id: string; label: string; status: string; steps: number; maxSteps: number }
   | { type: 'notice'; level: 'info' | 'success' | 'error'; message: string }
-  | { type: 'run_finished'; result: AgentResult };
+  | { type: 'run_finished'; runId: string; result: AgentResult }
+) & { subagentId?: string };   // set on every event produced inside a subagent
 ```
 
+As built in D2:
+
 - The `id` of a tool call is the model's `tool_call_id`, so a UI can create a row on `started` and
-  update the same row on `finished`.
-- `AgentUI` stays as is. A small adapter, `eventsToAgentUI`, keeps `TerminalUI` working with no
-  visible change (verified by the existing smoke tests).
-- Subagent events carry their scope, so nested work renders under the parent's `run_subagent` row.
+  update the same row on `finished`. Subagent events carry `subagentId`, and `subagent_started`
+  names the parent's `run_subagent` call, so nested work renders under that row.
+- `AgentUI` stays as is. `eventsToAgentUI` keeps `TerminalUI` working: the terminal output was
+  compared byte for byte, before and after, across 11 scenarios (tools, reasoning, API error, empty
+  response, step cap, compact and verbose subagents, fabricated artifact, recursion, compaction).
+- `final: false` is the text a model writes alongside tool calls ("Vou ler o loop atual..."), which
+  the design shows and the terminal never did. The adapter keeps hiding it, so CLI output is unchanged.
+- `permission_requested` is emitted by the session just before it calls `onConfirm`. `toolCallId` is
+  filled in by D4.
+- `changes?: FileChange[]` on `tool_call_finished` is added by D7.
+- Observers are isolated: `combineSinks` catches a throwing sink so it can neither fail the run nor
+  starve the others.
+- `ToolContext` gained `toolCallId` and `emit`; `SubagentDeps.ui` is gone, because a child now reports
+  through the parent's event stream (tagged with its `subagentId`).
+- Sessions take `onEvent` (new, primary) and `ui` (legacy, adapted from the same stream).
 
 ### 5.3 Cancellation (D3)
 
@@ -270,7 +286,7 @@ Points are Fibonacci, capped at 8, matching `spec-to-tasks`.
 | ID | Task | Pts | Acceptance criteria |
 |---|---|---|---|
 | D1 | **Done.** `createSession()` factory; remove global handlers; explicit workspace and config | 5 | `cli/index.ts` is a thin consumer of `createSession`. Importing `terminal.ts` has no side effects. Two sessions with different workspaces and handlers run in one process without interference (fake-model test). `loadConfig` takes a path or object; no `process.cwd()` reads remain in `core`. `npm run test:*` and `typecheck` pass. |
-| D2 | Typed `AgentEvent` stream + `eventsToAgentUI` adapter | 5 | Every `AgentUI` call has an event equivalent with stable tool-call ids and `durationMs`. CLI output is identical to before. A test records the event sequence for a run with two tool calls and a subagent. |
+| D2 | **Done.** Typed `AgentEvent` stream + `eventsToAgentUI` adapter | 5 | Every `AgentUI` call has an event equivalent with stable tool-call ids and `durationMs`. CLI output is identical to before. A test records the event sequence for a run with two tool calls and a subagent. |
 | D3 | Cancellation via `AbortSignal` (loop, API call, `run_bash`, subagents) | 3 | Aborting mid-API-call and mid-`run_bash` ends the run with `cancelled` within a second, kills the child process, and leaves history valid (no dangling `tool_call_id`). A following `run()` works. |
 | D4 | Permission model v2: decisions, modes, per-project allowlist | 5 | `allow_always` persists and applies on the next session; dangerous commands still prompt in `ask-dangerous` and `ask-commands`; `auto` skips prompts; legacy boolean handler still works; the permission event carries the tool-call id. |
 | D5 | Session store (JSONL), resume, list, search, rename | 5 | A run is persisted and `resume` reproduces the same `messages`. `list` filters by workspace; `search` finds text in titles and messages. A corrupted last line is skipped, not fatal. Nothing is written inside the workspace. |

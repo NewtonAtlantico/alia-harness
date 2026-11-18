@@ -1,6 +1,7 @@
 // Core Alia Agent exports - Pure TypeScript logic with zero CLI / Terminal UI dependencies
 export * from './agent/agentLoop.js';
 export * from './agent/agentUI.js';
+export * from './agent/events.js';
 export * from './agent/subagentResult.js';
 export * from './safety/safetyChecker.js';
 export * from './context/contextManager.js';

@@ -52,7 +52,6 @@ function setup(
       systemPrompt: PARENT_PROMPT,
       getSkills: opts.skills ? () => opts.skills! : undefined,
       verbose: opts.verbose ?? false,
-      ui: TerminalUI, // no global default UI any more: pass it explicitly
     })
   );
   const parent = new AliaAgent({

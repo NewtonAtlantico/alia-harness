@@ -2,7 +2,9 @@ import OpenAI from 'openai';
 import { ToolRegistry, ToolContext } from '../tools/index.js';
 import { SafetyChecker } from '../safety/safetyChecker.js';
 import { ContextManager } from '../context/contextManager.js';
+import { randomUUID } from 'node:crypto';
 import { AgentUI } from './agentUI.js';
+import { AgentEvent, EventSink, combineSinks, eventsToAgentUI } from './events.js';
 import { AliaModelConfig } from '../config.js';
 
 export interface AgentOptions {
@@ -16,6 +18,9 @@ export interface AgentOptions {
   workingDirectory: string;
   systemPrompt?: string;
   maxSteps?: number;
+  /** Receives every {@link AgentEvent} of this agent's runs (the primary way to observe a run). */
+  onEvent?: EventSink;
+  /** Legacy observer: adapted from the event stream (see `eventsToAgentUI`). May be combined with `onEvent`. */
   ui?: AgentUI;
 }
 
@@ -54,7 +59,7 @@ export class AliaAgent {
   private workingDirectory: string;
   private systemPrompt: string;
   private maxSteps: number;
-  private ui?: AgentUI;
+  private emit: EventSink;
   private messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
 
   constructor(options: AgentOptions) {
@@ -67,7 +72,7 @@ export class AliaAgent {
     this.workingDirectory = options.workingDirectory;
     this.systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     this.maxSteps = options.maxSteps || 30;
-    this.ui = options.ui;
+    this.emit = combineSinks(options.ui ? eventsToAgentUI(options.ui) : undefined, options.onEvent);
 
     this.reset();
   }
@@ -114,6 +119,21 @@ export class AliaAgent {
    * on completed / max_steps / failed instead of string-matching the text.
    */
   async runDetailed(userPrompt: string): Promise<AgentResult> {
+    const runId = randomUUID();
+    this.emit({ type: 'run_started', runId });
+    let result: AgentResult;
+    try {
+      result = await this.runLoop(userPrompt);
+    } catch (err: any) {
+      // Unexpected exception: still close the run for observers, then let the caller see it.
+      this.emit({ type: 'run_finished', runId, result: { status: 'failed', text: String(err?.message ?? err), steps: 0 } });
+      throw err;
+    }
+    this.emit({ type: 'run_finished', runId, result });
+    return result;
+  }
+
+  private async runLoop(userPrompt: string): Promise<AgentResult> {
     // 1. Append user prompt to message history
     this.messages.push({
       role: 'user',
@@ -129,10 +149,10 @@ export class AliaAgent {
       const { messages: prunedMessages, pruned } = this.contextManager.pruneMessages(this.messages);
       if (pruned) {
         this.messages = prunedMessages;
-        this.ui?.printInfo?.('Context window compacted to preserve token budget.');
+        this.emit({ type: 'context_compacted' });
       }
 
-      const thinking = this.ui?.startThinking?.();
+      this.emit({ type: 'model_started', step });
 
       let response: OpenAI.Chat.Completions.ChatCompletion;
       try {
@@ -143,17 +163,17 @@ export class AliaAgent {
           tool_choice: 'auto',
         });
       } catch (err: any) {
-        thinking?.stop();
+        this.emit({ type: 'model_finished', step });
         const errorMsg = `API request failed: ${err.message}`;
-        this.ui?.printError?.(errorMsg);
+        this.emit({ type: 'notice', level: 'error', message: errorMsg });
         return { status: 'failed', text: errorMsg, steps: step, failure: 'api_error' };
       }
 
-      thinking?.stop();
+      this.emit({ type: 'model_finished', step });
 
       const choice = response.choices?.[0];
       if (!choice || !choice.message) {
-        this.ui?.printError?.('Empty response received from LLM endpoint.');
+        this.emit({ type: 'notice', level: 'error', message: 'Empty response received from LLM endpoint.' });
         return { status: 'failed', text: 'Empty response received.', steps: step, failure: 'empty_response' };
       }
 
@@ -166,7 +186,7 @@ export class AliaAgent {
         (assistantMessage as any).reasoning;
 
       if (reasoning) {
-        this.ui?.printThinking?.(reasoning);
+        this.emit({ type: 'thinking', text: reasoning });
       }
 
       // Check if the model requested tool calls
@@ -176,18 +196,22 @@ export class AliaAgent {
         // No tool calls: model has concluded and produced a final text response
         const content = assistantMessage.content || '';
         this.messages.push(assistantMessage);
-        this.ui?.printAssistantMessage?.(content);
+        this.emit({ type: 'assistant_message', text: content, final: true });
         return { status: 'completed', text: content, steps: step };
       }
 
       // Model returned tool calls: append assistant's tool-call request to messages
       this.messages.push(assistantMessage);
+      if (assistantMessage.content) {
+        this.emit({ type: 'assistant_message', text: assistantMessage.content, final: false });
+      }
 
       // Execute each tool call
-      const toolContext: ToolContext = {
+      const baseContext: ToolContext = {
         workingDirectory: this.workingDirectory,
         safetyChecker: this.safetyChecker,
         contextManager: this.contextManager,
+        emit: this.emit,
       };
 
       for (const toolCall of toolCalls) {
@@ -197,14 +221,14 @@ export class AliaAgent {
         const fnName = toolCall.function.name;
         const fnArgs = toolCall.function.arguments;
 
-        this.ui?.printToolCall?.(fnName, fnArgs);
+        this.emit({ type: 'tool_call_started', id: toolCall.id, name: fnName, args: fnArgs });
 
         const startTime = Date.now();
-        const result = await this.toolRegistry.execute(fnName, fnArgs, toolContext);
-        const duration = Date.now() - startTime;
+        const result = await this.toolRegistry.execute(fnName, fnArgs, { ...baseContext, toolCallId: toolCall.id });
+        const durationMs = Date.now() - startTime;
 
         const isError = result.startsWith('Error:');
-        this.ui?.printToolResult?.(result, isError);
+        this.emit({ type: 'tool_call_finished', id: toolCall.id, name: fnName, result, isError, durationMs });
 
         // Feedback: Append tool result back into message history as a tool role message
         this.messages.push({
@@ -218,7 +242,7 @@ export class AliaAgent {
     }
 
     const maxStepsMsg = `Agent reached maximum allowable steps (${this.maxSteps}) without concluding.`;
-    this.ui?.printError?.(maxStepsMsg);
+    this.emit({ type: 'notice', level: 'error', message: maxStepsMsg });
     return { status: 'max_steps', text: maxStepsMsg, steps: step };
   }
 }
