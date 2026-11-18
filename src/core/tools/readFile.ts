@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ToolDefinition } from './types.js';
 import { detectBinaryFile } from './fileUtils.js';
-import { describePages, documentKind, readDocument } from '../documents/readDocument.js';
+import { describePages, documentKind, readDocument, unitLabel } from '../documents/readDocument.js';
 
 interface ReadFileArgs {
   path: string;
@@ -14,7 +14,7 @@ interface ReadFileArgs {
 export const readFileTool: ToolDefinition<ReadFileArgs> = {
   name: 'read_file',
   description:
-    'Reads text content from a given file path. Can optionally read a specific line range. Also reads PDF documents as text, with [p. N] page markers: a long document is returned in chunks, so use "pages" (e.g. "7-12") to continue where the previous result stopped. Audio/video and scanned PDFs cannot be read. Other binary files are rejected (detected by extension or NUL bytes).',
+    'Reads text content from a given file path. Can optionally read a specific line range. Also reads PDF, Word (.docx) and PowerPoint (.pptx, speaker notes included) documents as text, with [p. N] / [slide N] / [part N] markers: a long document is returned in chunks, so use "pages" (e.g. "7-12", which counts pages, slides or parts) to continue where the previous result stopped. Audio/video, scanned PDFs and the old .doc/.ppt formats cannot be read. Other binary files are rejected (detected by extension or NUL bytes).',
   parameters: {
     type: 'object',
     properties: {
@@ -32,7 +32,7 @@ export const readFileTool: ToolDefinition<ReadFileArgs> = {
       },
       pages: {
         type: 'string',
-        description: 'For PDF documents: which pages to read, e.g. "3", "3-5", "1,4-6" or "7-". Default: from the start.',
+        description: 'For documents: which pages (slides, parts) to read, e.g. "3", "3-5", "1,4-6" or "7-". Default: from the start.',
       },
     },
     required: ['path'],
@@ -72,12 +72,12 @@ export const readFileTool: ToolDefinition<ReadFileArgs> = {
           const span = Math.max(1, doc.pagesShown.length);
           const last = Math.min(doc.totalPages, doc.nextPage + span - 1);
           notes.push(
-            `[Showing pages ${describePages(doc.pagesShown)} of ${doc.totalPages}. Continue with pages: "${doc.nextPage}-${last}".]`
+            `[Showing ${doc.unit}s ${describePages(doc.pagesShown)} of ${doc.totalPages}. Continue with pages: "${doc.nextPage}-${last}".]`
           );
         } else if (doc.pagesShown.length < doc.totalPages) {
-          notes.push(`[Showing pages ${describePages(doc.pagesShown)} of ${doc.totalPages}.]`);
+          notes.push(`[Showing ${doc.unit}s ${describePages(doc.pagesShown)} of ${doc.totalPages}.]`);
         }
-        return [`--- Document: ${args.path} (PDF, ${doc.totalPages} page${doc.totalPages === 1 ? '' : 's'}) ---`, doc.text, ...notes].join('\n');
+        return [`--- Document: ${args.path} (${doc.kind.toUpperCase()}, ${unitLabel(doc.unit, doc.totalPages)}) ---`, doc.text, ...notes].join('\n');
       }
 
       // Reject binary files instead of dumping unreadable garbage into the context window.

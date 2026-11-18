@@ -50,7 +50,7 @@ console.log('\n=== what counts as a document ===');
   check('pdf, in any case', documentKind('a.pdf') === 'pdf' && documentKind('A.PDF') === 'pdf');
   check('audio and video are recordings', ['x.mp4', 'x.MOV', 'x.mp3', 'x.m4a', 'x.wav', 'x.webm', 'x.mkv'].every((f) => documentKind(f) === 'recording'));
   check('ordinary files are not documents', documentKind('a.txt') === undefined && documentKind('a.ts') === undefined && documentKind('noext') === undefined);
-  check('(.docx and .pptx arrive in D9)', documentKind('a.docx') === undefined);
+  check('Office files are documents too (see test:office)', documentKind('a.docx') === 'docx' && documentKind('a.pptx') === 'pptx');
 }
 
 console.log('\n=== page selections ===');

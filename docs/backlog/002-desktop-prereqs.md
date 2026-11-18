@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`), D5 (session store; `npm run test:store`), D6 (command registry, `/compact`; `npm run test:commands`), D7 (change tracking and undo; `npm run test:changes`), D8 (PDF reading; `npm run test:documents`). Next: D9 (DOCX and PPTX). Phase 0 of the desktop app; the app itself will be backlog 003. |
+| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`), D5 (session store; `npm run test:store`), D6 (command registry, `/compact`; `npm run test:commands`), D7 (change tracking and undo; `npm run test:changes`), D8 (PDF reading; `npm run test:documents`), D9 (DOCX and PPTX; `npm run test:office`). Next: D10 (`ask_user`). Phase 0 of the desktop app; the app itself will be backlog 003. |
 | **Depends on** | `src/core` as it is today (decoupled from `cli/`); subagents S1-S5 (done) |
 | **Design** | `alia Harness Desktop.pdf` (chat, changes panel, permission card, pipeline wizard, slash and `@` menus) |
 | **Primary consumer** | The standalone Electron app (backlog 003), plus the CLI, which must keep working unchanged |
@@ -315,32 +315,47 @@ Known limitations:
 
 ### 5.8 Document readers (D8, D9)
 
-- `readDocument(path, { pages?, maxChars?, maxLines? })` returns `{ ok: true, text, totalPages, pagesShown, nextPage?, warnings }`
+- `readDocument(path, { pages?, maxChars?, maxLines? })` returns `{ ok: true, kind, unit, text, totalPages, pagesShown, nextPage?, warnings }`
   or `{ ok: false, error }`; it never throws. Pure JavaScript (no native binaries), so Electron packaging stays simple.
-- **PDF (D8, done):** read with `unpdf` (pdf.js), chosen after a spike on real PDFs: correct Portuguese accents, about
-  half a second for an 8-page, 5.5 MB file. Pages are extracted one at a time, so reading a chunk of a long BRD does
-  not parse the whole file.
-- **Provenance:** each page starts with `[p. N]` (the real page number, also when a range is selected), so a requirement
-  can cite where it came from. PPTX will use `[slide N]` with speaker notes (D9).
-- **Chunks, never a silent cut:** a long document is returned page by page up to a budget (characters and lines), and the
+  A document is read as a numbered series of **units**: pages (PDF), slides (decks) or parts (Word). The `pages`
+  argument, the budget and the "continue with pages" instruction work the same for all three.
+- **Provenance markers:** `[p. N]` (PDF), `[slide N]` (decks; `[slide N, hidden]`), `[part N: Heading]` (Word). The number
+  is always the real one, also when a range is selected.
+- **Chunks, never a silent cut:** a long document is returned unit by unit up to a budget (characters and lines), and the
   result says where to continue. `read_file` sizes the budget to the tool-output limits (16,000 characters / 250 lines by
   default), so the generic head-and-tail truncation, which would drop the middle of a document without saying so, never
-  applies. The result ends with an exact instruction, for example `[Showing pages 1-4 of 8. Continue with pages: "5-8".]`;
-  following it reads every page exactly once. A single page over the budget is cut and says so.
-- `read_file` gained `pages` (`"3"`, `"3-5"`, `"1,4-6"`, `"7-"`, or a number).
-- **Scanned PDFs are refused, not guessed:** no text layer on any page returns an error that says so and that OCR is not
-  available (an error result, so the model and the UI see a failure). A mixed document is read, with `(no text)` for the
-  empty pages and a warning listing them, so the pipeline skills can carry the gap into their open questions.
-- **Recordings** (audio and video extensions) return "send a transcript (text) instead", from both `read_file` and `@`
-  mentions, instead of the generic "binary file" message. A corrupt, empty, password-protected or oversized (over 60 MB)
-  file is a clear error.
-- **`@` mentions:** a new `resolveFileMentionsAsync` attaches a PDF as `<document ... type="pdf" pages="N" shown="1-30">`
-  (up to the 100,000-character per-file limit, cut at a page boundary, with the pages left out named so they can be read
-  with `read_file`). `session.prepareInput`, `session.resolveSkill` and a subagent's `inputs` use it, so they are now
-  asynchronous. The synchronous `resolveFileMentions` is unchanged and still treats a PDF as a binary file.
-- **Paths with spaces** (real documents have them) can now be mentioned with quotes: `@"Proposta Técnica 2026.pdf"`.
-  Unquoted mentions behave as before (they end at the first space). A subagent's `inputs` quotes such paths
-  automatically, so the desktop wizard can hand it any file name.
+  applies. The result ends with an exact instruction, for example `[Showing slides 1-6 of 40. Continue with pages: "7-12".]`;
+  following it reads every unit exactly once. A single unit over the budget is cut and says so.
+- `read_file` gained `pages` (`"3"`, `"3-5"`, `"1,4-6"`, `"7-"`, or a number) and a header such as
+  `--- Document: brd.docx (DOCX, 8 parts) ---`.
+- **PDF (D8):** `unpdf` (pdf.js), chosen after a spike on real PDFs. Pages are extracted one at a time, so a chunked read of a
+  long BRD does not parse the whole file. A **scanned PDF** (no text layer) is refused with the reason and a note that OCR is not
+  available (an error result); a mixed document is read, with `(no text)` for the empty pages and a warning listing them.
+- **Word (D9):** read with `fflate` (zip) and a small purpose-built XML reader (no DTD or entity support, so no entity-expansion
+  attacks; only the needed entries are inflated, and an entry over 40 MB is refused before it is inflated). Headings come out
+  as `#` (resolved through the style *names*, so Portuguese-localized files work: their style ids are `Ttulo1`, their names are
+  `heading 1`), plus outline levels; bullet and numbered lists with nesting and correct counts, including lists whose numbering comes
+  from the style itself (`List Bullet`, `List Number`) or from a style they are based on; tables as pipe tables (merged cells keep
+  the columns aligned, pipes escaped); tracked insertions are read and deletions are not; hyperlinks, content controls and text
+  boxes are read; **reviewers' comments** are kept as a final `Comments` part, with their authors. Word has no stable page
+  numbers, so the text is split into parts at each top-level heading, and every ~6,000 characters otherwise. Images are counted in a
+  warning. Not extracted: headers, footers, footnotes.
+- **PowerPoint (D9):** one entry per slide **in presentation order** (not file order): the title as `#`, the text of every shape
+  (nested bullets keep their level), tables, image descriptions (`[image: ...]`), `[chart]`, group shapes, and the **speaker notes**
+  after a `Notes:` line. A slide with only notes is kept. Footers, dates and slide numbers are left out. Hidden slides are marked
+  and listed in a warning; slides with only undescribed images are flagged as missing content; a deck of pictures only is refused.
+- **Recordings** (audio and video extensions) return "send a transcript (text) instead". The old binary formats **.doc / .ppt**
+  are refused with "save it as .docx / .pptx". A corrupt, empty, password-protected (an encrypted Office file is not a zip) or
+  oversized (over 60 MB) file is a clear error. These messages come from `read_file` and `@` mentions alike.
+- **`@` mentions:** `resolveFileMentionsAsync` attaches a document as `<document path=... type="pdf|docx|pptx" pages|parts|slides="N"
+  shown="1-30">` (up to the 100,000-character per-file limit, cut at a unit boundary, with what was left out named so it can be read
+  with `read_file`). `session.prepareInput`, `session.resolveSkill` and a subagent's `inputs` use it, so they are asynchronous.
+  The synchronous `resolveFileMentions` is unchanged and still treats a document as a binary file.
+- **Paths with spaces** (real documents have them) can be mentioned with quotes: `@"Proposta Técnica 2026.pdf"`. Unquoted mentions
+  behave as before. A subagent's `inputs` quotes such paths automatically.
+- Checked against a genuine Word file produced by `python-docx` as well as the synthetic fixtures; that exposed the style-based list
+  gap above. Not checked against files produced by Word or PowerPoint themselves, so real decks (SmartArt, charts) may hold text this
+  does not reach.
 
 ### 5.9 `ask_user` and gate questions (D10)
 
@@ -414,7 +429,7 @@ Points are Fibonacci, capped at 8, matching `spec-to-tasks`.
 | D6 | **Done.** `CommandRegistry`, `/compact`, `getContextUsage()` | 3 | CLI prompt and a test consumer read the same command list (built-ins plus skills). `/compact` shrinks a long history, keeps system prompt, pinned skills and recent turns, and the run continues correctly afterwards. |
 | D7 | **Done.** `ChangeTracker`: record, diff, revert, keep | 5 | `edit_file` and `write_file` record before/after; `diff` returns a unified diff; `revert` restores or deletes; revert skips a file modified after the agent's change and reports it; `keep` clears the list. |
 | D8 | **Done.** `readDocument` for PDF with page markers; integrate into `read_file` and `@` mentions | 5 | A sample multi-page PDF reads with `[p. N]` markers; `pages` argument works; a scanned PDF returns the no-text-layer message; audio/video return the transcript message; `@file.pdf` attaches text. |
-| D9 | `readDocument` for DOCX and PPTX (slides and speaker notes) | 3 | Sample DOCX keeps headings and tables as readable text; PPTX output has `[slide N]` markers and includes notes; both work through `read_file` and `@`. |
+| D9 | **Done.** `readDocument` for DOCX and PPTX (slides and speaker notes) | 3 | Sample DOCX keeps headings and tables as readable text; PPTX output has `[slide N]` markers and includes notes; both work through `read_file` and `@`. |
 | D10 | `ask_user` tool, `onAskUser` handler, HARNESS_NOTES mapping | 5 | With a handler, questions round-trip as structured answers (including a deferral with owner); without one the tool errors with the plain-text fallback instruction; it is absent in subagents; the CLI implements a basic handler. |
 | D11 | `pipeline_state` tool, `state.json` schema, `STATE.md` rendering, derived task stats | 5 | Updates validate against the schema and re-render `STATE.md`; stats (tasks, points, per spec) match a golden `spec-to-tasks` sample; the pipeline skill carries the one-line instruction and still works without the tool. |
 | D12 | Pipeline status and resume, with stale-input detection | 3 | Given a state file stopped at Gate 1 (3 of 5 answered), `getPipelineStatus` reports that, and a resumed session continues from the open questions. A modified input file is flagged `stale`. |

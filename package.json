@@ -27,20 +27,15 @@
     "test:store": "tsx scripts/smoke-store.ts",
     "test:commands": "tsx scripts/smoke-commands.ts",
     "test:changes": "tsx scripts/smoke-changes.ts",
-    "test:documents": "tsx scripts/smoke-documents.ts"
+    "test:documents": "tsx scripts/smoke-documents.ts",
+    "test:office": "tsx scripts/smoke-office.ts"
   },
-  "keywords": [
-    "ai",
-    "agent",
-    "alia",
-    "llm",
-    "cli",
-    "harness"
-  ],
+  "keywords": ["ai", "agent", "alia", "llm", "cli", "harness"],
   "author": "",
   "license": "MIT",
   "dependencies": {
     "diff": "^9.0.0",
+    "fflate": "^0.8.3",
     "openai": "^7.54.0",
     "picocolors": "^1.1.1",
     "unpdf": "^1.9.1"

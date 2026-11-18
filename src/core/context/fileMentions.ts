@@ -130,7 +130,7 @@ export function resolveFileMentions(
           isDir: true,
         });
       } else if (documents?.has(abs.toLowerCase())) {
-        // A document (PDF) that was read ahead of time.
+        // A document (PDF, Word, PowerPoint) that was read ahead of time.
         const doc = documents.get(abs.toLowerCase())!;
         if (!doc.ok) {
           errors.push(`@${cleaned}: ${doc.error}`);
@@ -140,7 +140,7 @@ export function resolveFileMentions(
         const notes = [...doc.warnings.map((w) => `[Note: ${w}]`)];
         if (truncated) {
           notes.push(
-            `[Pages ${doc.nextPage}-${doc.totalPages} are not attached (attachment size limit). Read them with read_file, pages "${doc.nextPage}-${doc.totalPages}".]`
+            `[${doc.unit[0].toUpperCase()}${doc.unit.slice(1)}s ${doc.nextPage}-${doc.totalPages} are not attached (attachment size limit). Read them with read_file, pages "${doc.nextPage}-${doc.totalPages}".]`
           );
         }
         const content = [doc.text, ...notes].join('\n');
@@ -153,7 +153,7 @@ export function resolveFileMentions(
         budget -= content.length;
         const lines = content.split('\n').length;
         blocks.push(
-          `<document path="${displayPath}" type="pdf" pages="${doc.totalPages}" shown="${describePages(doc.pagesShown)}">\n${content}\n</document>`
+          `<document path="${displayPath}" type="${doc.kind}" ${doc.unit}s="${doc.totalPages}" shown="${describePages(doc.pagesShown)}">\n${content}\n</document>`
         );
         attachments.push({ mention: `@${cleaned}`, displayPath, lines, chars: content.length, truncated, isDir: false });
       } else {
