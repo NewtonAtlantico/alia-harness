@@ -436,9 +436,12 @@ export class SessionRecorder {
       writeAtomic(file, JSON.stringify({ t: 'replace', messages } satisfies Entry) + '\n');
       this.persisted = messages.slice();
       this.needsNewline = false;
-      // An automatic title came from what was just erased; drop it (a title the user chose stays).
-      this.store.clearAutoTitle(this.id);
-      this.titled = false;
+      // After /clear nothing of the conversation is left, so an automatic title (taken from what was
+      // just erased) goes too. A compaction keeps the conversation, so it keeps its title.
+      if (!messages.some((m) => m.role === 'user')) {
+        this.store.clearAutoTitle(this.id);
+        this.titled = false;
+      }
       this.updateTitle(messages);
       return;
     }
@@ -464,7 +467,8 @@ export class SessionRecorder {
 
   private updateTitle(messages: ChatMessage[]): void {
     if (this.titled) return;
-    const firstUser = messages.find((m) => m.role === 'user');
+    // A compaction summary is not something the user said.
+    const firstUser = messages.find((m) => m.role === 'user' && !messageText(m).startsWith('<conversation_summary>'));
     if (!firstUser) return;
     this.store.setAutoTitle(this.id, deriveTitle(messageText(firstUser)));
     this.titled = true;

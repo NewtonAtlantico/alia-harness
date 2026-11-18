@@ -14,6 +14,8 @@ import {
 import { PermissionStore } from './safety/permissionStore.js';
 import { SessionRecorder, SessionStore, newSessionId } from './sessions/sessionStore.js';
 import { sameWorkspace } from './projectKey.js';
+import { CommandRegistry } from './commands/commandRegistry.js';
+import { compactHistory } from './context/compactor.js';
 import { ContextManager } from './context/contextManager.js';
 import { AttachedFile, resolveFileMentions } from './context/fileMentions.js';
 import { AgentResult, AliaAgent, DEFAULT_SYSTEM_PROMPT, RunOptions } from './agent/agentLoop.js';
@@ -103,6 +105,15 @@ export type SkillResolution =
       errors: string[];
     };
 
+export type CompactResult =
+  | { status: 'compacted'; summarized: number; tokensBefore: number; tokensAfter: number }
+  /** The history is already short, or summarizing it would not save anything. */
+  | { status: 'nothing_to_compact' }
+  /** A run (or another compaction) is in progress. */
+  | { status: 'busy' }
+  | { status: 'failed'; error: string }
+  | { status: 'cancelled' };
+
 export type SwitchModelResult =
   | { ok: true; id: string }
   | { ok: false; available: string[] };
@@ -128,7 +139,12 @@ export class AliaSession {
   readonly permissions: PermissionStore;
   /** Id of the saved session; undefined when no `sessionStore` was given. */
   readonly id: string | undefined;
+  /** The slash commands to offer: built-ins, the front-end's own (`register`), and one per available skill. */
+  readonly commands: CommandRegistry;
   private recorder?: SessionRecorder;
+  private emit: EventSink;
+  private activeRuns = 0;
+  private compacting = false;
   readonly systemPrompt: string;
   private readonly client: OpenAI;
 
@@ -166,6 +182,8 @@ export class AliaSession {
 
     const ui = options.ui;
     const emit = combineSinks(ui ? eventsToAgentUI(ui) : undefined, options.onEvent);
+    this.emit = emit;
+    this.commands = new CommandRegistry(() => this.skills);
     const onConfirm = options.onConfirm;
     this.permissions = options.permissionStore ?? new PermissionStore(this.workspace, { dir: options.permissionsDir });
     const safetyChecker = new SafetyChecker({
@@ -250,8 +268,58 @@ export class AliaSession {
   }
 
   /** Runs one user turn through the agent loop. Pass `{ signal }` to make it cancellable (Stop button). */
-  run(prompt: string, options: RunOptions = {}): Promise<AgentResult> {
-    return this.agent.runDetailed(prompt, options);
+  async run(prompt: string, options: RunOptions = {}): Promise<AgentResult> {
+    if (this.compacting) {
+      return { status: 'failed', text: 'The conversation is being compacted; try again in a moment.', steps: 0 };
+    }
+    this.activeRuns++;
+    try {
+      return await this.agent.runDetailed(prompt, options);
+    } finally {
+      this.activeRuns--;
+    }
+  }
+
+  /**
+   * Replaces the older part of the conversation with a model-written summary (`/compact`).
+   * Keeps the system prompt, pinned skills and the most recent messages. Leaves the history
+   * untouched unless it succeeds.
+   */
+  async compact(options: { keepRecent?: number; signal?: AbortSignal } = {}): Promise<CompactResult> {
+    if (this.activeRuns > 0 || this.compacting) return { status: 'busy' };
+    this.compacting = true;
+    try {
+      const outcome = await compactHistory(this.agent.getMessages(), {
+        client: this.client,
+        model: this.agent.getModel(),
+        contextManager: this.contextManager,
+        maxInputTokens: this.contextManager.getMaxInputTokens(),
+        keepRecent: options.keepRecent,
+        signal: options.signal,
+      });
+      switch (outcome.status) {
+        case 'compacted':
+          this.agent.setMessages(outcome.messages);
+          this.emit({
+            type: 'context_compacted',
+            summarized: outcome.summarized,
+            tokensBefore: outcome.tokensBefore,
+            tokensAfter: outcome.tokensAfter,
+          });
+          return { status: 'compacted', summarized: outcome.summarized, tokensBefore: outcome.tokensBefore, tokensAfter: outcome.tokensAfter };
+        case 'nothing_to_compact':
+          this.emit({ type: 'notice', level: 'info', message: 'Nothing to compact yet.' });
+          return outcome;
+        case 'failed':
+          this.emit({ type: 'notice', level: 'error', message: outcome.error });
+          return outcome;
+        case 'cancelled':
+          this.emit({ type: 'notice', level: 'info', message: 'Compaction cancelled.' });
+          return outcome;
+      }
+    } finally {
+      this.compacting = false;
+    }
   }
 
   /** Expands `@path` mentions in user text into attached file contents. */
@@ -303,6 +371,7 @@ export class AliaSession {
     const configured = this.config.models.find((m) => m.id === idOrName || m.name === idOrName);
     if (configured) {
       this.agent.setModel(configured.id, configured);
+      this.contextManager.setMaxInputTokens(configured.maxInputTokens || 128000);
       this.recorder?.setModel(configured.id);
       return { ok: true, id: configured.id };
     }
@@ -317,6 +386,7 @@ export class AliaSession {
       maxInputTokens: 128000,
       maxOutputTokens: 16000,
     });
+    this.contextManager.setMaxInputTokens(128000);
     this.recorder?.setModel(idOrName);
     return { ok: true, id: idOrName };
   }

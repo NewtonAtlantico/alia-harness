@@ -31,6 +31,15 @@ export class ContextManager {
     this.limits = { ...DEFAULT_CONTEXT_LIMITS, ...limits };
   }
 
+  /** The model's context window changed (a model switch): pruning follows the new limit. */
+  setMaxInputTokens(maxInputTokens: number): void {
+    this.limits = { ...this.limits, maxInputTokens };
+  }
+
+  getMaxInputTokens(): number {
+    return this.limits.maxInputTokens;
+  }
+
   /**
    * Truncate large tool outputs (stdout, file contents) to prevent blowing up the context window.
    * Keeps the head and tail of the output for debugging visibility.

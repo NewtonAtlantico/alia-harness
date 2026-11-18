@@ -3,7 +3,7 @@ import pc from 'picocolors';
 import { loadConfig, AliaConfig } from '../core/config.js';
 import { createSession, AliaSession } from '../core/session.js';
 import { TerminalUI, cliConfirmDangerousCommand, cliAutoApproveNotice } from './ui/terminal.js';
-import { DynamicPrompt, registerSkillCommands } from './ui/prompt.js';
+import { DynamicPrompt, setSlashCommands } from './ui/prompt.js';
 import { FileIndex } from '../core/context/fileIndex.js';
 
 interface CliArgs {
@@ -63,6 +63,7 @@ ${pc.bold('SLASH COMMANDS (type "/" for live interactive preview):')}
   /models                 List models from configuration & endpoint
   /model <id>              Switch active model on the fly
   /clear                   Reset conversation history
+  /compact                 Summarize older messages to free up context
   /tokens                  Show estimated context tokens used
   /exit, /quit             Exit the agent harness
 `);
@@ -97,9 +98,12 @@ async function main() {
     process.exit(1);
   }
 
-  const skippedSkills = registerSkillCommands(session.skills.available());
+  // The slash menu comes from the session's command list; the terminal adds the commands only it can do.
+  session.commands.register({ name: 'exit', description: 'Exit the agent harness' });
+  session.commands.register({ name: 'quit', description: 'Exit the agent harness' });
+  setSlashCommands(session.commands.list());
   for (const w of session.skills.warnings) TerminalUI.printInfo(`skills: ${w}`);
-  for (const name of skippedSkills) {
+  for (const name of session.commands.skippedSkills()) {
     TerminalUI.printInfo(`skills: "${name}" clashes with a built-in command; use it via use_skill only.`);
   }
 
@@ -239,6 +243,17 @@ async function main() {
                 }
               }
               console.log();
+            }
+            continue;
+          }
+
+          case '/compact': {
+            // The result is reported through the session's events (printed by the terminal UI).
+            const compacting = TerminalUI.startThinking('Compacting');
+            try {
+              await session.compact();
+            } finally {
+              compacting.stop();
             }
             continue;
           }

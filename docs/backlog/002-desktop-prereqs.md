@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`), D5 (session store; `npm run test:store`). Next: D6 (command registry, `/compact`). Phase 0 of the desktop app; the app itself will be backlog 003. |
+| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`), D5 (session store; `npm run test:store`), D6 (command registry, `/compact`; `npm run test:commands`). Next: D7 (change tracking). Phase 0 of the desktop app; the app itself will be backlog 003. |
 | **Depends on** | `src/core` as it is today (decoupled from `cli/`); subagents S1-S5 (done) |
 | **Design** | `alia Harness Desktop.pdf` (chat, changes panel, permission card, pipeline wizard, slash and `@` menus) |
 | **Primary consumer** | The standalone Electron app (backlog 003), plus the CLI, which must keep working unchanged |
@@ -251,14 +251,34 @@ Known limitations:
 
 ### 5.6 Command registry and `/compact` (D6)
 
-- A `CommandRegistry` in `core` lists built-ins (`/help`, `/model`, `/clear`, `/compact`, `/config`,
-  `/tools`, `/skills`, `/tokens`) plus one entry per available skill, with `name`, `description`,
-  `kind: 'builtin' | 'skill'`. Both the CLI prompt and the desktop slash menu read from it.
-  `/config` is registered by the front-end (core only knows it exists as a UI action).
-- `/compact`: summarizes the older history with the model into one pinned message and drops the
-  covered turns, keeping the system prompt, pinned skill blocks and the last N messages. Emits
-  `context_compacted`. This is more than today's tool-output archiving.
-- `session.getContextUsage()` (built in D1, because the CLI's `/tokens` needs it) feeds the context meter.
+- `session.commands` (a `CommandRegistry`) lists the built-ins (`help`, `tools`, `skills`, `models`, `model`,
+  `clear`, `compact`, `tokens`), then the front-end's own commands, then one entry per available skill, each
+  with `name`, `description`, `usage`, `acceptsArgs` and `kind: 'builtin' | 'skill' | 'host'`. The list is
+  computed on every call, so it follows the skills and the registered tools. A front-end adds what only
+  it can do with `commands.register(...)` (the terminal adds `exit` and `quit`; the desktop will add
+  `config`). A built-in or front-end command wins over a skill of the same name, and `skippedSkills()`
+  reports those.
+- The terminal's slash menu is filled from this list (`setSlashCommands`), replacing the hard-coded array
+  and `registerSkillCommands` in `prompt.ts`. A test asserts the menu equals the registry list.
+- `session.compact({ keepRecent?, signal? })` (`/compact` in the terminal) replaces the older part of the
+  history with a model-written summary and returns `compacted | nothing_to_compact | busy | failed | cancelled`.
+  - **Kept verbatim:** the system prompt and the last 10 messages. The cut never lands on a tool result: it
+    moves back to the assistant message that made the call, so the history stays valid for the API.
+  - **Pinned skills survive.** A skill loaded through `use_skill` is moved to a user message (its tool call is
+    summarized away); a `/skill` invocation stays as it was.
+  - **One summary message** (`<conversation_summary>`) replaces the rest. Compacting again folds the earlier
+    summary into the new one, so there is never more than one.
+  - The transcript sent for summarizing is capped (about half the model's window), with tool output
+    shortened, so compacting a huge history cannot overflow the model it is meant to relieve.
+  - **It never makes things worse or loses work:** an API error, an empty summary, a cancel, or a summary
+    that would not be smaller leaves the history untouched. Compaction is refused while a run is in
+    progress (`busy`), and a run is refused while a compaction is in progress.
+  - Emits `context_compacted` with `summarized`, `tokensBefore` and `tokensAfter`; the terminal prints it.
+  - Saved sessions follow: the file is rewritten (the compacted turns are gone from disk) and the title is kept.
+- `getContextUsage()` (built in D1) feeds the context meter. Switching model now also updates the pruning
+  limit (`ContextManager.setMaxInputTokens`); before, it stayed at the first model's value.
+- Not done: automatic compaction when the window fills. The existing pruning (archiving old tool output) still
+  runs on its own; `/compact` is manual. It can be wired to a threshold later.
 
 ### 5.7 Change tracking and undo (D7)
 
@@ -360,7 +380,7 @@ Points are Fibonacci, capped at 8, matching `spec-to-tasks`.
 | D3 | **Done.** Cancellation via `AbortSignal` (loop, API call, `run_bash`, subagents) | 3 | Aborting mid-API-call and mid-`run_bash` ends the run with `cancelled` within a second, kills the child process, and leaves history valid (no dangling `tool_call_id`). A following `run()` works. |
 | D4 | **Done.** Permission model v2: decisions, modes, per-project allowlist | 5 | `allow_always` persists and applies on the next session; dangerous commands still prompt in `ask-dangerous` and `ask-commands`; `auto` skips prompts; legacy boolean handler still works; the permission event carries the tool-call id. |
 | D5 | **Done.** Session store (JSONL), resume, list, search, rename | 5 | A run is persisted and `resume` reproduces the same `messages`. `list` filters by workspace; `search` finds text in titles and messages. A corrupted last line is skipped, not fatal. Nothing is written inside the workspace. |
-| D6 | `CommandRegistry`, `/compact`, `getContextUsage()` | 3 | CLI prompt and a test consumer read the same command list (built-ins plus skills). `/compact` shrinks a long history, keeps system prompt, pinned skills and recent turns, and the run continues correctly afterwards. |
+| D6 | **Done.** `CommandRegistry`, `/compact`, `getContextUsage()` | 3 | CLI prompt and a test consumer read the same command list (built-ins plus skills). `/compact` shrinks a long history, keeps system prompt, pinned skills and recent turns, and the run continues correctly afterwards. |
 | D7 | `ChangeTracker`: record, diff, revert, keep | 5 | `edit_file` and `write_file` record before/after; `diff` returns a unified diff; `revert` restores or deletes; revert skips a file modified after the agent's change and reports it; `keep` clears the list. |
 | D8 | `readDocument` for PDF with page markers; integrate into `read_file` and `@` mentions | 5 | A sample multi-page PDF reads with `[p. N]` markers; `pages` argument works; a scanned PDF returns the no-text-layer message; audio/video return the transcript message; `@file.pdf` attaches text. |
 | D9 | `readDocument` for DOCX and PPTX (slides and speaker notes) | 3 | Sample DOCX keeps headings and tables as readable text; PPTX output has `[slide N]` markers and includes notes; both work through `read_file` and `@`. |

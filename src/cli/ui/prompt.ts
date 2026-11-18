@@ -2,6 +2,7 @@ import readline from 'node:readline';
 import { stripVTControlCharacters } from 'node:util';
 import pc from 'picocolors';
 import { FileIndex, WorkspaceEntry, FILE_PREVIEW_LIMIT } from '../../core/context/fileIndex.js';
+import type { CommandInfo } from '../../core/commands/commandRegistry.js';
 import { accent, brandLight } from './theme.js';
 
 export interface SlashCommandInfo {
@@ -14,45 +15,25 @@ export interface SlashCommandInfo {
   skill?: boolean;
 }
 
-export const SLASH_COMMANDS: SlashCommandInfo[] = [
-  { command: '/help', description: 'Show available slash commands and usage' },
-  { command: '/tools', description: 'List all available tools and parameters' },
-  { command: '/skills', description: 'List skills and whether they are available' },
-  { command: '/models', description: 'List models from config and remote endpoint' },
-  { command: '/model', description: 'Switch active model (e.g. /model gpt-oss:20b)', usage: '/model <id>' },
-  { command: '/clear', description: 'Reset conversation history' },
-  { command: '/tokens', description: 'Show estimated context tokens used' },
-  { command: '/exit', description: 'Exit the agent harness' },
-  { command: '/quit', description: 'Exit the agent harness' },
-];
+/** The live slash menu. Filled from the session's command list with {@link setSlashCommands}. */
+export const SLASH_COMMANDS: SlashCommandInfo[] = [];
 
 /**
- * Adds one `/<name>` command per skill to the live slash menu (replacing any
- * previously registered skill commands). Skills whose name clashes with a built-in
- * command are skipped; the names of skipped skills are returned.
+ * Fills the slash menu from the session's command registry, so the terminal shows the same list
+ * as any other front-end. Replaces whatever was there.
  */
-export function registerSkillCommands(skills: { name: string; description: string }[]): string[] {
-  for (let i = SLASH_COMMANDS.length - 1; i >= 0; i--) {
-    if (SLASH_COMMANDS[i].skill) SLASH_COMMANDS.splice(i, 1);
-  }
-  const taken = new Set(SLASH_COMMANDS.map((c) => c.command.toLowerCase()));
-  const skipped: string[] = [];
-  for (const skill of skills) {
-    const command = `/${skill.name}`;
-    if (taken.has(command.toLowerCase())) {
-      skipped.push(skill.name);
-      continue;
-    }
-    taken.add(command.toLowerCase());
-    SLASH_COMMANDS.push({
-      command,
-      description: `[skill] ${skill.description.replace(/\s+/g, ' ').trim()}`,
-      usage: `${command} <input>`,
-      acceptsArgs: true,
-      skill: true,
-    });
-  }
-  return skipped;
+export function setSlashCommands(commands: CommandInfo[]): void {
+  SLASH_COMMANDS.splice(
+    0,
+    SLASH_COMMANDS.length,
+    ...commands.map((c) => ({
+      command: `/${c.name}`,
+      description: c.kind === 'skill' ? `[skill] ${c.description}` : c.description,
+      usage: c.usage,
+      acceptsArgs: c.acceptsArgs,
+      skill: c.kind === 'skill',
+    }))
+  );
 }
 
 function visibleLength(str: string): number {

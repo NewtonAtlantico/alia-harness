@@ -5,8 +5,13 @@
  */
 import { EventEmitter } from 'node:events';
 import readline from 'node:readline';
-import { DynamicPrompt } from '../src/cli/ui/prompt.js';
+import { DynamicPrompt, setSlashCommands } from '../src/cli/ui/prompt.js';
 import { FileIndex } from '../src/core/context/fileIndex.js';
+import { CommandRegistry } from '../src/core/commands/commandRegistry.js';
+import { SkillRegistry } from '../src/core/skills/skillLoader.js';
+
+// The slash menu is filled from the command registry (the CLI does this at startup).
+setSlashCommands(new CommandRegistry(() => new SkillRegistry({ roots: [] })).list());
 
 class FakeStdin extends EventEmitter {
   isTTY = true;

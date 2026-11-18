@@ -14,7 +14,8 @@ import { createUseSkillTool } from '../src/core/tools/useSkill.js';
 import { ToolRegistry } from '../src/core/tools/index.js';
 import { ContextManager } from '../src/core/context/contextManager.js';
 import { SafetyChecker } from '../src/core/safety/safetyChecker.js';
-import { SLASH_COMMANDS, registerSkillCommands } from '../src/cli/ui/prompt.js';
+import { SLASH_COMMANDS, setSlashCommands } from '../src/cli/ui/prompt.js';
+import { CommandRegistry } from '../src/core/commands/commandRegistry.js';
 
 let failures = 0;
 function check(name: string, cond: boolean, extra = '') {
@@ -135,11 +136,11 @@ try {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
-const skipped = registerSkillCommands([...registry.available(), { name: 'help', description: 'clash' }]);
+setSlashCommands(new CommandRegistry(() => registry).list());
 check('skill commands registered', SLASH_COMMANDS.some((c) => c.command === '/spec-to-tasks' && c.skill && c.acceptsArgs));
-check('built-in clash skipped', skipped.includes('help') && SLASH_COMMANDS.filter((c) => c.command === '/help').length === 1);
-registerSkillCommands([]);
-check('re-registering replaces skill commands', !SLASH_COMMANDS.some((c) => c.skill));
+check('built-ins are in the menu too', SLASH_COMMANDS.some((c) => c.command === '/help' && !c.skill) && SLASH_COMMANDS.some((c) => c.command === '/compact'));
+setSlashCommands(new CommandRegistry(() => new SkillRegistry({ roots: [] })).list());
+check('the menu is replaced, not appended to', !SLASH_COMMANDS.some((c) => c.skill) && SLASH_COMMANDS.some((c) => c.command === '/help'));
 
 console.log(failures === 0 ? '\nAll skill checks passed.' : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

@@ -41,7 +41,11 @@ export type AgentEventBody =
     }
   /** The request was answered (or the run was cancelled while it was open): close the card. */
   | { type: 'permission_resolved'; id: string; toolCallId?: string; decision: PermissionDecision | 'cancelled' }
-  | { type: 'context_compacted' }
+  /**
+   * The history was made smaller: older tool output archived (no extra fields), or a `/compact`
+   * summary (the fields say how much it saved).
+   */
+  | { type: 'context_compacted'; summarized?: number; tokensBefore?: number; tokensAfter?: number }
   | {
       type: 'subagent_started';
       id: string;
@@ -109,7 +113,11 @@ export function eventsToAgentUI(ui: AgentUI): EventSink {
         ui.printToolResult?.(e.result, e.isError);
         return;
       case 'context_compacted':
-        ui.printInfo?.('Context window compacted to preserve token budget.');
+        ui.printInfo?.(
+          e.tokensBefore !== undefined
+            ? `Conversation compacted: ${e.tokensBefore} -> ${e.tokensAfter} estimated tokens (${e.summarized} earlier messages summarized).`
+            : 'Context window compacted to preserve token budget.'
+        );
         return;
       case 'subagent_started':
         ui.printInfo?.(
