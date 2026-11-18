@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
-import { ToolRegistry, ToolContext } from '../tools/index.js';
+import { ToolRegistry, ToolContext, CANCELLED_OUTPUT_PREFIX } from '../tools/index.js';
+import { raceAbort } from '../abort.js';
 import { SafetyChecker } from '../safety/safetyChecker.js';
 import { ContextManager } from '../context/contextManager.js';
 import { randomUUID } from 'node:crypto';
@@ -30,8 +31,17 @@ export interface AgentOptions {
  * - max_steps: the step budget ran out before the model concluded.
  * - failed:    the API call threw, or the endpoint returned no usable message
  *              (see `failure` for which).
+ * - cancelled: the caller aborted the run through its AbortSignal.
  */
-export type AgentStatus = 'completed' | 'max_steps' | 'failed';
+export type AgentStatus = 'completed' | 'max_steps' | 'failed' | 'cancelled';
+
+export interface RunOptions {
+  /**
+   * Aborts the run. It stops the model request, stops (or skips) tool calls, and ends with
+   * status `cancelled`. The history stays valid, so the same agent can run again.
+   */
+  signal?: AbortSignal;
+}
 
 export interface AgentResult {
   status: AgentStatus;
@@ -110,20 +120,20 @@ export class AliaAgent {
    * Feeds user input, intercepts tool calls, runs them locally, feeds results back,
    * and repeats until the model finishes its task with a final text response.
    */
-  async run(userPrompt: string): Promise<string> {
-    return (await this.runDetailed(userPrompt)).text;
+  async run(userPrompt: string, options: RunOptions = {}): Promise<string> {
+    return (await this.runDetailed(userPrompt, options)).text;
   }
 
   /**
    * Same loop as `run()`, but reports how it ended so callers (subagents, tests) can branch
    * on completed / max_steps / failed instead of string-matching the text.
    */
-  async runDetailed(userPrompt: string): Promise<AgentResult> {
+  async runDetailed(userPrompt: string, options: RunOptions = {}): Promise<AgentResult> {
     const runId = randomUUID();
     this.emit({ type: 'run_started', runId });
     let result: AgentResult;
     try {
-      result = await this.runLoop(userPrompt);
+      result = await this.runLoop(userPrompt, options.signal);
     } catch (err: any) {
       // Unexpected exception: still close the run for observers, then let the caller see it.
       this.emit({ type: 'run_finished', runId, result: { status: 'failed', text: String(err?.message ?? err), steps: 0 } });
@@ -133,7 +143,12 @@ export class AliaAgent {
     return result;
   }
 
-  private async runLoop(userPrompt: string): Promise<AgentResult> {
+  private cancelled(step: number): AgentResult {
+    this.emit({ type: 'notice', level: 'info', message: 'Run cancelled.' });
+    return { status: 'cancelled', text: 'Run cancelled by user.', steps: step };
+  }
+
+  private async runLoop(userPrompt: string, signal?: AbortSignal): Promise<AgentResult> {
     // 1. Append user prompt to message history
     this.messages.push({
       role: 'user',
@@ -143,6 +158,7 @@ export class AliaAgent {
     let step = 0;
 
     while (step < this.maxSteps) {
+      if (signal?.aborted) return this.cancelled(step);
       step++;
 
       // Manage and prune context window if getting close to token budget
@@ -156,20 +172,31 @@ export class AliaAgent {
 
       let response: OpenAI.Chat.Completions.ChatCompletion;
       try {
-        response = await this.client.chat.completions.create({
-          model: this.model,
-          messages: this.messages,
-          tools: this.toolRegistry.getOpenAITools(),
-          tool_choice: 'auto',
-        });
+        // The signal is handed to the client (so the HTTP request is dropped) and also raced here,
+        // so a client that ignores it still cannot keep a cancelled run waiting.
+        response = await raceAbort(
+          this.client.chat.completions.create(
+            {
+              model: this.model,
+              messages: this.messages,
+              tools: this.toolRegistry.getOpenAITools(),
+              tool_choice: 'auto',
+            },
+            signal ? { signal } : undefined
+          ),
+          signal
+        );
       } catch (err: any) {
         this.emit({ type: 'model_finished', step });
+        if (signal?.aborted) return this.cancelled(step);
         const errorMsg = `API request failed: ${err.message}`;
         this.emit({ type: 'notice', level: 'error', message: errorMsg });
         return { status: 'failed', text: errorMsg, steps: step, failure: 'api_error' };
       }
 
       this.emit({ type: 'model_finished', step });
+      // The answer arrived just as the user cancelled: drop it rather than act on it.
+      if (signal?.aborted) return this.cancelled(step);
 
       const choice = response.choices?.[0];
       if (!choice || !choice.message) {
@@ -211,12 +238,15 @@ export class AliaAgent {
         workingDirectory: this.workingDirectory,
         safetyChecker: this.safetyChecker,
         contextManager: this.contextManager,
+        signal,
         emit: this.emit,
       };
+      const answered = new Set<string>();
 
       for (const toolCall of toolCalls) {
         // Only function tool calls supported by standard OpenAI spec
         if (toolCall.type !== 'function') continue;
+        if (signal?.aborted) break;
 
         const fnName = toolCall.function.name;
         const fnArgs = toolCall.function.arguments;
@@ -227,7 +257,7 @@ export class AliaAgent {
         const result = await this.toolRegistry.execute(fnName, fnArgs, { ...baseContext, toolCallId: toolCall.id });
         const durationMs = Date.now() - startTime;
 
-        const isError = result.startsWith('Error:');
+        const isError = result.startsWith('Error:') || result.startsWith(CANCELLED_OUTPUT_PREFIX);
         this.emit({ type: 'tool_call_finished', id: toolCall.id, name: fnName, result, isError, durationMs });
 
         // Feedback: Append tool result back into message history as a tool role message
@@ -236,6 +266,21 @@ export class AliaAgent {
           tool_call_id: toolCall.id,
           content: result,
         });
+        answered.add(toolCall.id);
+      }
+
+      if (signal?.aborted) {
+        // The model announced these calls, so each needs a tool message or the next request is
+        // rejected for a dangling tool_call_id. Tell it they did not run.
+        for (const toolCall of toolCalls) {
+          if (answered.has(toolCall.id)) continue;
+          this.messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: `${CANCELLED_OUTPUT_PREFIX} Tool call was not run because the run was cancelled.`,
+          });
+        }
+        return this.cancelled(step);
       }
 
       // Loop repeats: next iteration will send tool results back to LLM for reasoning

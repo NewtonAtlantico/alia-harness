@@ -225,9 +225,16 @@ export async function cliConfirmDangerousCommand(ctx: SafetyConfirmationContext)
 
   const rl = readline.createInterface({ input, output });
   try {
-    const answer = await rl.question(pc.bold('Do you want to allow this command? [y/N]: '));
+    const answer = await rl.question(
+      pc.bold('Do you want to allow this command? [y/N]: '),
+      { signal: ctx.signal }
+    );
     const trimmed = answer.trim().toLowerCase();
     return trimmed === 'y' || trimmed === 'yes';
+  } catch (err: any) {
+    // The run was cancelled while the question was open: dismiss it as a "no".
+    if (err?.name === 'AbortError') return false;
+    throw err;
   } finally {
     rl.close();
   }

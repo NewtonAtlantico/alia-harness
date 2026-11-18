@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { ToolDefinition, ToolContext, toOpenAITool } from './types.js';
+import { ToolDefinition, ToolContext, toOpenAITool, CANCELLED_OUTPUT_PREFIX } from './types.js';
 import { readFileTool } from './readFile.js';
 import { runBashTool } from './runBash.js';
 import { writeFileTool } from './writeFile.js';
@@ -72,6 +72,10 @@ export class ToolRegistry {
     rawArguments: string,
     context: ToolContext
   ): Promise<string> {
+    if (context.signal?.aborted) {
+      return `${CANCELLED_OUTPUT_PREFIX} Tool "${name}" was not run because the run was cancelled.`;
+    }
+
     const tool = this.tools.get(name);
     if (!tool) {
       const why = this.withheld.get(name);

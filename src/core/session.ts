@@ -8,7 +8,7 @@ import { createRunSubagentTool } from './tools/runSubagent.js';
 import { SafetyChecker, SafetyConfirmationHandler } from './safety/safetyChecker.js';
 import { ContextManager } from './context/contextManager.js';
 import { AttachedFile, resolveFileMentions } from './context/fileMentions.js';
-import { AgentResult, AliaAgent, DEFAULT_SYSTEM_PROMPT } from './agent/agentLoop.js';
+import { AgentResult, AliaAgent, DEFAULT_SYSTEM_PROMPT, RunOptions } from './agent/agentLoop.js';
 import { randomUUID } from 'node:crypto';
 import { AgentUI } from './agent/agentUI.js';
 import { EventSink, combineSinks, eventsToAgentUI } from './agent/events.js';
@@ -165,9 +165,9 @@ export class AliaSession {
     );
   }
 
-  /** Runs one user turn through the agent loop. */
-  run(prompt: string): Promise<AgentResult> {
-    return this.agent.runDetailed(prompt);
+  /** Runs one user turn through the agent loop. Pass `{ signal }` to make it cancellable (Stop button). */
+  run(prompt: string, options: RunOptions = {}): Promise<AgentResult> {
+    return this.agent.runDetailed(prompt, options);
   }
 
   /** Expands `@path` mentions in user text into attached file contents. */

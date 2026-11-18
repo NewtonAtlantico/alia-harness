@@ -1,8 +1,8 @@
-import { exec, execSync } from 'node:child_process';
+import { ChildProcess, exec, execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { ToolDefinition } from './types.js';
+import { CANCELLED_OUTPUT_PREFIX, ToolDefinition } from './types.js';
 
 interface RunBashArgs {
   command: string;
@@ -77,6 +77,27 @@ function findPosixShellOnWindows(): ShellInfo | null {
   return null;
 }
 
+/**
+ * Stops a command and everything it started. On Windows the shell is only a wrapper
+ * (`bash -c "npm test"` -> node), so killing just the shell would leave the real work running;
+ * `taskkill /T` takes the whole tree. Elsewhere the shell gets SIGTERM, which covers the common
+ * simple command (bash runs it directly); a compound command's descendants may outlive it.
+ */
+function killProcessTree(child: ChildProcess): void {
+  if (!child.pid) return;
+  if (os.platform() === 'win32') {
+    try {
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+        .on('error', () => child.kill())
+        .unref();
+    } catch {
+      child.kill();
+    }
+    return;
+  }
+  child.kill('SIGTERM');
+}
+
 function resolveShell(): ShellInfo {
   if (cachedShell) return cachedShell;
 
@@ -119,7 +140,7 @@ export const runBashTool: ToolDefinition<RunBashArgs> = {
     const trimmedCommand = args.command.trim();
 
     // Human-in-the-loop safety gate
-    const safetyCheck = await context.safetyChecker.confirmIfDangerous(trimmedCommand);
+    const safetyCheck = await context.safetyChecker.confirmIfDangerous(trimmedCommand, context.signal);
     if (!safetyCheck.approved) {
       return safetyCheck.reason || 'Command execution cancelled by user.';
     }
@@ -127,8 +148,26 @@ export const runBashTool: ToolDefinition<RunBashArgs> = {
     const timeout = args.timeout_ms && args.timeout_ms > 0 ? args.timeout_ms : 30000;
     const { shell, label } = resolveShell();
 
+    const signal = context.signal;
+    if (signal?.aborted) return `${CANCELLED_OUTPUT_PREFIX} Command was not run because the run was cancelled.`;
+
     return new Promise<string>((resolve) => {
-      exec(
+      let settled = false;
+      const finish = (text: string) => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener('abort', onAbort);
+        resolve(text);
+      };
+      // Declared before exec so the callback can reference it; assigned right after.
+      let child: ChildProcess;
+      function onAbort() {
+        killProcessTree(child);
+        // Answer now: do not wait for the pipes of a dying tree to drain.
+        finish(`${CANCELLED_OUTPUT_PREFIX} Command was stopped before it finished.`);
+      }
+
+      child = exec(
         trimmedCommand,
         {
           cwd: context.workingDirectory,
@@ -170,9 +209,10 @@ export const runBashTool: ToolDefinition<RunBashArgs> = {
           }
 
           const { output: truncatedOutput } = context.contextManager.truncateToolOutput(output);
-          resolve(truncatedOutput);
+          finish(truncatedOutput);
         }
       );
+      signal?.addEventListener('abort', onAbort, { once: true });
     });
   },
 };

@@ -21,7 +21,8 @@
     "test:agent": "tsx scripts/smoke-agent.ts",
     "test:subagents": "tsx scripts/smoke-subagents.ts",
     "test:session": "tsx scripts/smoke-session.ts",
-    "test:events": "tsx scripts/smoke-events.ts"
+    "test:events": "tsx scripts/smoke-events.ts",
+    "test:cancel": "tsx scripts/smoke-cancel.ts"
   },
   "keywords": ["ai", "agent", "alia", "llm", "cli", "harness"],
   "author": "",

@@ -3,12 +3,20 @@ import { SafetyChecker } from '../safety/safetyChecker.js';
 import { ContextManager } from '../context/contextManager.js';
 import type { AgentEvent } from '../agent/events.js';
 
+/**
+ * Tool results that begin with this text mean "stopped because the run was cancelled".
+ * The agent loop reports them as failed tool calls.
+ */
+export const CANCELLED_OUTPUT_PREFIX = '[Cancelled by user]';
+
 export interface ToolContext {
   workingDirectory: string;
   safetyChecker: SafetyChecker;
   contextManager: ContextManager;
   /** The model's id for the tool call being executed (absent when a tool is invoked outside a run). */
   toolCallId?: string;
+  /** Aborts when the user cancels the run. Long-running tools must stop work and return promptly. */
+  signal?: AbortSignal;
   /** Lets a tool report structured events (e.g. subagent start/finish). Absent outside a run. */
   emit?: (event: AgentEvent) => void;
 }

@@ -1,3 +1,5 @@
+import { RunCancelledError, raceAbort } from '../abort.js';
+
 export interface DangerousCommandRule {
   pattern: RegExp;
   reason: string;
@@ -37,6 +39,8 @@ export interface SafetyConfirmationContext {
   command: string;
   reasons: string[];
   requester?: string;
+  /** Aborts if the run is cancelled while the question is open: dismiss the prompt. */
+  signal?: AbortSignal;
 }
 
 export type SafetyConfirmationHandler = (
@@ -93,7 +97,7 @@ export class SafetyChecker {
    * Prompt user for confirmation if command is dangerous.
    * Returns true if approved, false if denied.
    */
-  async confirmIfDangerous(command: string): Promise<{ approved: boolean; reason?: string }> {
+  async confirmIfDangerous(command: string, signal?: AbortSignal): Promise<{ approved: boolean; reason?: string }> {
     const check = this.evaluateCommand(command);
 
     if (!check.isDangerous) {
@@ -115,11 +119,20 @@ export class SafetyChecker {
       };
     }
 
-    const approved = await handler({
-      command,
-      reasons: check.reasons,
-      requester,
-    });
+    const cancelledResult = {
+      approved: false,
+      reason: `Cancelled by user before the command was approved: "${command}"`,
+    };
+    if (signal?.aborted) return cancelledResult;
+
+    let approved: boolean;
+    try {
+      // The user may cancel the run while the approval card is open; never leave the run waiting on it.
+      approved = await raceAbort(handler({ command, reasons: check.reasons, requester, signal }), signal);
+    } catch (err) {
+      if (err instanceof RunCancelledError) return cancelledResult;
+      throw err;
+    }
 
     if (!approved) {
       return {

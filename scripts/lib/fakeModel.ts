@@ -16,6 +16,12 @@ export type ScriptedTurn =
     }
   /** Make the API call throw, like a network/server error. */
   | { throws: string }
+  /**
+   * The request never completes on its own, like a slow endpoint. 'honor-signal' rejects when the
+   * caller's AbortSignal fires (a well-behaved client); 'ignore-signal' never settles (a client that
+   * does not support cancellation).
+   */
+  | { hang: 'honor-signal' | 'ignore-signal' }
   /** Return a response with no choices, like a broken endpoint. */
   | { empty: true }
   /** Compute the turn from the request (e.g. to react to the previous tool result). */
@@ -26,6 +32,8 @@ export interface RecordedRequest {
   /** Snapshot of the history as sent (later mutation by the agent does not affect it). */
   messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
   toolNames: string[];
+  /** Whether the caller passed an AbortSignal in the request options. */
+  signalPassed: boolean;
 }
 
 export class FakeModel {
@@ -47,7 +55,7 @@ export class FakeModel {
     return {
       chat: {
         completions: {
-          create: async (params: any) => this.create(params),
+          create: async (params: any, options?: { signal?: AbortSignal }) => this.create(params, options),
         },
       },
     } as unknown as OpenAI;
@@ -57,11 +65,12 @@ export class FakeModel {
     return this.requests.length;
   }
 
-  private async create(params: any): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+  private async create(params: any, options?: { signal?: AbortSignal }): Promise<OpenAI.Chat.Completions.ChatCompletion> {
     const req: RecordedRequest = {
       model: params.model,
       messages: structuredClone(params.messages),
       toolNames: (params.tools ?? []).map((t: any) => t.function?.name),
+      signalPassed: options?.signal !== undefined,
     };
     this.requests.push(req);
 
@@ -76,6 +85,14 @@ export class FakeModel {
     }
     if (typeof turn === 'function') turn = turn(req);
 
+    if ('hang' in turn) {
+      return new Promise((_, reject) => {
+        if (turn.hang !== 'honor-signal') return; // never settles
+        const abort = () => reject(Object.assign(new Error('Request was aborted.'), { name: 'AbortError' }));
+        if (options?.signal?.aborted) abort();
+        else options?.signal?.addEventListener('abort', abort, { once: true });
+      });
+    }
     if ('throws' in turn) throw new Error(turn.throws);
     if ('empty' in turn) return { id: 'fake', choices: [] } as unknown as OpenAI.Chat.Completions.ChatCompletion;
 

@@ -178,7 +178,8 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
       });
       let result;
       try {
-        result = await child.runDetailed(firstMessage);
+        // The child shares the parent's cancellation: aborting the parent stops the child too.
+        result = await child.runDetailed(firstMessage, { signal: ctx.signal });
       } catch (err) {
         emit?.({ type: 'subagent_finished', id: subagentId, label, status: 'failed', steps: 0, maxSteps });
         throw err;
@@ -199,7 +200,7 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
         report = { status: result.status === 'max_steps' ? 'max_steps' : 'failed', summary: result.text, artifacts: [], questions: '' };
       }
 
-      emit?.({ type: 'subagent_finished', id: subagentId, label, status: report.status, steps: result.steps, maxSteps });
+      emit?.({ type: 'subagent_finished', id: subagentId, label, status: result.status === 'cancelled' ? 'cancelled' : report.status, steps: result.steps, maxSteps });
       return formatSubagentReport(report, { steps: result.steps, maxSteps });
     },
   };

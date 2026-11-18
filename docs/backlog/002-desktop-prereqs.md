@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`). Next: D3 (cancellation). Phase 0 of the desktop app; the app itself will be backlog 003. |
+| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`). Next: D4 (permission model v2). Phase 0 of the desktop app; the app itself will be backlog 003. |
 | **Depends on** | `src/core` as it is today (decoupled from `cli/`); subagents S1-S5 (done) |
 | **Design** | `alia Harness Desktop.pdf` (chat, changes panel, permission card, pipeline wizard, slash and `@` menus) |
 | **Primary consumer** | The standalone Electron app (backlog 003), plus the CLI, which must keep working unchanged |
@@ -136,14 +136,34 @@ As built in D2:
 
 ### 5.3 Cancellation (D3)
 
-- `AliaAgent.runDetailed(prompt, { signal })`. The signal is passed to `client.chat.completions.create`
-  (`{ signal }` request option) and checked between tool calls.
-- `ToolContext` gains an optional `signal`; `run_bash` kills the child process on abort and returns
-  `[Cancelled by user]`; the other tools are short and just check the signal before starting.
-- New `AgentStatus` value `cancelled`. A cancelled run leaves history valid: any tool call that was
-  announced but not executed gets a synthetic `tool` message, so the next request is not rejected
-  for a dangling `tool_call_id`.
-- A subagent inherits the parent's signal. This also closes the "Ctrl+C during a child" risk in 001.
+- `session.run(prompt, { signal })` and `AliaAgent.runDetailed(prompt, { signal })`. The signal is
+  handed to `client.chat.completions.create` **and** raced in the loop (`raceAbort`), so a client that
+  ignores it cannot keep a cancelled run waiting. A response that arrives just as the user cancels
+  is dropped, not acted on.
+- `ToolContext.signal`. `ToolRegistry.execute` refuses new work once it is aborted (returns a
+  `[Cancelled by user] ...` result), so tools that never look at the signal are still safe. `run_bash`
+  kills the command and answers immediately, without waiting for its pipes to drain.
+- New `AgentStatus` value `cancelled` (text "Run cancelled by user."). `tool_call_finished` marks an
+  interrupted call `isError: true`.
+- A cancelled run leaves the history valid: every tool call the model announced but the loop did
+  not execute gets a synthetic tool message, so the next request is not rejected for a dangling
+  `tool_call_id`. The same agent or session can run again.
+- A subagent inherits the parent's signal; its `subagent_finished` event has status `cancelled`.
+- The approval is part of the run: `confirmIfDangerous(command, signal)` races the user's handler
+  against the signal, and `SafetyConfirmationContext.signal` lets a UI dismiss its approval card.
+  The CLI prompt does (`rl.question(..., { signal })`).
+
+Known limitations:
+
+- **Process trees:** on Windows, `taskkill /T /F` ends the command and everything it started (verified
+  with a grandchild process). On macOS/Linux the shell gets `SIGTERM`, which is enough for a simple
+  command but may leave descendants of a compound command running. It was not exercised on those
+  platforms here.
+- **Timeouts** (`timeout_ms`) still use Node's own timeout, which stops the shell only. Making them
+  use the same tree kill is a small follow-up.
+- **CLI Ctrl+C:** unchanged (it still exits the process, from the prompt and from the spinner). Core
+  now supports a cancel-the-run Ctrl+C, but wiring it into the terminal UI is separate work; the
+  desktop app's Stop button is the intended consumer.
 
 ### 5.4 Permission model v2 (D4)
 
@@ -287,7 +307,7 @@ Points are Fibonacci, capped at 8, matching `spec-to-tasks`.
 |---|---|---|---|
 | D1 | **Done.** `createSession()` factory; remove global handlers; explicit workspace and config | 5 | `cli/index.ts` is a thin consumer of `createSession`. Importing `terminal.ts` has no side effects. Two sessions with different workspaces and handlers run in one process without interference (fake-model test). `loadConfig` takes a path or object; no `process.cwd()` reads remain in `core`. `npm run test:*` and `typecheck` pass. |
 | D2 | **Done.** Typed `AgentEvent` stream + `eventsToAgentUI` adapter | 5 | Every `AgentUI` call has an event equivalent with stable tool-call ids and `durationMs`. CLI output is identical to before. A test records the event sequence for a run with two tool calls and a subagent. |
-| D3 | Cancellation via `AbortSignal` (loop, API call, `run_bash`, subagents) | 3 | Aborting mid-API-call and mid-`run_bash` ends the run with `cancelled` within a second, kills the child process, and leaves history valid (no dangling `tool_call_id`). A following `run()` works. |
+| D3 | **Done.** Cancellation via `AbortSignal` (loop, API call, `run_bash`, subagents) | 3 | Aborting mid-API-call and mid-`run_bash` ends the run with `cancelled` within a second, kills the child process, and leaves history valid (no dangling `tool_call_id`). A following `run()` works. |
 | D4 | Permission model v2: decisions, modes, per-project allowlist | 5 | `allow_always` persists and applies on the next session; dangerous commands still prompt in `ask-dangerous` and `ask-commands`; `auto` skips prompts; legacy boolean handler still works; the permission event carries the tool-call id. |
 | D5 | Session store (JSONL), resume, list, search, rename | 5 | A run is persisted and `resume` reproduces the same `messages`. `list` filters by workspace; `search` finds text in titles and messages. A corrupted last line is skipped, not fatal. Nothing is written inside the workspace. |
 | D6 | `CommandRegistry`, `/compact`, `getContextUsage()` | 3 | CLI prompt and a test consumer read the same command list (built-ins plus skills). `/compact` shrinks a long history, keeps system prompt, pinned skills and recent turns, and the run continues correctly afterwards. |
