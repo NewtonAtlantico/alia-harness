@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`), D5 (session store; `npm run test:store`), D6 (command registry, `/compact`; `npm run test:commands`), D7 (change tracking and undo; `npm run test:changes`), D8 (PDF reading; `npm run test:documents`), D9 (DOCX and PPTX; `npm run test:office`), D10 (`ask_user`; `npm run test:askuser`), D11 (pipeline state; `npm run test:pipeline`), D12 (pipeline status and resume; `npm run test:resume`). Next: D13 (tracker detection). Phase 0 of the desktop app; the app itself will be backlog 003. |
+| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`), D5 (session store; `npm run test:store`), D6 (command registry, `/compact`; `npm run test:commands`), D7 (change tracking and undo; `npm run test:changes`), D8 (PDF reading; `npm run test:documents`), D9 (DOCX and PPTX; `npm run test:office`), D10 (`ask_user`; `npm run test:askuser`), D11 (pipeline state; `npm run test:pipeline`), D12 (pipeline status and resume; `npm run test:resume`), D13 (tracker detection; `npm run test:issues`). Only the optional D14 (streaming) is left. Phase 0 of the desktop app is complete; the app itself will be backlog 003. |
 | **Depends on** | `src/core` as it is today (decoupled from `cli/`); subagents S1-S5 (done) |
 | **Design** | `alia Harness Desktop.pdf` (chat, changes panel, permission card, pipeline wizard, slash and `@` menus) |
 | **Primary consumer** | The standalone Electron app (backlog 003), plus the CLI, which must keep working unchanged |
@@ -460,19 +460,27 @@ the prose is rendered from it:
 ### 5.11 Tracker detection (D13)
 
 ```ts
-detectIssuePublishing(session): {
-  mcp: string[];                    // registered tool names that can create issues (e.g. createJiraIssue)
-  cli: { gh?: 'ready' | 'unauthenticated' | 'missing'; glab?: ... };
-  mode: 'publish' | 'drafts';
-  warning?: string;
-}
+const status = await session.issuePublishing();   // or detectIssuePublishing({ workspace, toolNames }, { probe? })
+// { mcp: string[], cli: { gh?, glab? }, remote?: { host, provider }, mode: 'publish' | 'drafts',
+//   via?: 'gh' | 'glab' | 'mcp', skill: 'add-tasks-to-jira' | 'issue-writer', warning?: string, draftsDir: 'docs/issues' }
 ```
 
-- `mode` is `publish` when an MCP-backed issue tool is registered (same prefix rule as `requires:`)
-  **or** a `gh`/`glab` CLI is installed and authenticated for the repo's remote. Otherwise it is `drafts` and `warning` says that no tracker connection was found and that drafts
-  will be saved to `docs/issues/`. The app shows this before the user confirms "Publicar issues".
-- The `issue-writer` skill already falls back to `docs/issues/<date>-<slug>.md`; no skill change.
-- Today the harness has no MCP client, so v1 resolves to `publish` only through an authenticated CLI.
+- `mode` is `publish` when **a registered tool can create an issue** (the future MCP client's `mcp__<server>__create_issue`, `createJiraIssue`,
+  and similar; read-only tools such as `list_issues` and unrelated ones such as `create_pull_request` do not count) **or the `gh` / `glab` CLI is
+  installed and signed in for the host of the repository's `origin` remote**. Otherwise it is `drafts`, with a `warning`.
+- **The CLI check is made for the right host**: `gh auth status --hostname <host>`, so a GitHub Enterprise or self-hosted GitLab remote is
+  checked for that server and being signed in to github.com does not count. Only the CLI that serves the remote is asked (a self-hosted
+  host of unknown kind is tried with both). A folder with no git remote has no CLI to use (an MCP tool still counts: it knows where to publish).
+  A CLI that is not installed is `missing`, one that is installed but not signed in is `unauthenticated`.
+- `via` prefers a ready CLI over an MCP tool, as the `issue-writer` skill does. `skill` is `add-tasks-to-jira` when both Jira tools it
+  `requires:` are registered (so the answer agrees with the skill's own availability rule, which is tested), otherwise `issue-writer`.
+- **The warning** is the same text on every attempt (the app shows it at every publish attempt while `mode` is `drafts`, as decided): that no
+  issue tracker connection was found and why (no tool; the CLI is not installed or not signed in to *that host*; or there is no git remote), that the
+  issues will be saved as drafts in `docs/issues/`, and the exact fix (for example "run `gh auth login --hostname github.com`").
+- The probe is injectable (`CommandProbe`), so every combination is tested without a real CLI; the real one (`createExecProbe`) never throws,
+  reports a missing program, and cuts a hanging one off after a timeout.
+- The `issue-writer` skill already falls back to `docs/issues/<date>-<slug>.md`; no skill change. The harness has no MCP client yet, so today
+  `publish` comes from a signed-in CLI; the day an MCP client registers its tools, the same check starts returning `publish` by itself.
 
 ## 6. Tasks
 
@@ -492,7 +500,7 @@ Points are Fibonacci, capped at 8, matching `spec-to-tasks`.
 | D10 | **Done.** `ask_user` tool, `onAskUser` handler, HARNESS_NOTES mapping | 5 | With a handler, questions round-trip as structured answers (including a deferral with owner); without one the tool errors with the plain-text fallback instruction; it is absent in subagents; the CLI implements a basic handler. |
 | D11 | **Done.** `pipeline_state` tool, `state.json` schema, `STATE.md` rendering, derived task stats | 5 | Updates validate against the schema and re-render `STATE.md`; stats (tasks, points, per spec) match a golden `spec-to-tasks` sample; the pipeline skill carries the one-line instruction and still works without the tool. |
 | D12 | **Done.** Pipeline status and resume, with stale-input detection | 3 | Given a state file stopped at Gate 1 (3 of 5 answered), `getPipelineStatus` reports that, and a resumed session continues from the open questions. A modified input file is flagged `stale`. |
-| D13 | `detectIssuePublishing()` with the warning | 3 | Registry with an MCP issue tool resolves to `publish`; a ready `gh`/`glab` CLI resolves to `publish`; neither resolves to `drafts` with the warning text; verified with a fake registry and a stubbed CLI probe. |
+| D13 | **Done.** `detectIssuePublishing()` with the warning | 3 | Registry with an MCP issue tool resolves to `publish`; a ready `gh`/`glab` CLI resolves to `publish`; neither resolves to `drafts` with the warning text; verified with a fake registry and a stubbed CLI probe. |
 | D14 | *(optional)* Streaming of assistant text and reasoning | 5 | `assistant_delta` and `thinking_delta` events during a run, final message unchanged; falls back to non-streaming when the endpoint does not support it. Can ship after the app's v1. |
 
 Total: 55 points (60 with D14).

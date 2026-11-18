@@ -8,6 +8,7 @@ import { createRunSubagentTool } from './tools/runSubagent.js';
 import { AskUserHandler, createAskUserTool } from './tools/askUser.js';
 import { createPipelineStateTool } from './tools/pipelineState.js';
 import { PipelineStatus, getPipelineStatus } from './pipeline/pipelineStatus.js';
+import { CommandProbe, IssuePublishingStatus, detectIssuePublishing } from './issues/issuePublishing.js';
 import {
   PermissionMode,
   SafetyChecker,
@@ -342,6 +343,15 @@ export class AliaSession {
     } finally {
       this.compacting = false;
     }
+  }
+
+  /**
+   * Whether "Publicar issues" can publish (an issue tool is registered, or `gh`/`glab` is signed in for this
+   * repository's remote) or will fall back to drafts in `docs/issues/`. When it will fall back, `warning` is the
+   * text to show the user before they confirm; ask again at every publish attempt.
+   */
+  issuePublishing(options: { probe?: CommandProbe } = {}): Promise<IssuePublishingStatus> {
+    return detectIssuePublishing({ workspace: this.workspace, toolNames: this.tools.getAll().map((t) => t.name) }, options);
   }
 
   /** Where this project's requirements-to-tasks pipeline stands, read from `docs/pipeline/state.json`. Changes nothing. */

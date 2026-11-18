@@ -12,6 +12,7 @@ export * from './documents/readDocument.js';
 export * from './pipeline/pipelineState.js';
 export * from './pipeline/taskStats.js';
 export * from './pipeline/pipelineStatus.js';
+export * from './issues/issuePublishing.js';
 export * from './context/compactor.js';
 export * from './context/contextManager.js';
 export * from './context/fileMentions.js';
