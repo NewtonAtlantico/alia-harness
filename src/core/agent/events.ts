@@ -1,5 +1,6 @@
 import type { AgentResult } from './agentLoop.js';
 import type { AgentUI, ThinkingHandle } from './agentUI.js';
+import type { PermissionDecision } from '../safety/safetyChecker.js';
 
 /**
  * Everything a front-end needs to render a run, as plain serializable data.
@@ -24,8 +25,22 @@ export type AgentEventBody =
   | { type: 'assistant_message'; text: string; final: boolean }
   | { type: 'tool_call_started'; id: string; name: string; args: string }
   | { type: 'tool_call_finished'; id: string; name: string; result: string; isError: boolean; durationMs: number }
-  /** A dangerous command is waiting for the user's decision. `toolCallId` is filled in by the permission model (D4). */
-  | { type: 'permission_requested'; id: string; toolCallId?: string; command: string; reasons: string[]; requester?: string }
+  /**
+   * A command is waiting for the user's decision. `toolCallId` is the tool call that wants to run it.
+   * `canAlwaysAllow` is false for a dangerous command: offer "allow once" and "deny" only.
+   */
+  | {
+      type: 'permission_requested';
+      id: string;
+      toolCallId?: string;
+      command: string;
+      reasons: string[];
+      dangerous: boolean;
+      canAlwaysAllow: boolean;
+      requester?: string;
+    }
+  /** The request was answered (or the run was cancelled while it was open): close the card. */
+  | { type: 'permission_resolved'; id: string; toolCallId?: string; decision: PermissionDecision | 'cancelled' }
   | { type: 'context_compacted' }
   | {
       type: 'subagent_started';
@@ -111,7 +126,7 @@ export function eventsToAgentUI(ui: AgentUI): EventSink {
         else if (e.level === 'success') ui.printSuccess?.(e.message);
         else ui.printInfo?.(e.message);
         return;
-      // No terminal equivalent: run_started, run_finished, permission_requested
+      // No terminal equivalent: run_started, run_finished, permission_requested, permission_resolved
       // (the terminal asks through its own confirmation handler).
       default:
         return;

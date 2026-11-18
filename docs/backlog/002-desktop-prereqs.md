@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`). Next: D4 (permission model v2). Phase 0 of the desktop app; the app itself will be backlog 003. |
+| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`). Next: D5 (session store). Phase 0 of the desktop app; the app itself will be backlog 003. |
 | **Depends on** | `src/core` as it is today (decoupled from `cli/`); subagents S1-S5 (done) |
 | **Design** | `alia Harness Desktop.pdf` (chat, changes panel, permission card, pipeline wizard, slash and `@` menus) |
 | **Primary consumer** | The standalone Electron app (backlog 003), plus the CLI, which must keep working unchanged |
@@ -106,7 +106,8 @@ type AgentEvent = (
   | { type: 'assistant_message'; text: string; final: boolean }
   | { type: 'tool_call_started'; id: string; name: string; args: string }
   | { type: 'tool_call_finished'; id: string; name: string; result: string; isError: boolean; durationMs: number }
-  | { type: 'permission_requested'; id: string; toolCallId?: string; command: string; reasons: string[]; requester?: string }
+  | { type: 'permission_requested'; id: string; toolCallId?: string; command: string; reasons: string[]; dangerous: boolean; canAlwaysAllow: boolean; requester?: string }
+  | { type: 'permission_resolved'; id: string; toolCallId?: string; decision: 'allow_once' | 'allow_always' | 'deny' | 'cancelled' }
   | { type: 'context_compacted' }
   | { type: 'subagent_started'; id: string; parentToolCallId?: string; label: string; maxSteps: number; skill?: string; quiet: boolean }
   | { type: 'subagent_finished'; id: string; label: string; status: string; steps: number; maxSteps: number }
@@ -125,8 +126,8 @@ As built in D2:
   response, step cap, compact and verbose subagents, fabricated artifact, recursion, compaction).
 - `final: false` is the text a model writes alongside tool calls ("Vou ler o loop atual..."), which
   the design shows and the terminal never did. The adapter keeps hiding it, so CLI output is unchanged.
-- `permission_requested` is emitted by the session just before it calls `onConfirm`. `toolCallId` is
-  filled in by D4.
+- `permission_requested` is emitted by the session just before it calls `onConfirm`, and
+  `permission_resolved` when it is answered or the run is cancelled with the card open (D4).
 - `changes?: FileChange[]` on `tool_call_finished` is added by D7.
 - Observers are isolated: `combineSinks` catches a throwing sink so it can neither fail the run nor
   starve the others.
@@ -178,11 +179,30 @@ type PermissionMode = 'ask-dangerous' | 'ask-commands' | 'auto';
 | `ask-commands` | Prompt for every `run_bash` command not on the allowlist | Desktop (the mock prompts on `npm run build`) |
 | `auto` | No prompts (current `--auto-approve`) | opt-in |
 
-- `allow_always` stores a command rule (exact command or prefix such as `npm run build`) in
-  `<workspace>/.alia/permissions.json`. **Dangerous commands can never be allowlisted**: they always
-  prompt, in every mode except `auto`.
-- The handler receives `{ command, reasons, requester, toolCallId }` and returns a `PermissionDecision`.
-  The old boolean handler keeps working through a shim, so the CLI is untouched at first.
+As built in D4:
+
+- `SafetyChecker.authorize(command, { signal, toolCallId })` replaces `confirmIfDangerous`, which stays
+  as a deprecated alias. `new SafetyChecker(true)` is `auto`, `(false)` is `ask-dangerous`;
+  `autoApprove: true` is shorthand for `mode: 'auto'`, and `mode` wins when both are given. Sessions
+  take `permissionMode` (same rule), `permissionStore`, `permissionsDir`, and expose `session.permissions`.
+- The handler receives `{ command, reasons, dangerous, canAlwaysAllow, requester, toolCallId, signal }` and
+  returns a `PermissionDecision`, a boolean (the older contract: `true` is allow once, `false` is
+  deny, so the CLI is untouched), or `{ decision, match?, command? }`. Without a handler, anything that needs
+  approval is denied.
+- **Dangerous commands can never be allowlisted.** They prompt in every mode except `auto`, are not
+  offered "always" (`canAlwaysAllow: false`), `allow_always` on one is treated as `allow_once`, and a
+  destructive command that was written into the allowlist file by hand still prompts.
+- `allow_always` saves the **exact command**. A host may choose a prefix rule instead (`match: 'prefix'`,
+  e.g. `git status`), which covers that command plus plain arguments. After a prefix nothing may chain,
+  redirect or substitute (semicolon, ampersand, pipe, angle brackets, backtick, dollar sign, newline),
+  so `npm run build && rm -rf x` cannot ride on
+  an allowed `npm run build`. A "prefix" that is not really a prefix of the command falls back to the exact command.
+- **Where it is stored (changed from the first draft):** `~/.alia/permissions/<project>-<hash>.json`, not
+  `<workspace>/.alia/permissions.json`. `.alia/` in a project also holds project skills, which teams
+  commit; a committed allowlist would pre-approve commands for everyone who opens the repo. The file
+  is plain JSON that names its project, is read on every check (so sessions on one project agree), is
+  written atomically, and a damaged file grants nothing and is set aside on the next write.
+- If the allowlist cannot be written, the command still runs this once.
 - File writes outside the workspace are out of scope here; `write_file` and `edit_file` behave as today.
 
 ### 5.5 Session store (D5)
@@ -308,7 +328,7 @@ Points are Fibonacci, capped at 8, matching `spec-to-tasks`.
 | D1 | **Done.** `createSession()` factory; remove global handlers; explicit workspace and config | 5 | `cli/index.ts` is a thin consumer of `createSession`. Importing `terminal.ts` has no side effects. Two sessions with different workspaces and handlers run in one process without interference (fake-model test). `loadConfig` takes a path or object; no `process.cwd()` reads remain in `core`. `npm run test:*` and `typecheck` pass. |
 | D2 | **Done.** Typed `AgentEvent` stream + `eventsToAgentUI` adapter | 5 | Every `AgentUI` call has an event equivalent with stable tool-call ids and `durationMs`. CLI output is identical to before. A test records the event sequence for a run with two tool calls and a subagent. |
 | D3 | **Done.** Cancellation via `AbortSignal` (loop, API call, `run_bash`, subagents) | 3 | Aborting mid-API-call and mid-`run_bash` ends the run with `cancelled` within a second, kills the child process, and leaves history valid (no dangling `tool_call_id`). A following `run()` works. |
-| D4 | Permission model v2: decisions, modes, per-project allowlist | 5 | `allow_always` persists and applies on the next session; dangerous commands still prompt in `ask-dangerous` and `ask-commands`; `auto` skips prompts; legacy boolean handler still works; the permission event carries the tool-call id. |
+| D4 | **Done.** Permission model v2: decisions, modes, per-project allowlist | 5 | `allow_always` persists and applies on the next session; dangerous commands still prompt in `ask-dangerous` and `ask-commands`; `auto` skips prompts; legacy boolean handler still works; the permission event carries the tool-call id. |
 | D5 | Session store (JSONL), resume, list, search, rename | 5 | A run is persisted and `resume` reproduces the same `messages`. `list` filters by workspace; `search` finds text in titles and messages. A corrupted last line is skipped, not fatal. Nothing is written inside the workspace. |
 | D6 | `CommandRegistry`, `/compact`, `getContextUsage()` | 3 | CLI prompt and a test consumer read the same command list (built-ins plus skills). `/compact` shrinks a long history, keeps system prompt, pinned skills and recent turns, and the run continues correctly afterwards. |
 | D7 | `ChangeTracker`: record, diff, revert, keep | 5 | `edit_file` and `write_file` record before/after; `diff` returns a unified diff; `revert` restores or deletes; revert skips a file modified after the agent's change and reports it; `keep` clears the list. |
@@ -343,7 +363,7 @@ Within the foundation, D2 before D3 because cancellation adds an event and a sta
 | A small model ignores `pipeline_state` and hand-writes `STATE.md`. | The tool is the source of truth only when used. The status function detects drift (`STATE.md` newer than `state.json`) and the wizard shows a warning; fall back to code-driven orchestration if it recurs (001, option B). |
 | Single-conversation pipeline hits the 128k window on large BRDs. | `read_file` `pages` chunking (D8), `/compact` (D6), and the wizard shows the context meter. Subagent-per-stage remains the planned escape hatch. |
 | PDF or DOCX parsers misread complex layouts. | Spike before choosing (D8); keep page markers so the model can cite and the human can verify; scanned and low-text files are flagged, not guessed. |
-| `allow_always` becomes a hole. | Dangerous patterns are never allowlistable; the allowlist is per project, human-readable JSON, and shown in the settings screen (backlog 003). |
+| `allow_always` becomes a hole. | Dangerous patterns are never allowlistable (even by hand-editing the file); rules are exact commands by default, prefix rules refuse shell operators; the allowlist is per user and project, kept outside the repo, human-readable JSON, and shown in the settings screen (backlog 003) through `session.permissions`. |
 | Revert overwrites user edits. | D7 compares disk content with `after` first and skips conflicts. |
 | Session files hold sensitive document content. | Stored under `~/.alia`, outside the repo; delete is a first-class operation (D5). |
 

@@ -5,7 +5,13 @@ import { createAliaClient, fetchAvailableModels } from './client.js';
 import { ToolRegistry } from './tools/index.js';
 import { createUseSkillTool } from './tools/useSkill.js';
 import { createRunSubagentTool } from './tools/runSubagent.js';
-import { SafetyChecker, SafetyConfirmationHandler } from './safety/safetyChecker.js';
+import {
+  PermissionMode,
+  SafetyChecker,
+  SafetyConfirmationHandler,
+  normalizeAnswer,
+} from './safety/safetyChecker.js';
+import { PermissionStore } from './safety/permissionStore.js';
 import { ContextManager } from './context/contextManager.js';
 import { AttachedFile, resolveFileMentions } from './context/fileMentions.js';
 import { AgentResult, AliaAgent, DEFAULT_SYSTEM_PROMPT, RunOptions } from './agent/agentLoop.js';
@@ -31,12 +37,24 @@ export interface SessionOptions {
   onEvent?: EventSink;
   /** Legacy `AgentUI` observer (the terminal), adapted from the same event stream. Optional; a session with neither is silent. */
   ui?: AgentUI;
-  /** Run potentially destructive commands without asking. */
+  /**
+   * When commands need the user's approval: `ask-dangerous` (default: only destructive ones),
+   * `ask-commands` (every command not allowlisted in this project) or `auto` (never).
+   */
+  permissionMode?: PermissionMode;
+  /** Shorthand for `permissionMode: 'auto'`. `permissionMode` wins when both are set. */
   autoApprove?: boolean;
-  /** Asked before a destructive command runs. Without it (and without `autoApprove`) such commands are denied. */
+  /**
+   * Asked when a command needs approval. Without it (and outside `auto`) such commands are denied.
+   * Returns a `PermissionDecision` (`allow_once` | `allow_always` | `deny`), or a boolean (older contract).
+   */
   onConfirm?: SafetyConfirmationHandler;
-  /** Called when `autoApprove` lets a destructive command through (for an audit line). */
+  /** Called when `auto` lets a destructive command through (for an audit line). */
   onAutoApprove?: (command: string) => void;
+  /** Where "always allow" is remembered. Default: a per-project file under `~/.alia/permissions`. */
+  permissionStore?: PermissionStore;
+  /** Folder for the default permission store (tests, or a host that keeps its data elsewhere). */
+  permissionsDir?: string;
   /** Skill folders to scan, lowest precedence first. Default: bundled, user, project (`<workspace>/.alia/skills`), env. */
   skillRoots?: SkillRoot[];
   /** Show a subagent's full transcript instead of one line per tool call. */
@@ -90,6 +108,8 @@ export class AliaSession {
   readonly skills: SkillRegistry;
   readonly agent: AliaAgent;
   readonly contextManager: ContextManager;
+  /** The project's allowlist ("always allow"): list, remove and clear rules from a settings screen. */
+  readonly permissions: PermissionStore;
   readonly systemPrompt: string;
   private readonly client: OpenAI;
 
@@ -116,18 +136,34 @@ export class AliaSession {
     const ui = options.ui;
     const emit = combineSinks(ui ? eventsToAgentUI(ui) : undefined, options.onEvent);
     const onConfirm = options.onConfirm;
+    this.permissions = options.permissionStore ?? new PermissionStore(this.workspace, { dir: options.permissionsDir });
     const safetyChecker = new SafetyChecker({
-      autoApprove: options.autoApprove ?? false,
+      mode: options.permissionMode ?? (options.autoApprove ? 'auto' : 'ask-dangerous'),
+      permissions: this.permissions,
       onConfirm: onConfirm
-        ? (ctx) => {
+        ? async (ctx) => {
+            const id = randomUUID();
+            let resolved = false;
+            const resolve = (decision: 'allow_once' | 'allow_always' | 'deny' | 'cancelled') => {
+              if (resolved) return;
+              resolved = true;
+              emit({ type: 'permission_resolved', id, toolCallId: ctx.toolCallId, decision });
+            };
             emit({
               type: 'permission_requested',
-              id: randomUUID(),
+              id,
+              toolCallId: ctx.toolCallId,
               command: ctx.command,
               reasons: ctx.reasons,
+              dangerous: ctx.dangerous,
+              canAlwaysAllow: ctx.canAlwaysAllow,
               requester: ctx.requester,
             });
-            return onConfirm(ctx);
+            // The run may be cancelled while the card is open; the handler may never answer then.
+            ctx.signal?.addEventListener('abort', () => resolve('cancelled'), { once: true });
+            const answer = await onConfirm(ctx);
+            resolve(normalizeAnswer(answer).decision);
+            return answer;
           }
         : undefined,
       onAutoApprove: options.onAutoApprove,

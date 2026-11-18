@@ -140,7 +140,10 @@ export const runBashTool: ToolDefinition<RunBashArgs> = {
     const trimmedCommand = args.command.trim();
 
     // Human-in-the-loop safety gate
-    const safetyCheck = await context.safetyChecker.confirmIfDangerous(trimmedCommand, context.signal);
+    const safetyCheck = await context.safetyChecker.authorize(trimmedCommand, {
+      signal: context.signal,
+      toolCallId: context.toolCallId,
+    });
     if (!safetyCheck.approved) {
       return safetyCheck.reason || 'Command execution cancelled by user.';
     }

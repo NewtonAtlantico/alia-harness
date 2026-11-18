@@ -4,6 +4,7 @@ export * from './agent/agentUI.js';
 export * from './agent/events.js';
 export * from './agent/subagentResult.js';
 export * from './safety/safetyChecker.js';
+export * from './safety/permissionStore.js';
 export * from './context/contextManager.js';
 export * from './context/fileMentions.js';
 export * from './skills/skillLoader.js';
