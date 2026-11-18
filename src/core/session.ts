@@ -7,6 +7,7 @@ import { createUseSkillTool } from './tools/useSkill.js';
 import { createRunSubagentTool } from './tools/runSubagent.js';
 import { AskUserHandler, createAskUserTool } from './tools/askUser.js';
 import { createPipelineStateTool } from './tools/pipelineState.js';
+import { PipelineStatus, getPipelineStatus } from './pipeline/pipelineStatus.js';
 import {
   PermissionMode,
   SafetyChecker,
@@ -341,6 +342,24 @@ export class AliaSession {
     } finally {
       this.compacting = false;
     }
+  }
+
+  /** Where this project's requirements-to-tasks pipeline stands, read from `docs/pipeline/state.json`. Changes nothing. */
+  pipelineStatus(): PipelineStatus {
+    return getPipelineStatus(this.workspace);
+  }
+
+  /**
+   * The prompt that resumes the pipeline ("Retomar sessão"): the pipeline skill, already loaded, plus
+   * where it stopped and exactly what to do next. Pass `prompt` to `run()`. No `prompt` when there is
+   * no pipeline state to resume.
+   */
+  async resumePipelinePrompt(): Promise<{ status: PipelineStatus; prompt?: string }> {
+    const status = this.pipelineStatus();
+    if (!status.exists) return { status };
+    const resolved = await this.resolveSkill('/requirements-to-tasks-pipeline', status.resumePrompt);
+    // If the skill is not available the model can still load it with use_skill, as the text says.
+    return { status, prompt: resolved.status === 'ready' ? resolved.prompt : status.resumePrompt };
   }
 
   /** Expands `@path` mentions in user text into attached file contents. */

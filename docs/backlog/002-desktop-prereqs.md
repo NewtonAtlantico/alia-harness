@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`), D5 (session store; `npm run test:store`), D6 (command registry, `/compact`; `npm run test:commands`), D7 (change tracking and undo; `npm run test:changes`), D8 (PDF reading; `npm run test:documents`), D9 (DOCX and PPTX; `npm run test:office`), D10 (`ask_user`; `npm run test:askuser`), D11 (pipeline state; `npm run test:pipeline`). Next: D12 (pipeline status and resume). Phase 0 of the desktop app; the app itself will be backlog 003. |
+| **Status** | In progress. Done: D1 (`createSession`, no globals, explicit workspace/config; `npm run test:session`), D2 (typed event stream; `npm run test:events`), D3 (cancellation; `npm run test:cancel`), D4 (permission model v2; `npm run test:permissions`), D5 (session store; `npm run test:store`), D6 (command registry, `/compact`; `npm run test:commands`), D7 (change tracking and undo; `npm run test:changes`), D8 (PDF reading; `npm run test:documents`), D9 (DOCX and PPTX; `npm run test:office`), D10 (`ask_user`; `npm run test:askuser`), D11 (pipeline state; `npm run test:pipeline`), D12 (pipeline status and resume; `npm run test:resume`). Next: D13 (tracker detection). Phase 0 of the desktop app; the app itself will be backlog 003. |
 | **Depends on** | `src/core` as it is today (decoupled from `cli/`); subagents S1-S5 (done) |
 | **Design** | `alia Harness Desktop.pdf` (chat, changes panel, permission card, pipeline wizard, slash and `@` menus) |
 | **Primary consumer** | The standalone Electron app (backlog 003), plus the CLI, which must keep working unchanged |
@@ -438,9 +438,24 @@ the prose is rendered from it:
   It is tested against a golden backlog (4 specs, 11 tasks, 45 points) and a golden `STATE.md`.
 - `SKILL.md` for the pipeline now says: use `pipeline_state` when available (inputs with a `path`, questions before asking, answers and
   deferrals after), otherwise write `STATE.md` by hand.
-- **Resume (D12):** `getPipelineStatus(workspace)` returns the first incomplete stage or open gate, and flags a changed input (hash
-  mismatch against the manifest) as `stale`, as the skill already requires. `createSession` can seed a "resume the pipeline" prompt from it.
-  It will also report drift between `STATE.md` and the state it should be rendered from.
+- **Status and resume (D12):** `getPipelineStatus(workspace)` (and `session.pipelineStatus()`) answers "where did this stop, and what is next?"
+  from `state.json` alone. It never throws and changes nothing. It returns the stages and gates with their progress, a one-line `summary`
+  ("Waiting at gate G1: 3 of 5 questions answered."), the task counts, and `next`, the **first thing that is not finished, in pipeline order**:
+  `inputs_changed`, `answer_questions` (the gate and exactly the open questions), `review_specs` (gate 3), `pass_gate` (the user has not
+  approved moving on), `run_stage` (to start, continue, unblock or **redo if stale**), `complete`, or `not_started` / `damaged`. Earlier work
+  comes first: a question reopened at gate 1 is next even if stage 4 is done.
+- **Changed inputs are noticed.** `add_input` records a file's hash; the status compares it with the file now and reports `changed` or
+  `missing`. A changed input takes precedence over everything (the answers may no longer hold), and the resume prompt tells the model to ask the
+  user whether to redo from stage 1 (`set_stage` stale, then `mark_stale`) and to refresh the inventory (`add_input` again). Inputs without
+  a file are never flagged. The status itself changes nothing: the decision is the user's.
+- **A ready-made resume prompt.** `status.resumePrompt` says where it stopped and what to do, listing only the *open* questions ("do not
+  ask them again"), and how to record the answers (`ask_user`, `answer_question`, `defer_question` with an owner, `set_gate` only when none is
+  open and the user approves). `session.resumePipelinePrompt()` returns that text with the pipeline skill already loaded (or the plain text if
+  the skill is unavailable, or nothing when there is no state); pass it to `run()`. The test restarts the session (as a closed app would),
+  resumes a pipeline stopped at gate 1 with 3 of 5 answered, and the new run asks only the two open questions and closes the gate.
+- **STATE.md drift:** the status reports whether STATE.md matches what `state.json` renders to (`ok`, `differs`, `missing`). `differs` usually means
+  it was edited by hand (a small model that ignored the tool), or that the task files changed (their counts are computed). Line endings alone are not
+  drift. `refreshStateMarkdown(workspace)` regenerates it.
 
 ### 5.11 Tracker detection (D13)
 
@@ -476,7 +491,7 @@ Points are Fibonacci, capped at 8, matching `spec-to-tasks`.
 | D9 | **Done.** `readDocument` for DOCX and PPTX (slides and speaker notes) | 3 | Sample DOCX keeps headings and tables as readable text; PPTX output has `[slide N]` markers and includes notes; both work through `read_file` and `@`. |
 | D10 | **Done.** `ask_user` tool, `onAskUser` handler, HARNESS_NOTES mapping | 5 | With a handler, questions round-trip as structured answers (including a deferral with owner); without one the tool errors with the plain-text fallback instruction; it is absent in subagents; the CLI implements a basic handler. |
 | D11 | **Done.** `pipeline_state` tool, `state.json` schema, `STATE.md` rendering, derived task stats | 5 | Updates validate against the schema and re-render `STATE.md`; stats (tasks, points, per spec) match a golden `spec-to-tasks` sample; the pipeline skill carries the one-line instruction and still works without the tool. |
-| D12 | Pipeline status and resume, with stale-input detection | 3 | Given a state file stopped at Gate 1 (3 of 5 answered), `getPipelineStatus` reports that, and a resumed session continues from the open questions. A modified input file is flagged `stale`. |
+| D12 | **Done.** Pipeline status and resume, with stale-input detection | 3 | Given a state file stopped at Gate 1 (3 of 5 answered), `getPipelineStatus` reports that, and a resumed session continues from the open questions. A modified input file is flagged `stale`. |
 | D13 | `detectIssuePublishing()` with the warning | 3 | Registry with an MCP issue tool resolves to `publish`; a ready `gh`/`glab` CLI resolves to `publish`; neither resolves to `drafts` with the warning text; verified with a fake registry and a stubbed CLI probe. |
 | D14 | *(optional)* Streaming of assistant text and reasoning | 5 | `assistant_delta` and `thinking_delta` events during a run, final message unchanged; falls back to non-streaming when the endpoint does not support it. Can ship after the app's v1. |
 
