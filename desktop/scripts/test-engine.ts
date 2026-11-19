@@ -597,6 +597,64 @@ console.log('\n=== the project tree and a read-only preview ===');
   }
 }
 
+console.log('\n=== pipeline intake: inspect, start, resume ===');
+{
+  const skillRoots = [{ label: 'bundled', dir: path.resolve('..', 'skills') }];
+  const r = await rig(new FakeModel([{ content: 'comecei' }, { content: 'retomei' }], 'repeat-last'), { skillRoots });
+  const outside = mk('outside');
+  const brd = path.join(r.ws, 'BRD.pdf');
+  fs.writeFileSync(brd, makePdf([['Requisitos do portal']]));
+  const scan = path.join(outside, 'scan.pdf');
+  fs.writeFileSync(scan, makePdf([null]));
+  const video = path.join(outside, 'kickoff.mp4');
+  fs.writeFileSync(video, 'video');
+  const notes = path.join(outside, 'kickoff-transcricao.txt');
+  fs.writeFileSync(notes, 'Ana: precisamos de SSO.\n'.repeat(100));
+  const { sessionId } = await r.open();
+  const fails = (name: string, payload: object) => r.call(name, payload).then(() => '', (e) => e.message as string);
+
+  check('files in the project are inspected: kind, skill, and what is wrong with the others once the user chose them', (await r.call('pipeline.inspect', { projectPath: r.ws, paths: [brd] })).items[0].handledBy === 'requirement-extraction-from-documents');
+  check('a file outside the project that the user never chose is refused', (await fails('pipeline.inspect', { projectPath: r.ws, paths: [scan] })).includes('outside the project folder'));
+  check('...and so is starting with it', (await fails('pipeline.start', { sessionId, inputs: [{ path: brd }, { path: scan }] })).includes('outside the project folder') && !fs.existsSync(path.join(r.ws, 'docs', 'pipeline', 'state.json')));
+  await r.call('attachments.allow', { paths: [scan, video, notes] });
+  const items = (await r.call('pipeline.inspect', { projectPath: r.ws, paths: [scan, video, notes] })).items;
+  check('once chosen, a scan, a recording and a transcript are told apart, with the reader\'s own explanation', !!items[0].problem && items[1].class === 'recording' && items[1].needsTranscript && items[2].class === 'transcript' && !items[2].problem, JSON.stringify(items.map((i: any) => i.class)));
+
+  const refused = await r.call('pipeline.start', { sessionId, inputs: [{ path: brd }, { path: scan }] });
+  check('an unreadable file refuses the start, by name, and writes nothing', refused.started === false && refused.problems[0].name === 'scan.pdf' && !fs.existsSync(path.join(r.ws, 'docs', 'pipeline', 'state.json')) && r.events(sessionId, 'run_started').length === 0);
+  const noTranscript = await r.call('pipeline.start', { sessionId, inputs: [{ path: video }] });
+  check('a recording without a transcript is refused', noTranscript.started === false && noTranscript.problems[0].message.includes('transcript'));
+
+  const started = await r.call('pipeline.start', { sessionId, inputs: [{ path: brd }, { path: video, transcriptPath: notes }] });
+  const state = new PipelineStateStore(r.ws).load()!;
+  check('it starts, and the inventory is already on disk with the recording and its transcript', started.started === true && started.resumed === false && started.inputs.length === 3 && state.inputs.map((i) => i.name).join() === 'BRD.pdf,kickoff.mp4,kickoff-transcricao.txt' && !!state.inputs[0].hash && state.inputs[2].kind === 'transcript');
+  await r.finished(sessionId, 0);
+  const sent = JSON.stringify(r.model.requests[0]);
+  check('the model got the pipeline skill and the inputs, and the page was told what the user "said"', sent.includes('requirements-to-tasks-pipeline') && sent.includes('BRD.pdf') && sent.includes('requirement-extraction-from-threads') && r.messages.some((m: any) => m.kind === 'user_message' && m.text.startsWith('Iniciar o pipeline com 3 entradas')));
+  check('the status request reads the pipeline', (await r.call('pipeline.status', { projectPath: r.ws })).next.kind === 'run_stage');
+
+  check('a run in progress cannot be started over', await (async () => {
+    const h = await rig(new FakeModel([{ content: 'x' }], 'repeat-last'), { skillRoots });
+    const s2 = (await h.open()).sessionId;
+    fs.writeFileSync(path.join(h.ws, 'a.txt'), 'um pedido curto');
+    const first = await h.call('pipeline.start', { sessionId: s2, inputs: [{ path: path.join(h.ws, 'a.txt') }] });
+    const second = await fails2(h, 's2', s2);
+    await h.finished(s2, 0);
+    return first.started === true && second.includes('already running');
+  })());
+
+  const resumed = await r.call('pipeline.resume', { sessionId });
+  await r.finished(sessionId, 1);
+  check('resume sends the resume prompt', resumed.started === true && JSON.stringify(r.model.requests[1]).includes('Where it stopped'));
+  const empty = await rig(say('x'), { skillRoots });
+  const es = (await empty.open()).sessionId;
+  check('resuming where there is nothing says so, and starts nothing', (await empty.call('pipeline.resume', { sessionId: es })).reason === 'no_pipeline' && empty.events(es, 'run_started').length === 0);
+}
+
+async function fails2(h: Rig, _label: string, sessionId: string): Promise<string> {
+  return h.call('pipeline.start', { sessionId, inputs: [{ path: path.join(h.ws, 'a.txt') }] }).then(() => '', (e) => e.message as string);
+}
+
 // ===================================================================================== broker
 
 console.log('\n=== the broker: strict validation ===');
@@ -622,6 +680,7 @@ console.log('\n=== the broker: strict validation ===');
   check('a request name that is not a string is rejected', (await reject({ name: 'x' }, {})).includes('Unknown request') && (await reject(undefined, {})).includes('Unknown request'));
   check('a response of an unknown shape is rejected', (await reject('interaction.respond', { id: 'i', response: { decision: 'maybe' } })).includes('response') && (await reject('interaction.respond', { id: 'i', response: { decision: 'deny', extra: 1 } })).includes('response'));
   check('a request that has no fields takes {} or nothing, but not extras', (await broker.handle('interaction.pending', undefined) as any).forwarded === 'interaction.pending' && (await reject('interaction.pending', { x: 1 })).includes('Unrecognized key'));
+  check('the pipeline requests are strict too: no files, an extra field, or a bad id', (await reject('pipeline.start', { sessionId: 's-1', inputs: [] })).includes('inputs') && (await reject('pipeline.inspect', { projectPath: 'C:/x', paths: ['a'], more: 1 })).includes('Unrecognized key') && (await reject('pipeline.start', { sessionId: '../x', inputs: [{ path: 'a' }] })).includes('not a valid id'));
   check('nothing rejected reached the engine', calls.length === before + 1, `${calls.length - before - 1} extra`);
 
   console.log('\n=== the broker: only folders the user opened ===');

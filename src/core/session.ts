@@ -8,6 +8,8 @@ import { createRunSubagentTool } from './tools/runSubagent.js';
 import { AskUserHandler, createAskUserTool } from './tools/askUser.js';
 import { createPipelineStateTool } from './tools/pipelineState.js';
 import { PipelineStatus, getPipelineStatus } from './pipeline/pipelineStatus.js';
+import { IntakeProblem, PipelineStartInput, describePipelineStart, planPipelineInputs, recordPipelineInputs } from './pipeline/intake.js';
+import type { PipelineInput } from './pipeline/pipelineState.js';
 import { CommandProbe, IssuePublishingStatus, detectIssuePublishing } from './issues/issuePublishing.js';
 import {
   PermissionMode,
@@ -383,6 +385,30 @@ export class AliaSession {
     const resolved = await this.resolveSkill('/requirements-to-tasks-pipeline', status.resumePrompt);
     // If the skill is not available the model can still load it with use_skill, as the text says.
     return { status, prompt: resolved.status === 'ready' ? resolved.prompt : status.resumePrompt };
+  }
+
+  /**
+   * Starts the pipeline from the files the user gave ("Iniciar pipeline"). Every file must be readable (a recording needs its
+   * transcript); if any is not, nothing is written and `refused` says why, file by file. Otherwise the inventory (names, kinds,
+   * the skill that reads each, and the hash of each file) is written to `docs/pipeline/state.json` **first**, and the prompt to
+   * pass to `run()` is returned. Starting on a project that already has a pipeline adds the inputs to it.
+   */
+  async startPipelinePrompt(inputs: PipelineStartInput[]): Promise<
+    | { status: 'ready'; prompt: string; inputs: PipelineInput[]; resumed: boolean }
+    | { status: 'refused'; problems: IntakeProblem[] }
+  > {
+    const plan = await planPipelineInputs(inputs);
+    if (plan.problems.length > 0) return { status: 'refused', problems: plan.problems };
+    const before = this.pipelineStatus();
+    if (before.exists && before.next.kind === 'damaged') {
+      return { status: 'refused', problems: [{ path: '', name: 'state.json', message: before.next.message }] };
+    }
+    const recorded = recordPipelineInputs(this.workspace, plan);
+    if (!recorded.ok) return { status: 'refused', problems: [{ path: '', name: 'state.json', message: recorded.error }] };
+    const text = describePipelineStart(this.workspace, recorded.inputs, before.exists);
+    const resolved = await this.resolveSkill('/requirements-to-tasks-pipeline', text);
+    // If the skill is not available the model can still load it with use_skill, as in a resume.
+    return { status: 'ready', prompt: resolved.status === 'ready' ? resolved.prompt : text, inputs: recorded.inputs, resumed: before.exists };
   }
 
   /** Expands `@path` mentions in user text into attached file contents. */

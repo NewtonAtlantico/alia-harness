@@ -21,6 +21,9 @@ export interface SidebarProps {
   now: Date;
   onQuery: (text: string) => void;
   onNewConversation: () => void;
+  onNewPipeline: () => void;
+  /** The pipeline intake is the screen being shown. */
+  pipelineActive?: boolean;
   onOpenFolder: () => void;
   onSelectProject: (projectPath: string) => void;
   onOpenConversation: (info: SessionInfo) => void;
@@ -124,6 +127,9 @@ export function Sidebar(p: SidebarProps) {
     <nav className="sidebar" aria-label={t.sidebar.label}>
       <button type="button" className="btn primary new-conversation" onClick={p.onNewConversation}>
         {t.sidebar.newConversation} <kbd>Ctrl N</kbd>
+      </button>
+      <button type="button" className="btn new-pipeline" data-testid="new-pipeline" aria-current={p.pipelineActive ? 'page' : undefined} title={t.pipeline.openTitle} onClick={p.onNewPipeline}>
+        {t.sidebar.newPipeline}
       </button>
 
       <div role="search" className="search">

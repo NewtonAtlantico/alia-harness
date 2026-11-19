@@ -92,6 +92,10 @@ export const rendererSchemas = {
   'projects.setTrust': strict({ projectPath, trusted: z.boolean() }),
   'sessions.active': none,
   'pipeline.brief': strict({ projectPath }),
+  'pipeline.status': strict({ projectPath }),
+  'pipeline.inspect': strict({ projectPath, paths: z.array(relPath).min(1).max(100) }),
+  'pipeline.start': strict({ sessionId, inputs: z.array(strict({ path: relPath, transcriptPath: relPath.optional() })).min(1).max(100) }),
+  'pipeline.resume': strict({ sessionId }),
   'settings.get': none,
   'settings.update': strict({
     displayName: z.string().trim().max(100).optional(),

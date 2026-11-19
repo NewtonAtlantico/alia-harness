@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import type { SettingsView } from '../../shared/ipc';
+import type { IntakeProblem, PipelineInputRef, SettingsView } from '../../shared/ipc';
 import { ConversationPane } from './components/ConversationPane';
 import { Home } from './components/Home';
+import { PipelineIntake, type IntakeNotice } from './components/PipelineIntake';
 import { SettingsScreen } from './components/SettingsScreen';
 import { Sidebar } from './components/Sidebar';
 import { TitleBar } from './components/TitleBar';
@@ -9,8 +10,12 @@ import { TrustDialog } from './components/TrustDialog';
 import { useInteractions } from './hooks/useInteractions';
 import { useWorkspace } from './hooks/useWorkspace';
 import { t } from './i18n/pt-BR';
+import type { IntakeRow } from './lib/intake';
 
-type Screen = 'chat' | 'settings';
+type Screen = 'chat' | 'settings' | 'pipeline';
+
+/** Two frames: long enough for a screen that was just switched to to be on the page and listening. */
+const nextFrames = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 
 /** The app: title bar, the sidebar (projects, conversations, search, pipelines) and the screen beside it. */
 export function App() {
@@ -24,6 +29,9 @@ export function App() {
       return false;
     }
   });
+  const [intakeRows, setIntakeRows] = useState<IntakeRow[]>([]);
+  const [pipelineEpoch, setPipelineEpoch] = useState(0);
+  const [intakeNotice, setIntakeNotice] = useState<IntakeNotice>({ problems: [] });
   const inter = useInteractions();
   const ws = useWorkspace(() => setScreen('chat'), inter.pending);
 
@@ -43,6 +51,45 @@ export function App() {
     };
   }, []);
 
+  /**
+   * Starts the pipeline in a conversation of its own. The conversation is on screen before the engine is asked, so the run is
+   * seen from its first line; if the engine refuses (a file cannot be used) the intake comes back, with its files, and says why.
+   */
+  const runInNewConversation = async (project: string, call: (sessionId: string) => Promise<IntakeProblem[] | string | undefined>): Promise<IntakeProblem[] | string | undefined> => {
+    const sessionId = await ws.actions.freshDraft(project);
+    if (!sessionId) throw new Error(t.pipeline.startFailed('a conversa não pôde ser aberta'));
+    setScreen('chat');
+    await nextFrames();
+    try {
+      const refused = await call(sessionId);
+      if (refused) {
+        setScreen('pipeline');
+        // The intake was left to show the conversation, so it is a new instance now: the reason is kept here for it.
+        if (typeof refused === 'string') setIntakeNotice({ problems: [], error: refused });
+        else setIntakeNotice({ problems: refused });
+        return refused;
+      }
+      ws.actions.markStarted();
+      setIntakeRows([]);
+      setPipelineEpoch((n) => n + 1);
+      return undefined;
+    } catch (err) {
+      setScreen('pipeline');
+      setIntakeNotice({ problems: [], error: String((err as Error)?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '') });
+      throw err;
+    }
+  };
+  const startPipeline = (project: string, inputs: PipelineInputRef[]) =>
+    runInNewConversation(project, async (sessionId) => {
+      const result = await window.alia.request('pipeline.start', { sessionId, inputs });
+      return result.started ? undefined : result.problems;
+    }) as Promise<IntakeProblem[] | undefined>;
+  const resumePipeline = (project: string) =>
+    runInNewConversation(project, async (sessionId) => {
+      const result = await window.alia.request('pipeline.resume', { sessionId });
+      return result.started ? undefined : t.pipeline.stop.start;
+    }) as Promise<string | undefined>;
+
   useEffect(() => {
     try {
       window.localStorage.setItem('alia.panelOpen', panelOpen ? '1' : '0');
@@ -60,6 +107,7 @@ export function App() {
           currentProject={ws.currentProject}
           conversations={ws.conversations}
           activeId={screen === 'chat' ? ws.open?.info.id : undefined}
+          pipelineActive={screen === 'pipeline'}
           pipelines={ws.pipelines}
           states={ws.states}
           projectMarks={ws.projectMarks}
@@ -71,6 +119,10 @@ export function App() {
           onNewConversation={() => {
             setScreen('chat');
             ws.actions.newConversation();
+          }}
+          onNewPipeline={() => {
+            setIntakeNotice({ problems: [] });
+            setScreen('pipeline');
           }}
           onOpenFolder={() => {
             setScreen('chat');
@@ -99,6 +151,19 @@ export function App() {
           )}
           {screen === 'settings' ? (
             <SettingsScreen onClose={() => setScreen('chat')} onSaved={(s) => { setSettings(s); ws.actions.ensureDraft(); }} onProjectsChanged={ws.actions.refreshProjects} />
+          ) : screen === 'pipeline' ? (
+            <PipelineIntake
+              projects={ws.projects}
+              project={ws.currentProject}
+              onProject={(p) => void ws.actions.selectProject(p)}
+              rows={intakeRows}
+              setRows={(update) => setIntakeRows(update)}
+              notice={intakeNotice}
+              setNotice={setIntakeNotice}
+              onStart={startPipeline}
+              onResume={resumePipeline}
+              refreshKey={pipelineEpoch}
+            />
           ) : ws.open ? (
             <ConversationPane
               key={`${ws.open.info.id}:${ws.open.epoch ?? 0}`}

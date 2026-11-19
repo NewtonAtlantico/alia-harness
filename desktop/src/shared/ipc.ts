@@ -26,10 +26,13 @@ import type {
   UserQuestion,
   WorkspaceEntry,
   DirectoryEntry,
+  IntakeItem,
+  IntakeProblem,
+  PipelineStatus,
 } from 'alia-harness/core';
 
 export type { PermissionMode };
-export type { ToolAnnotation, DirectoryEntry };
+export type { ToolAnnotation, DirectoryEntry, IntakeItem, IntakeProblem, PipelineStatus };
 export type { AgentEvent, AliaModelConfig, ChatMessage, CommandInfo, CompactResult, ContextUsage, PermissionDecision, PermissionRule, RevertResult, SearchHit, SessionInfo, SwitchModelResult, UserAnswer, UserQuestion, WorkspaceEntry };
 
 // ------------------------------------------------------------------------------------ results
@@ -94,6 +97,19 @@ export interface PipelineBrief {
   answered?: number;
   total?: number;
 }
+
+/** A file the pipeline starts with. A recording comes with the transcript that stands for it. */
+export interface PipelineInputRef {
+  path: string;
+  transcriptPath?: string;
+}
+
+/** Whether the pipeline started. When not, nothing was written and `problems` say why, file by file. */
+export type PipelineStartResult =
+  | { started: true; resumed: boolean; inputs: Array<{ name: string; kind: string; handledBy?: string }> }
+  | { started: false; problems: IntakeProblem[] };
+
+export type PipelineResumeResult = { started: true } | { started: false; reason: 'no_pipeline' };
 
 export interface RunStarted {
   started: true;
@@ -286,6 +302,14 @@ export interface RendererRequests {
   /** Conversations currently open in the engine, with whether each is running or waiting for an answer. */
   'sessions.active': { request: Record<string, never>; result: ActiveSession[] };
   'pipeline.brief': { request: { projectPath: string }; result: PipelineBrief };
+  /** Where a project's pipeline stands (stages, gates, what is next). Reads `docs/pipeline/state.json`; changes nothing. */
+  'pipeline.status': { request: { projectPath: string }; result: PipelineStatus };
+  /** What each file is, which skill would read it, and why it cannot be used (in the reader's own words). Files must be in the project or chosen by the user. */
+  'pipeline.inspect': { request: { projectPath: string; paths: string[] }; result: { items: IntakeItem[] } };
+  /** Writes the input inventory to state.json, then starts the pipeline in this conversation. Refuses (and writes nothing) if a file cannot be used. */
+  'pipeline.start': { request: { sessionId: string; inputs: PipelineInputRef[] }; result: PipelineStartResult };
+  /** Resumes the pipeline from where `state.json` says it stopped. */
+  'pipeline.resume': { request: { sessionId: string }; result: PipelineResumeResult };
   /** Lets the user choose files to attach (native dialog). Returns their paths, which the engine may then read. */
   'attachments.pick': { request: Record<string, never>; result: { paths: string[] } };
   'settings.get': { request: Record<string, never>; result: SettingsView };

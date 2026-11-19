@@ -19,6 +19,7 @@ import {
   createSession,
   newSessionId,
   getPipelineStatus,
+  inspectInput,
   extractMentionPaths,
   listDirectory,
   readDocument,
@@ -38,6 +39,8 @@ import type {
   ModelList,
   OpenedSession,
   PipelineBrief,
+  PipelineResumeResult,
+  PipelineStartResult,
   PingResult,
   RunStarted,
   SelfTestResult,
@@ -152,6 +155,36 @@ export class EngineRuntime {
       if (signal?.aborted) return settle('closed');
       this.options.post({ kind: 'interaction', interaction });
     });
+  }
+
+  /** Starts a run in the background: shows `text` as what the user said and gives the model `prompt`. */
+  private launch(e: Entry, text: string, prompt: string): void {
+    const sessionId = e.id;
+    this.options.post({ kind: 'user_message', sessionId, text });
+    const controller = new AbortController();
+    e.busy = true;
+    e.controller = controller;
+    void e.session
+      .run(prompt, { signal: controller.signal })
+      .catch((err: unknown) => this.notice(sessionId, 'error', `The run failed: ${(err as Error)?.message ?? err}`))
+      .finally(() => {
+        // A newer run may already have started (the event above freed the conversation); leave it alone.
+        if (e.controller === controller) {
+          e.busy = false;
+          e.controller = undefined;
+        }
+        if (!e.busy) this.closeInteractions(sessionId);
+      });
+  }
+
+  /** The user chose these files in the page (or dropped them); only those, or files in the project, may be inventoried. */
+  private checkInputPaths(workspace: string, paths: string[]): void {
+    for (const p of paths) {
+      const abs = path.resolve(p);
+      if (isInside(workspace, abs)) continue;
+      if (this.allowedOutside.some((allowed) => sameFile(allowed, abs) || isInside(allowed, abs))) continue;
+      throw new Error(`"${abs}" is outside the project folder. Choose it with the file dialog or drag it into the window.`);
+    }
   }
 
   private closeInteractions(sessionId: string): void {
@@ -286,21 +319,7 @@ export class EngineRuntime {
       }
       for (const message of errors) this.notice(sessionId, 'error', message);
 
-      this.options.post({ kind: 'user_message', sessionId, text });
-      const controller = new AbortController();
-      e.busy = true;
-      e.controller = controller;
-      void e.session
-        .run(prompt, { signal: controller.signal })
-        .catch((err: unknown) => this.notice(sessionId, 'error', `The run failed: ${(err as Error)?.message ?? err}`))
-        .finally(() => {
-          // A newer run may already have started (the event above freed the conversation); leave it alone.
-          if (e.controller === controller) {
-            e.busy = false;
-            e.controller = undefined;
-          }
-          if (!e.busy) this.closeInteractions(sessionId);
-        });
+      this.launch(e, text, prompt);
       return { started: true, kind, attached, errors };
     },
 
@@ -403,6 +422,34 @@ export class EngineRuntime {
       })),
 
     'pipeline.brief': ({ projectPath }) => pipelineBrief(path.resolve(projectPath)),
+
+    'pipeline.status': ({ projectPath }) => getPipelineStatus(path.resolve(projectPath)),
+
+    'pipeline.inspect': async ({ projectPath, paths }) => {
+      const workspace = path.resolve(projectPath);
+      this.checkInputPaths(workspace, paths);
+      return { items: await Promise.all(paths.map((p) => inspectInput(path.resolve(p)))) };
+    },
+
+    'pipeline.start': async ({ sessionId, inputs }): Promise<PipelineStartResult> => {
+      const e = this.entry(sessionId);
+      if (e.busy) throw new Error('This conversation is already running. Stop it first, or wait for it to finish.');
+      this.checkInputPaths(e.workspace, inputs.flatMap((i) => (i.transcriptPath ? [i.path, i.transcriptPath] : [i.path])));
+      const started = await e.session.startPipelinePrompt(inputs.map((i) => ({ path: path.resolve(i.path), ...(i.transcriptPath ? { transcriptPath: path.resolve(i.transcriptPath) } : {}) })));
+      if (started.status === 'refused') return { started: false, problems: started.problems };
+      const count = started.inputs.length;
+      this.launch(e, `Iniciar o pipeline com ${count} ${count === 1 ? 'entrada' : 'entradas'}: ${started.inputs.map((i) => i.name).join(', ')}`, started.prompt);
+      return { started: true, resumed: started.resumed, inputs: started.inputs.map((i) => ({ name: i.name, kind: i.kind, handledBy: i.handledBy })) };
+    },
+
+    'pipeline.resume': async ({ sessionId }): Promise<PipelineResumeResult> => {
+      const e = this.entry(sessionId);
+      if (e.busy) throw new Error('This conversation is already running. Stop it first, or wait for it to finish.');
+      const resumed = await e.session.resumePipelinePrompt();
+      if (!resumed.prompt) return { started: false, reason: 'no_pipeline' };
+      this.launch(e, 'Retomar o pipeline', resumed.prompt);
+      return { started: true };
+    },
 
     'interaction.pending': () => [...this.pending.values()].map((p) => p.interaction),
   };

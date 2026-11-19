@@ -32,6 +32,7 @@
     "test:askuser": "tsx scripts/smoke-askuser.ts",
     "test:pipeline": "tsx scripts/smoke-pipeline.ts",
     "test:resume": "tsx scripts/smoke-resume.ts",
+    "test:intake": "tsx scripts/smoke-intake.ts",
     "test:issues": "tsx scripts/smoke-issues.ts",
     "test:e2e": "tsx scripts/smoke-e2e.ts",
     "desktop:install": "npm --prefix desktop install",
@@ -56,7 +57,9 @@
     "desktop:test:interactions-logic": "npm --prefix desktop run test:interactions-logic",
     "desktop:test:interactions-app": "npm --prefix desktop run test:interactions-app",
     "desktop:test:panel-logic": "npm --prefix desktop run test:panel-logic",
-    "desktop:test:panel-app": "npm --prefix desktop run test:panel-app"
+    "desktop:test:panel-app": "npm --prefix desktop run test:panel-app",
+    "desktop:test:intake-logic": "npm --prefix desktop run test:intake-logic",
+    "desktop:test:intake-app": "npm --prefix desktop run test:intake-app"
   },
   "keywords": [
     "ai",

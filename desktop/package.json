@@ -28,7 +28,9 @@
     "test:interactions-logic": "tsx --tsconfig tsconfig.node.json scripts/test-interactions-logic.ts",
     "test:interactions-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-interactions-app.ts",
     "test:panel-logic": "tsx --tsconfig tsconfig.node.json scripts/test-panel-logic.ts",
-    "test:panel-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-panel-app.ts"
+    "test:panel-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-panel-app.ts",
+    "test:intake-logic": "tsx --tsconfig tsconfig.node.json scripts/test-intake-logic.ts",
+    "test:intake-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-intake-app.ts"
   },
   "devDependencies": {
     "@electron/fuses": "^2.1.3",

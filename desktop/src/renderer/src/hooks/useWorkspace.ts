@@ -128,20 +128,25 @@ export function useWorkspace(onNewConversation?: () => void, pending: ReadonlyAr
    * Opens a session for a new conversation in a project (replacing an unused draft). Nothing is saved until the first
    * message, so this leaves no trace if the user never writes. Without a configured endpoint it quietly does nothing.
    */
-  const startDraft = useCallback(async (project: string) => {
+  const startDraft = useCallback(async (project: string): Promise<string | undefined> => {
     const token = ++draftToken.current;
     const previous = openRef.current;
     if (previous?.draft) void api('session.close', { sessionId: previous.opened.sessionId }).catch(() => {});
     try {
       const opened = await api('session.open', { projectPath: project });
-      if (token !== draftToken.current) return void api('session.close', { sessionId: opened.sessionId }).catch(() => {});
+      if (token !== draftToken.current) {
+        void api('session.close', { sessionId: opened.sessionId }).catch(() => {});
+        return undefined;
+      }
       const now = new Date().toISOString();
       const info: SessionInfo = { id: opened.sessionId, title: t.sidebar.newConversation, titleSource: 'auto', workspace: opened.workspace, model: opened.model, createdAt: now, updatedAt: now };
       setOpen({ draft: true, info, opened, messages: [] });
+      return opened.sessionId;
     } catch (err) {
-      if (token !== draftToken.current) return;
+      if (token !== draftToken.current) return undefined;
       setOpen(undefined);
       if (!/not configured/i.test(errorText(err))) fail(err);
+      return undefined;
     }
   }, []);
 
@@ -267,6 +272,18 @@ export function useWorkspace(onNewConversation?: () => void, pending: ReadonlyAr
     [trustPrompt, commitProject, openConversation]
   );
 
+  /** A brand-new conversation in a project, whatever is open now (a pipeline runs in its own). Returns its session id. */
+  const freshDraft = useCallback(
+    async (projectPath: string): Promise<string | undefined> => {
+      setCurrentProject(projectPath);
+      current.current = projectPath;
+      remember(projectPath);
+      void refreshConversations(projectPath);
+      return startDraft(projectPath);
+    },
+    [refreshConversations, startDraft]
+  );
+
   const openFolder = useCallback(async () => {
     setError(undefined);
     try {
@@ -364,6 +381,6 @@ export function useWorkspace(onNewConversation?: () => void, pending: ReadonlyAr
     searching,
     trustPrompt,
     error,
-    actions: { openFolder, selectProject, newConversation, markStarted, ensureDraft, openConversation, rename, remove, setQuery, answerTrust, refreshProjects, dismissError: () => setError(undefined) },
+    actions: { openFolder, freshDraft, selectProject, newConversation, markStarted, ensureDraft, openConversation, rename, remove, setQuery, answerTrust, refreshProjects, dismissError: () => setError(undefined) },
   };
 }
