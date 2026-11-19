@@ -14,6 +14,7 @@ export * from './pipeline/pipelineState.js';
 export * from './pipeline/taskStats.js';
 export * from './pipeline/pipelineStatus.js';
 export * from './pipeline/intake.js';
+export * from './pipeline/report.js';
 export * from './issues/issuePublishing.js';
 export * from './context/compactor.js';
 export * from './context/contextManager.js';

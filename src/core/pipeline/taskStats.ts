@@ -22,6 +22,8 @@ export interface TaskSummary {
   dependsOn: string[];
   /** The entries of `dependsOn` that match no task in any file. */
   unresolvedDependsOn: string[];
+  /** The entries of `dependsOn` that were found, and in which file (a task of another story, when the file differs from its own). */
+  resolvedDependsOn: Array<{ ref: string; file: string; slug: string; id?: string; title: string }>;
 }
 
 export interface TaskFileSummary {
@@ -42,6 +44,8 @@ export interface TaskStats {
   points: number;
   /** Things that break the skill's rules or cannot be read; empty when the backlog is clean. */
   problems: string[];
+  /** The tasks of a dependency cycle, in order (the first repeated at the end), or empty. */
+  cycle: string[];
 }
 
 const ID_PREFIX = /^(?:(?:Task|Tarefa)\s+)?(T?\d+(?:\.\d+)*[a-z]?)\s*(?:[:.\-–—)]\s*|\s+)(.+)$/i;
@@ -78,7 +82,7 @@ export function parseTaskFile(text: string): { title?: string; tasks: Array<Task
     const h3 = /^###\s+(.+?)\s*$/.exec(line);
     if (h3) {
       const { id, title: t } = splitHeading(h3[1]);
-      current = { id, title: t, dependsOn: [], unresolvedDependsOn: [] };
+      current = { id, title: t, dependsOn: [], unresolvedDependsOn: [], resolvedDependsOn: [] };
       tasks.push(current);
       continue;
     }
@@ -186,8 +190,10 @@ export function summarizeTasks(workspace: string, tasksDir = 'docs/tasks'): Task
       const edges: string[] = [];
       for (const ref of t.dependsOn) {
         const hit = find(ref, parsedByFile.filter((p) => p.summary === summary)) ?? find(ref, parsedByFile);
-        if (hit) edges.push(keyOf(hit.file, hit.task));
-        else {
+        if (hit) {
+          edges.push(keyOf(hit.file, hit.task));
+          t.resolvedDependsOn.push({ ref, file: hit.file, slug: hit.file.split('/').pop()!.replace(/-tasks\.md$/i, ''), ...(hit.task.id ? { id: hit.task.id } : {}), title: hit.task.title });
+        } else {
           t.unresolvedDependsOn.push(ref);
           problems.push(`${summary.file}: "${t.id ? `${t.id} ` : ''}${t.title}" depends on "${ref}", which is not a task`);
         }
@@ -200,6 +206,7 @@ export function summarizeTasks(workspace: string, tasksDir = 'docs/tasks'): Task
   // A cycle means no valid order exists.
   const state = new Map<string, 1 | 2>();
   const cycle: string[] = [];
+  const cycleOut: string[] = [];
   const visit = (key: string, trail: string[]): boolean => {
     if (state.get(key) === 2) return false;
     if (state.get(key) === 1) {
@@ -214,6 +221,7 @@ export function summarizeTasks(workspace: string, tasksDir = 'docs/tasks'): Task
   for (const key of graph.keys()) {
     if (visit(key, [])) {
       problems.push(`dependency cycle: ${cycle.map((k) => k.split('::')[1]).join(' -> ')}`);
+      cycleOut.push(...cycle.map((k) => k.split('::')[1]));
       break;
     }
   }
@@ -223,5 +231,6 @@ export function summarizeTasks(workspace: string, tasksDir = 'docs/tasks'): Task
     taskCount: files.reduce((n, f) => n + f.taskCount, 0),
     points: files.reduce((n, f) => n + f.points, 0),
     problems,
+    cycle: cycleOut,
   };
 }

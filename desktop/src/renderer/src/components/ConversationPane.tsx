@@ -15,6 +15,7 @@ import { gateCardFor } from '../lib/pipelineRun';
 import { GateCard } from './GateCard';
 import { InteractionCards } from './InteractionCards';
 import { ArchitecturePanel } from './ArchitecturePanel';
+import { FinalReport } from './FinalReport';
 import { PipelineHeader } from './PipelineHeader';
 import { SpecsPanel } from './SpecsPanel';
 import { architectureFor, specsFor, stagePanelFor } from '../lib/stagePanels';
@@ -178,6 +179,7 @@ export function ConversationPane({ conversation, states, loading, intro, configu
   const stage = idle && view ? stagePanelFor(view) : null;
   const arch = stage === 'architecture' && view ? architectureFor(view) : null;
   const specs = stage === 'specs' && view ? specsFor(view) : null;
+  const done = idle && !!view && view.status.next.kind === 'complete';
   const resume = useCallback(async () => {
     setResuming(true);
     setPipelineError(undefined);
@@ -251,6 +253,7 @@ export function ConversationPane({ conversation, states, loading, intro, configu
             : undefined
         }
       />
+      {done && view && <FinalReport view={view} sessionId={info.id} onOpen={(file) => void openFile(file)} onStarted={onStarted} />}
       {arch && <ArchitecturePanel data={arch} sessionId={info.id} onOpen={(file) => void openFile(file)} />}
       {specs && <SpecsPanel key={info.id} data={specs} sessionId={info.id} by={defaultOwner.trim() || 'Usuário'} onChanged={reload} onResume={resume} onStarted={onStarted} />}
       {card && !(stage === 'specs' && card.ready) && <GateCard key={card.gate} card={card} sessionId={info.id} defaultOwner={defaultOwner} onChanged={reload} onResume={resume} title={stage === 'architecture' ? t.run.arch.reviewTitle : undefined} chip={stage === 'architecture' ? arch?.recommendation : undefined} follows={stage !== 'specs'} />}

@@ -33,6 +33,7 @@
     "test:pipeline": "tsx scripts/smoke-pipeline.ts",
     "test:resume": "tsx scripts/smoke-resume.ts",
     "test:intake": "tsx scripts/smoke-intake.ts",
+    "test:report": "tsx scripts/smoke-report.ts",
     "test:issues": "tsx scripts/smoke-issues.ts",
     "test:e2e": "tsx scripts/smoke-e2e.ts",
     "desktop:install": "npm --prefix desktop install",
@@ -62,7 +63,8 @@
     "desktop:test:intake-app": "npm --prefix desktop run test:intake-app",
     "desktop:test:run-logic": "npm --prefix desktop run test:run-logic",
     "desktop:test:run-app": "npm --prefix desktop run test:run-app",
-    "desktop:test:gates-app": "npm --prefix desktop run test:gates-app"
+    "desktop:test:gates-app": "npm --prefix desktop run test:gates-app",
+    "desktop:test:report-app": "npm --prefix desktop run test:report-app"
   },
   "keywords": [
     "ai",

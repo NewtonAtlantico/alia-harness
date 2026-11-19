@@ -43,7 +43,9 @@ export function createPipelineStateTool(): ToolDefinition<PipelineStateArgs> {
       'Summaries the app shows on screen (record them when you finish the stage, in addition to the markdown artifact): ' +
       'set_architecture (style, driver, contexts [names or {name, role}], recommendation approve|approve_with_notes|request_changes, notes); ' +
       'set_adr_alignment (adr, alignment aligned|misaligned, note: required when misaligned); ' +
-      'set_spec (slug, title, persona, depends_on [spec slugs], constraints, path). A spec recorded with set_spec must be reviewed (set_spec_review) before gate G3 can pass.',
+      'set_spec (slug, title, persona, depends_on [spec slugs], constraints, path). A spec recorded with set_spec must be reviewed (set_spec_review) before gate G3 can pass. ' +
+      'After stage 4, record the cross-spec check that needs reading with set_check (key "coverage", status pass|fail, detail: required when it fails, naming the criteria without a task). ' +
+      'The app computes the others (story points, cycles, dependencies against the stories) from docs/tasks itself.',
     parameters: {
       type: 'object',
       properties: {
@@ -95,6 +97,8 @@ export function createPipelineStateTool(): ToolDefinition<PipelineStateArgs> {
               persona: { type: 'string' },
               depends_on: { type: 'array', items: { type: 'string' }, description: 'set_spec: slugs of the specs this one depends on.' },
               constraints: { type: 'array', items: { type: 'string' } },
+              key: { type: 'string', description: 'set_check: the check, for example coverage (every acceptance criterion has a task).' },
+              detail: { type: 'string', description: 'set_check: what is wrong (required for fail).' },
             },
             required: ['op'],
           },

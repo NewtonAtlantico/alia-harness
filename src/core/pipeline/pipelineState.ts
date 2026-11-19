@@ -153,6 +153,16 @@ export interface SpecSummary {
   path?: string;
 }
 
+export type CheckStatus = 'pass' | 'fail';
+
+/** A check the model made and recorded (the cross-spec checks that need reading: does every acceptance criterion have a task?). */
+export interface PipelineCheck {
+  key: string;
+  status: CheckStatus;
+  detail?: string;
+  date?: string;
+}
+
 export interface PipelineState {
   version: 1;
   updatedAt: string;
@@ -170,6 +180,8 @@ export interface PipelineState {
   architecture?: ArchitectureSummary;
   adrAlignment: AdrAlignment[];
   specs: SpecSummary[];
+  /** Checks recorded with `set_check`, by key. */
+  checks: PipelineCheck[];
 }
 
 export class PipelineStateError extends Error {
@@ -195,6 +207,7 @@ export function newState(now: Date = new Date()): PipelineState {
     notes: [],
     adrAlignment: [],
     specs: [],
+    checks: [],
   };
 }
 
@@ -236,6 +249,7 @@ export function normalizeState(raw: unknown): PipelineState {
       dependsOn: Array.isArray(x?.dependsOn) ? x.dependsOn : [],
       constraints: Array.isArray(x?.constraints) ? x.constraints : [],
     })),
+    checks: list(raw.checks, 'checks'),
   };
   return state;
 }
@@ -278,7 +292,7 @@ export interface ApplyContext {
 const OP_NAMES = [
   'set_project', 'add_input', 'set_stage', 'add_question', 'answer_question', 'defer_question', 'reopen_question',
   'set_gate', 'set_spec_review', 'add_assumption', 'add_decision', 'add_adr', 'add_note', 'mark_stale',
-  'set_architecture', 'set_adr_alignment', 'set_spec',
+  'set_architecture', 'set_adr_alignment', 'set_spec', 'set_check',
 ];
 const RECOMMENDATIONS: ArchitectureRecommendation[] = ['approve', 'approve_with_notes', 'request_changes'];
 const ALIGNMENTS: AdrAlignmentStatus[] = ['aligned', 'misaligned'];
@@ -623,6 +637,18 @@ export function applyOps(
         break;
       }
 
+      case 'set_check': {
+        const key = str(op.key);
+        if (!key || !/^[\w.-]+$/.test(key)) return fail('"key" is required and must be a short name without spaces (for example "coverage")');
+        if (op.status !== 'pass' && op.status !== 'fail') return fail('"status" must be pass or fail');
+        if (op.status === 'fail' && !str(op.detail)) return fail('a failing check needs a "detail": what is wrong, so the person can fix it');
+        const check: PipelineCheck = { key, status: op.status, ...(str(op.detail) ? { detail: str(op.detail) } : {}), date: str(op.date) ?? day(ctx.now) };
+        const at = state.checks.findIndex((c) => c.key === key);
+        if (at >= 0) state.checks[at] = check;
+        else state.checks.push(check);
+        break;
+      }
+
       case 'mark_stale': {
         const after = stageNumber(op.after_stage);
         const reason = str(op.reason);
@@ -716,6 +742,10 @@ export function renderStateMd(state: PipelineState, tasks?: TaskStats): string {
   if (state.adrs.length > 0) {
     out.push('', '## ADRs', '| Id | Title | Status |', '|---|---|---|');
     state.adrs.forEach((a) => out.push(`| ${cell(a.id)} | ${cell(a.title)} | ${cell(a.status)} |`));
+  }
+  if (state.checks.length > 0) {
+    out.push('', '## Cross-spec checks', '| Check | Result | Detail |', '|---|---|---|');
+    state.checks.forEach((c) => out.push(`| ${cell(c.key)} | ${c.status} | ${cell(c.detail ?? '')} |`));
   }
   if (tasks && tasks.problems.length > 0) {
     out.push('', '## Backlog problems', ...tasks.problems.map((p) => `- ${p}`));

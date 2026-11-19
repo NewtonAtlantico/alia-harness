@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { PipelineStateStore, type AliaConfig } from 'alia-harness/core';
+import { PipelineStateStore, type AliaConfig, type CommandProbe } from 'alia-harness/core';
 import { FakeModel, type ScriptedTurn } from '../../scripts/lib/fakeModel';
 import { EngineRuntime } from '../src/engine/runtime';
 import { Broker, ProjectRegistry } from '../src/main/broker';
@@ -50,10 +50,10 @@ interface Rig {
   waitInteraction: (since?: number) => Promise<Interaction>;
 }
 
-async function rig(turns: ScriptedTurn[] | FakeModel, opts: { permissionMode?: 'ask-dangerous' | 'ask-commands' | 'auto'; cap?: number; dirs?: ReturnType<typeof dataDirs>; ws?: string; skillRoots?: Array<{ label: string; dir: string }> } = {}): Promise<Rig> {
+async function rig(turns: ScriptedTurn[] | FakeModel, opts: { permissionMode?: 'ask-dangerous' | 'ask-commands' | 'auto'; cap?: number; dirs?: ReturnType<typeof dataDirs>; ws?: string; skillRoots?: Array<{ label: string; dir: string }>; issueProbe?: CommandProbe } = {}): Promise<Rig> {
   const messages: PushMessage[] = [];
   const model = turns instanceof FakeModel ? turns : new FakeModel(turns);
-  const rt = new EngineRuntime({ post: (m) => messages.push(m as PushMessage), clientFor: () => model.client, eventTextCap: opts.cap });
+  const rt = new EngineRuntime({ post: (m) => messages.push(m as PushMessage), clientFor: () => model.client, eventTextCap: opts.cap, issueProbe: opts.issueProbe });
   const dirs = opts.dirs ?? dataDirs();
   const ws = opts.ws ?? mk('project');
   await rt.handle('engine.configure', { config, skillRoots: opts.skillRoots ?? [], dataDirs: dirs, ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}) });
@@ -752,6 +752,47 @@ console.log('\n=== pipeline run: reviewing specs and asking for changes ===');
   check('both are refused while a run is going', e1.includes('running') && e2.includes('running'), `${e1} | ${e2}`);
   await busy.call('session.cancel', { sessionId: bs });
   await busy.finished(bs, 0);
+}
+
+console.log('\n=== pipeline end: the report and publishing the issues ===');
+{
+  const skillRoots = [{ label: 'bundled', dir: path.resolve('..', 'skills') }];
+  const ok = (stdout = '') => ({ code: 0, stdout, missing: false, timedOut: false });
+  const probe = (connected: boolean): CommandProbe => async (command) => (command === 'git' ? (connected ? ok('https://github.com/acme/portal.git\n') : { code: 1, stdout: '', missing: false, timedOut: false }) : command === 'gh' ? (connected ? ok() : { code: 1, stdout: '', missing: false, timedOut: false }) : { code: null, stdout: '', missing: true, timedOut: false });
+  let connected = false;
+  const r = await rig(new FakeModel([{ content: 'feito' }], 'repeat-last'), { skillRoots, issueProbe: async (c, a, w) => probe(connected)(c, a, w) });
+  const { sessionId } = await r.open();
+  fs.cpSync(path.resolve('..', 'scripts', 'fixtures', 'pipeline', 'docs'), path.join(r.ws, 'docs'), { recursive: true });
+  const store = new PipelineStateStore(r.ws);
+  const slugs = ['01-login-sso', '02-consultar-pedidos', '03-abrir-chamado', '04-acesso-parceiros'];
+  store.apply([
+    { op: 'add_input', name: 'brd.pdf', input_kind: 'document' },
+    ...[1, 2, 3, 4].flatMap((n) => [{ op: 'set_stage', stage: n, status: 'running' }, { op: 'set_stage', stage: n, status: 'done' }, ...(n < 4 ? [{ op: 'set_gate', gate: `G${n}`, status: 'passed' }] : [])]),
+    ...slugs.map((slug, i) => ({ op: 'set_spec', slug, title: `Spec ${slug}`, depends_on: i === 0 ? [] : ['01-login-sso'] })),
+    ...slugs.map((spec) => ({ op: 'set_spec_review', spec, status: 'reviewed', by: 'Ana' })),
+    { op: 'add_adr', id: 'ADR-001', title: 'PostgreSQL', status: 'accepted' },
+  ]);
+  const view = await r.call('pipeline.state', { projectPath: r.ws });
+  check('the view carries the report: 4 specs, 11 tasks, 45 points, the backlog by spec', view.report.specs === 4 && view.report.tasks === 11 && view.report.points === 45 && view.report.adrs === 1 && view.report.backlog.length === 4 && view.report.backlog[0].tasks[0].id === '1.1');
+  check('the checks come with it: computed ones judged from the task files, coverage unknown until recorded', view.report.checks.find((c: any) => c.key === 'points').state === 'pass' && view.report.checks.find((c: any) => c.key === 'coverage').state === 'unknown');
+  check('04-acesso-parceiros waits for 02-consultar-pedidos without depending on it: that is a failing check, and a blocker', view.report.checks.find((c: any) => c.key === 'story_dependencies').state === 'fail' && view.report.blockers.some((b: any) => b.kind === 'check' && b.ref === 'story_dependencies'), JSON.stringify(view.report.checks.find((c: any) => c.key === 'story_dependencies')));
+  check('a state that cannot be read has no report', await (async () => { const w = await rig(say('x')); return (await w.call('pipeline.state', { projectPath: w.ws })).report === undefined; })());
+
+  const fails = (name: string, payload: object) => r.call(name, payload).then(() => '', (e) => e.message as string);
+  const first = await r.call('issues.publish', { sessionId });
+  check('without a tracker connection it asks first, with the warning (why, where the drafts go), and starts nothing', first.started === false && first.reason === 'needs_confirmation' && first.status.mode === 'drafts' && first.status.warning.includes('docs/issues/') && first.status.warning.includes('no git remote') && r.events(sessionId, 'run_started').length === 0);
+  const drafts = await r.call('issues.publish', { sessionId, confirmDrafts: true });
+  await r.finished(sessionId, 0);
+  const sent0 = JSON.stringify(r.model.requests[0]);
+  check('after the user confirms it runs the issue skill in drafts mode: nothing to be published, drafts in docs/issues/', drafts.started === true && drafts.mode === 'drafts' && drafts.skill === 'issue-writer' && sent0.includes('issue-writer') && sent0.includes('do not try to publish anything') && sent0.includes('docs/issues/') && r.messages.some((m: any) => m.kind === 'user_message' && m.text === 'Gerar rascunhos de issues'));
+
+  connected = true;
+  const live = await r.call('issues.publish', { sessionId });
+  await r.finished(sessionId, 1);
+  check('it detects again at every attempt: now a gh that is signed in, so it publishes (no confirmation), with the skill', live.started === true && live.mode === 'publish' && live.via === 'gh' && JSON.stringify(r.model.requests[1]).includes('Publish the tasks in docs/tasks/') && r.messages.some((m: any) => m.kind === 'user_message' && m.text === 'Publicar issues'));
+  connected = false;
+  check('and when the connection is gone it asks again (a confirmation does not last)', (await r.call('issues.publish', { sessionId })).started === false);
+  void fails;
 }
 
 // ===================================================================================== broker

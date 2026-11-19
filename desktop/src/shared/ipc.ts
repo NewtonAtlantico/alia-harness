@@ -41,10 +41,14 @@ import type {
   ArchitectureSummary,
   AdrAlignment,
   AdrRef,
+  PipelineReport,
+  CheckResult,
+  Blocker,
+  IssuePublishingStatus,
 } from 'alia-harness/core';
 
 export type { PermissionMode };
-export type { ToolAnnotation, DirectoryEntry, IntakeItem, IntakeProblem, PipelineStatus, PipelineState, GateId, GateProgress, GateQuestion, PipelineStage, Assumption, PipelineInput, SpecReview, SpecSummary, ArchitectureSummary, AdrAlignment, AdrRef };
+export type { ToolAnnotation, DirectoryEntry, IntakeItem, IntakeProblem, PipelineStatus, PipelineState, GateId, GateProgress, GateQuestion, PipelineStage, Assumption, PipelineInput, SpecReview, SpecSummary, ArchitectureSummary, AdrAlignment, AdrRef, PipelineReport, CheckResult, Blocker, IssuePublishingStatus };
 export type { AgentEvent, AliaModelConfig, ChatMessage, CommandInfo, CompactResult, ContextUsage, PermissionDecision, PermissionRule, RevertResult, SearchHit, SessionInfo, SwitchModelResult, UserAnswer, UserQuestion, WorkspaceEntry };
 
 // ------------------------------------------------------------------------------------ results
@@ -128,7 +132,12 @@ export interface PipelineView {
   /** What each stage's artifact is, and whether it exists yet (a folder for stage 4). */
   artifacts: Array<{ stage: number; path: string; exists: boolean; isDir: boolean }>;
   markdownExists: boolean;
+  /** The backlog by spec, the checks across specs, the totals and what still blocks. Absent when there is no readable state. */
+  report?: PipelineReport;
 }
+
+/** Whether "Publicar issues" ran. In drafts mode it asks first: `status.warning` says why, how to fix it and where the drafts go. */
+export type IssuesPublishResult = { started: true; mode: 'publish' | 'drafts'; via?: string; skill: string } | { started: false; reason: 'needs_confirmation'; status: IssuePublishingStatus };
 
 export type PipelineResumeResult = { started: true } | { started: false; reason: 'no_pipeline' };
 
@@ -339,6 +348,8 @@ export interface RendererRequests {
   'pipeline.reviewSpec': { request: { sessionId: string; spec: string; status: 'reviewed' | 'in_review' | 'draft'; comment?: string; by: string }; result: { status: PipelineStatus } };
   /** The user asks for changes to a spec: the comment goes to the agent, the specs stage (and what follows) is marked stale, and the run starts. */
   'pipeline.requestChanges': { request: { sessionId: string; spec: string; comment: string; by: string }; result: { started: true } };
+  /** Publishes the backlog as issues. Detects at every attempt: with a tracker connection it runs the suggested skill; without one it answers `needs_confirmation` with the warning, and writes drafts only when called again with `confirmDrafts`. */
+  'issues.publish': { request: { sessionId: string; confirmDrafts?: boolean }; result: IssuesPublishResult };
   /** Resumes the pipeline from where `state.json` says it stopped. */
   'pipeline.resume': { request: { sessionId: string }; result: PipelineResumeResult };
   /** Opens a file or folder of the project with the system. Documents are opened, a folder is shown, anything else is only shown in its folder. */

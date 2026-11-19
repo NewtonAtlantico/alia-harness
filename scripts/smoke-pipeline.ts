@@ -71,7 +71,7 @@ console.log('\n=== task counts: the golden backlog ===');
   check('all of them resolve (ids, "T"-prefixed ids, titles, other files)', stats.files.every((f) => f.tasks.every((t) => t.unresolvedDependsOn.length === 0)));
   check('headings with ids in several styles keep their titles', stats.files[1].tasks[0].id === 'T2.1' && stats.files[1].tasks[0].title.startsWith('GET /v1/orders') && stats.files[2].tasks[2].title === 'E-mail de confirmação e notificação');
   check('"5 pts" reads as 5', stats.files[1].tasks[0].points === 5);
-  check('a missing folder is an empty backlog, not an error', json(summarizeTasks(mk())) === json({ files: [], taskCount: 0, points: 0, problems: [] }));
+  check('a missing folder is an empty backlog, not an error', json(summarizeTasks(mk())) === json({ files: [], taskCount: 0, points: 0, problems: [], cycle: [] }));
 }
 
 console.log('\n=== task counts: problems are reported ===');

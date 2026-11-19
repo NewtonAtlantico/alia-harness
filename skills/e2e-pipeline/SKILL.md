@@ -152,6 +152,11 @@ no task exceeds 8 points (Fibonacci 1/2/3/5/8 only), and cross-spec task depende
 backlog's story dependencies. Fix discrepancies by re-running the skill for that spec, not by
 hand-editing tasks.
 
+With `pipeline_state`: record the check that needs reading (every acceptance criterion is covered) with
+`set_check` (`key: "coverage"`, `status: pass|fail`, and for a failure a `detail` that names the criteria
+without a task). The app computes the others (points, cycles, dependencies against the stories) from
+`docs/tasks` itself; do not record those.
+
 ## Final report
 
 End with a short summary (not the documents themselves): artifacts produced with paths, ADRs
@@ -177,7 +182,7 @@ anything blocked, and the suggested next step (`issue-writer` to publish tasks).
 
 **When the `pipeline_state` tool is available, use it for every state change** (`set_stage`, `add_question`,
 `answer_question`, `defer_question`, `set_gate`, `set_spec_review`, `add_adr`, `add_assumption`, `mark_stale`,
-`set_architecture`, `set_adr_alignment`, `set_spec`):
+`set_architecture`, `set_adr_alignment`, `set_spec`, `set_check`):
 it writes `docs/pipeline/state.json` and regenerates STATE.md for you, and it refuses a stage that starts
 before the previous one is done and its gate has passed. **Otherwise, write STATE.md by hand** following the
 template below.

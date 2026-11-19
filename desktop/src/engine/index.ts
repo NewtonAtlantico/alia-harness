@@ -5,9 +5,10 @@
  */
 import type { EngineMessage, EngineReplyMessage, EngineRequestMessage } from '../shared/ipc';
 import { EngineRuntime } from './runtime';
+import { testIssueProbe } from './testSeams';
 
 const port = process.parentPort;
-const runtime = new EngineRuntime({ post: (message) => port.postMessage(message satisfies EngineMessage) });
+const runtime = new EngineRuntime({ post: (message) => port.postMessage(message satisfies EngineMessage), issueProbe: testIssueProbe() });
 
 port.on('message', async (event) => {
   const msg = event.data as EngineRequestMessage;

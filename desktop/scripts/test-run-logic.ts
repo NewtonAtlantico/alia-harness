@@ -6,9 +6,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { PipelineStateStore, getPipelineStatus } from 'alia-harness/core';
+import { PipelineStateStore, buildReport, getPipelineStatus } from 'alia-harness/core';
 import type { PipelineView } from '../src/shared/ipc';
 import { canResume, categoryLabel, finishAnswers, gateCardFor, isBlankText, partialAnswers, runChip, settledText, stepperFor, toUserQuestions } from '../src/renderer/src/lib/pipelineRun';
+import { blockerText, canPublish, checkRow, localizeItem, totalsLine } from '../src/renderer/src/lib/finalReport';
 import { architectureFor, canFollowToTasks, reviewLine, specsFor, stagePanelFor } from '../src/renderer/src/lib/stagePanels';
 
 let failures = 0;
@@ -178,6 +179,39 @@ console.log('\n=== gate 2 and gate 3 screens ===');
   s4.apply([{ op: 'reopen_question', id: 'g1' }]);
   check('a gap reopened blocks it again', !canFollowToTasks(specsFor(v())!));
   check('a review of a spec the summaries do not list still shows in the table', (() => { s4.apply([{ op: 'answer_question', id: 'g1', answer: 'x' }, { op: 'set_spec_review', spec: 'so-revisao', status: 'draft' }]); return specsFor(v())!.rows.some((r) => r.slug === 'so-revisao' && r.title === 'so-revisao'); })());
+}
+
+console.log('\n=== the final report ===');
+{
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'alia-run5-'));
+  fs.cpSync(path.resolve('..', 'scripts', 'fixtures', 'pipeline', 'docs'), path.join(ws, 'docs'), { recursive: true });
+  const s5 = new PipelineStateStore(ws);
+  const slugs = ['01-login-sso', '02-consultar-pedidos', '03-abrir-chamado', '04-acesso-parceiros'];
+  s5.apply([
+    { op: 'add_input', name: 'brd.pdf', input_kind: 'document' },
+    ...[1, 2, 3, 4].flatMap((n) => [{ op: 'set_stage', stage: n, status: 'running' }, { op: 'set_stage', stage: n, status: 'done' }, ...(n < 4 ? [{ op: 'set_gate', gate: `G${n}`, status: 'passed' }] : [])]),
+    ...slugs.map((slug, i) => ({ op: 'set_spec', slug, title: slug, depends_on: i === 0 ? [] : i === 3 ? ['01-login-sso', '02-consultar-pedidos'] : ['01-login-sso'] })),
+    ...slugs.map((spec) => ({ op: 'set_spec_review', spec, status: 'reviewed', by: 'Ana' })),
+    { op: 'add_adr', id: 'ADR-001', title: 'PostgreSQL', status: 'accepted' },
+    { op: 'set_check', key: 'coverage', status: 'pass' },
+  ]);
+  const rep = () => buildReport(s5.load()!, new PipelineStateStore(ws).tasks(), getPipelineStatus(ws).staleInputs);
+  const r = rep();
+  check('the totals line reads as in the design', totalsLine(r) === '4 specs · 11 tarefas · 45 pontos · 1 ADR');
+  check('with every check passing and nothing blocking, it can publish', canPublish(r) && r.blockers.length === 0 && r.checks.map(checkRow).every((c) => c.state === 'pass' && c.explanation === 'Tudo certo.'));
+  check('each check has its label in Portuguese', checkRow(r.checks[0]).label.startsWith('Nenhuma tarefa acima de 8 pontos') && checkRow(r.checks[3]).label === 'Todo critério de aceite é coberto por uma tarefa');
+
+  s5.apply([{ op: 'set_check', key: 'coverage', status: 'fail', detail: 'RF-12 e RF-13 não têm tarefa.' }, { op: 'set_spec_review', spec: '02-consultar-pedidos', status: 'in_review' }]);
+  fs.appendFileSync(path.join(ws, 'docs', 'tasks', '01-login-sso-tasks.md'), '\n### 1.9 Enorme\n**Slice:** x\n**Story points:** 13\n');
+  const bad = rep();
+  const rows = Object.fromEntries(bad.checks.map(checkRow).map((c) => [c.key, c]));
+  check('a recorded failure keeps the model\'s own explanation', rows.coverage.state === 'fail' && rows.coverage.explanation === 'RF-12 e RF-13 não têm tarefa.');
+  check('a computed failure is explained from the files, with the tasks named in Portuguese', rows.points.state === 'fail' && rows.points.explanation === 'Estas tarefas estão fora da escala de pontos:' && rows.points.items.some((i) => i.includes('Enorme') && i.includes('(13 pontos)')), JSON.stringify(rows.points));
+  check('what blocks is said in sentences', bad.blockers.map(blockerText).some((x) => x === 'A spec 02-consultar-pedidos ainda não foi revisada.') && bad.blockers.map(blockerText).includes('Falhou: Todo critério de aceite é coberto por uma tarefa.') && bad.blockers.map(blockerText).some((x) => x.startsWith('Falhou: Nenhuma tarefa acima de 8 pontos')) && !canPublish(bad));
+  check('an unknown check says why it is not known', checkRow({ key: 'coverage', state: 'unknown', source: 'recorded', items: [] }).explanation === 'O agente ainda não registrou esta checagem.' && checkRow({ key: 'points', state: 'unknown', source: 'computed', items: [] }).explanation === 'Ainda não há tarefas para conferir.' && checkRow({ key: 'story_dependencies', state: 'unknown', source: 'computed', items: [] }).explanation.includes('resumo das specs'));
+  check('references are localized: points, no points, arrows', localizeItem('a: 1.1 X (13 points)') === 'a: 1.1 X (13 pontos)' && localizeItem('a: 1.1 X (no points)') === 'a: 1.1 X (sem pontos)' && localizeItem('a -> b') === 'a → b');
+  check('with no tasks there is nothing to publish', !canPublish({ ...bad, blockers: [], tasks: 0 }));
+  check('an unknown check key is shown as it is', checkRow({ key: 'naming', state: 'pass', source: 'recorded', items: [] }).label === 'naming');
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

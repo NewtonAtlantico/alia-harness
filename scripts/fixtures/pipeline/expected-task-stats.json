@@ -10,6 +10,7 @@
           "title": "Configurar cliente OIDC",
           "dependsOn": [],
           "unresolvedDependsOn": [],
+          "resolvedDependsOn": [],
           "slice": "Slice 1 — login corporativo ponta a ponta",
           "points": 3
         },
@@ -20,6 +21,15 @@
             "1.1"
           ],
           "unresolvedDependsOn": [],
+          "resolvedDependsOn": [
+            {
+              "ref": "1.1",
+              "file": "docs/tasks/01-login-sso-tasks.md",
+              "slug": "01-login-sso",
+              "id": "1.1",
+              "title": "Configurar cliente OIDC"
+            }
+          ],
           "slice": "Slice 1 — login corporativo ponta a ponta",
           "points": 5
         },
@@ -30,6 +40,15 @@
             "1.2"
           ],
           "unresolvedDependsOn": [],
+          "resolvedDependsOn": [
+            {
+              "ref": "1.2",
+              "file": "docs/tasks/01-login-sso-tasks.md",
+              "slug": "01-login-sso",
+              "id": "1.2",
+              "title": "Fluxo de login e callback"
+            }
+          ],
           "slice": "Slice 2 — ciclo de vida da sessão",
           "points": 3
         }
@@ -49,6 +68,15 @@
             "1.2"
           ],
           "unresolvedDependsOn": [],
+          "resolvedDependsOn": [
+            {
+              "ref": "1.2",
+              "file": "docs/tasks/01-login-sso-tasks.md",
+              "slug": "01-login-sso",
+              "id": "1.2",
+              "title": "Fluxo de login e callback"
+            }
+          ],
           "slice": "Slice 1 — listar pedidos",
           "points": 5
         },
@@ -59,6 +87,15 @@
             "T2.1"
           ],
           "unresolvedDependsOn": [],
+          "resolvedDependsOn": [
+            {
+              "ref": "T2.1",
+              "file": "docs/tasks/02-consultar-pedidos-tasks.md",
+              "slug": "02-consultar-pedidos",
+              "id": "T2.1",
+              "title": "GET /v1/orders com paginação por cursor"
+            }
+          ],
           "slice": "Slice 1 — listar pedidos",
           "points": 3
         },
@@ -69,6 +106,15 @@
             "2.1"
           ],
           "unresolvedDependsOn": [],
+          "resolvedDependsOn": [
+            {
+              "ref": "2.1",
+              "file": "docs/tasks/02-consultar-pedidos-tasks.md",
+              "slug": "02-consultar-pedidos",
+              "id": "T2.1",
+              "title": "GET /v1/orders com paginação por cursor"
+            }
+          ],
           "slice": "Slice 2 — detalhe",
           "points": 3
         }
@@ -88,6 +134,15 @@
             "1.2"
           ],
           "unresolvedDependsOn": [],
+          "resolvedDependsOn": [
+            {
+              "ref": "1.2",
+              "file": "docs/tasks/01-login-sso-tasks.md",
+              "slug": "01-login-sso",
+              "id": "1.2",
+              "title": "Fluxo de login e callback"
+            }
+          ],
           "slice": "Slice 1 — abrir chamado ponta a ponta",
           "points": 5
         },
@@ -98,6 +153,15 @@
             "3.1"
           ],
           "unresolvedDependsOn": [],
+          "resolvedDependsOn": [
+            {
+              "ref": "3.1",
+              "file": "docs/tasks/03-abrir-chamado-tasks.md",
+              "slug": "03-abrir-chamado",
+              "id": "3.1",
+              "title": "POST /v1/tickets com Idempotency-Key"
+            }
+          ],
           "slice": "Slice 1 — abrir chamado ponta a ponta",
           "points": 3
         },
@@ -109,6 +173,22 @@
             "Formulário de chamado"
           ],
           "unresolvedDependsOn": [],
+          "resolvedDependsOn": [
+            {
+              "ref": "3.1",
+              "file": "docs/tasks/03-abrir-chamado-tasks.md",
+              "slug": "03-abrir-chamado",
+              "id": "3.1",
+              "title": "POST /v1/tickets com Idempotency-Key"
+            },
+            {
+              "ref": "Formulário de chamado",
+              "file": "docs/tasks/03-abrir-chamado-tasks.md",
+              "slug": "03-abrir-chamado",
+              "id": "3.2",
+              "title": "Formulário de chamado"
+            }
+          ],
           "slice": "Slice 2 — confirmação",
           "points": 2
         }
@@ -128,6 +208,22 @@
             "2.1"
           ],
           "unresolvedDependsOn": [],
+          "resolvedDependsOn": [
+            {
+              "ref": "1.2",
+              "file": "docs/tasks/01-login-sso-tasks.md",
+              "slug": "01-login-sso",
+              "id": "1.2",
+              "title": "Fluxo de login e callback"
+            },
+            {
+              "ref": "2.1",
+              "file": "docs/tasks/02-consultar-pedidos-tasks.md",
+              "slug": "02-consultar-pedidos",
+              "id": "T2.1",
+              "title": "GET /v1/orders com paginação por cursor"
+            }
+          ],
           "slice": "Slice 1 — perfis",
           "points": 8
         },
@@ -137,6 +233,14 @@
             "Perfis e permissões de parceiro"
           ],
           "unresolvedDependsOn": [],
+          "resolvedDependsOn": [
+            {
+              "ref": "Perfis e permissões de parceiro",
+              "file": "docs/tasks/04-acesso-parceiros-tasks.md",
+              "slug": "04-acesso-parceiros",
+              "title": "Perfis e permissões de parceiro"
+            }
+          ],
           "slice": "Slice 2 — convite",
           "points": 5
         }
@@ -147,5 +251,6 @@
   ],
   "taskCount": 11,
   "points": 45,
-  "problems": []
+  "problems": [],
+  "cycle": []
 }

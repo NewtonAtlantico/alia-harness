@@ -19,6 +19,8 @@ import {
   createSession,
   newSessionId,
   getPipelineStatus,
+  buildReport,
+  type CommandProbe,
   gateProgress,
   PipelineStateStore,
   inspectInput,
@@ -43,6 +45,7 @@ import type {
   PipelineBrief,
   PipelineResumeResult,
   PipelineView,
+  IssuesPublishResult,
   PipelineStartResult,
   PingResult,
   RunStarted,
@@ -56,6 +59,8 @@ export interface RuntimeOptions {
   post: (message: Outbound) => void;
   /** Test seam: a client to use instead of the one built from the config (a fake model). */
   clientFor?: (config: AliaConfig) => OpenAI | undefined;
+  /** Test seam: how the tracker connection is probed (the real one runs git, gh and glab). */
+  issueProbe?: CommandProbe;
   /** Max characters of one text field sent in an event (tool output and the like). */
   eventTextCap?: number;
 }
@@ -480,7 +485,8 @@ export class EngineRuntime {
         const stat = fs.statSync(path.join(workspace, st.artifact), { throwIfNoEntry: false });
         return { stage: st.stage, path: st.artifact, exists: !!stat, isDir: !!stat?.isDirectory() };
       });
-      return { status, state, artifacts, markdownExists: fs.existsSync(path.join(workspace, 'docs', 'pipeline', 'STATE.md')) };
+      const report = state ? buildReport(state, new PipelineStateStore(workspace).tasks(), status.staleInputs) : undefined;
+      return { status, state, artifacts, markdownExists: fs.existsSync(path.join(workspace, 'docs', 'pipeline', 'STATE.md')), report };
     },
 
     'pipeline.answer': ({ sessionId, gate, answers, by }) => {
@@ -534,6 +540,21 @@ export class EngineRuntime {
       const prompt = `${resumed.prompt ?? ''}\n\nPedido de alterações de ${by} na spec "${spec}":\n${text}\n\nRefaça a etapa de specs levando isso em conta e registre a spec de novo (set_spec). Não aprove nada por conta própria: a revisão é humana.`;
       this.launch(e, `Pedir alterações na spec ${spec}: ${text}`, prompt);
       return { started: true };
+    },
+
+    'issues.publish': async ({ sessionId, confirmDrafts }): Promise<IssuesPublishResult> => {
+      const e = this.entry(sessionId);
+      if (e.busy) throw new Error('This conversation is already running. Stop it first, or wait for it to finish.');
+      // Detected at every attempt: a connection made (or lost) since the last one is what counts.
+      const status = await e.session.issuePublishing({ probe: this.options.issueProbe });
+      if (status.mode === 'drafts' && !confirmDrafts) return { started: false, reason: 'needs_confirmation', status };
+      const publish = status.mode === 'publish';
+      const request = publish
+        ? `Publish the tasks in docs/tasks/ as issues, using the tracker connection that is available (${status.via}). Report the issue links when done.`
+        : `There is no tracker connection. Write each task in docs/tasks/ as an issue draft under ${status.draftsDir}/ and do not try to publish anything. Say where the drafts are when done.`;
+      const resolved = await e.session.resolveSkill(`/${status.skill}`, request);
+      this.launch(e, publish ? 'Publicar issues' : 'Gerar rascunhos de issues', resolved.status === 'ready' ? resolved.prompt : request);
+      return { started: true, mode: status.mode, ...(status.via ? { via: status.via } : {}), skill: status.skill };
     },
 
     'pipeline.approveGate': ({ sessionId, gate }) => {

@@ -33,7 +33,8 @@
     "test:intake-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-intake-app.ts",
     "test:run-logic": "tsx --tsconfig tsconfig.node.json scripts/test-run-logic.ts",
     "test:run-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-run-app.ts",
-    "test:gates-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-gates-app.ts"
+    "test:gates-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-gates-app.ts",
+    "test:report-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-report-app.ts"
   },
   "devDependencies": {
     "@electron/fuses": "^2.1.3",
