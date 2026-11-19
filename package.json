@@ -40,7 +40,10 @@
     "desktop:typecheck": "npm --prefix desktop run typecheck",
     "desktop:smoke": "npm --prefix desktop run smoke",
     "desktop:test:engine": "npm --prefix desktop run test:engine",
-    "desktop:test:app": "npm --prefix desktop run test:app"
+    "desktop:test:app": "npm --prefix desktop run test:app",
+    "desktop:test:security": "npm --prefix desktop run test:security",
+    "desktop:test:hardening": "npm --prefix desktop run test:hardening",
+    "desktop:test:package": "npm --prefix desktop run test:package"
   },
   "keywords": [
     "ai",

@@ -154,7 +154,26 @@ export interface RendererRequests {
   'interaction.pending': { request: Record<string, never>; result: Interaction[] };
   /** Asks the user for a project folder with the native dialog; only folders chosen this way can be opened. */
   'projects.pick': { request: Record<string, never>; result: { path: string } | null };
+  'window.minimize': { request: Record<string, never>; result: { ok: true } };
+  'window.toggleMaximize': { request: Record<string, never>; result: { maximized: boolean } };
+  'window.close': { request: Record<string, never>; result: { ok: true } };
+  'window.state': { request: Record<string, never>; result: { maximized: boolean } };
+  'app.info': { request: Record<string, never>; result: AppInfo };
+  /** Opens an https link in the system browser, after the user confirms it in a native dialog. */
+  'app.openExternal': { request: { url: string }; result: { opened: boolean } };
 }
+
+/** Requests answered by main itself; they never reach the engine. */
+export type MainRequestName = 'projects.pick' | 'window.minimize' | 'window.toggleMaximize' | 'window.close' | 'window.state' | 'app.info' | 'app.openExternal';
+
+export interface AppInfo {
+  name: string;
+  version: string;
+  platform: string;
+}
+
+/** A command from the app menu or a shortcut (Ctrl N and so on). The page decides what it means on the current screen. */
+export type AppCommand = 'new_conversation' | 'open_project' | 'open_settings' | 'toggle_panel';
 
 /** What only main may ask of the engine (never reachable from the renderer). */
 export interface InternalRequests {
@@ -172,7 +191,7 @@ export interface InternalRequests {
   };
 }
 
-export type EngineRequests = Omit<RendererRequests, 'projects.pick'> & InternalRequests;
+export type EngineRequests = Omit<RendererRequests, MainRequestName> & InternalRequests;
 export type RendererRequestName = keyof RendererRequests;
 export type EngineRequestName = keyof EngineRequests;
 
@@ -195,9 +214,11 @@ export type PushMessage =
   | { kind: 'interaction'; interaction: Interaction }
   | { kind: 'interaction_closed'; id: string; sessionId: string }
   /** The engine process died and was started again: its sessions are gone, so reopen them with `resumeId`. */
-  | { kind: 'engine_status'; status: 'restarted' | 'down' };
+  | { kind: 'engine_status'; status: 'restarted' | 'down' }
+  | { kind: 'window_state'; maximized: boolean }
+  | { kind: 'command'; command: AppCommand };
 
-export type EngineMessage = EngineRequestMessage | EngineReplyMessage | { kind: 'ready' } | Exclude<PushMessage, { kind: 'engine_status' }>;
+export type EngineMessage = EngineRequestMessage | EngineReplyMessage | { kind: 'ready' } | Extract<PushMessage, { kind: 'event' | 'interaction' | 'interaction_closed' }>;
 
 // ------------------------------------------------------------------------------------ renderer API
 

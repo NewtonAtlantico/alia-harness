@@ -1,0 +1,72 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 38px;
+  flex: none;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+  -webkit-app-region: drag; /* dragging the bar moves the window; double-click maximizes */
+}
+
+.titlebar-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-left: var(--space-4);
+}
+
+/* The logo image has a pale background of its own; multiply lets the bar show through it. */
+.titlebar-brand img {
+  mix-blend-mode: multiply;
+}
+
+.titlebar-version {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.titlebar-controls {
+  display: flex;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-controls button {
+  width: 46px;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: default;
+}
+
+.titlebar-controls button:hover {
+  background: var(--primary-selected);
+}
+
+.titlebar-controls button.close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+.titlebar-controls button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-6);
+}

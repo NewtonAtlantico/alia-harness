@@ -18,3 +18,13 @@ nsis:
   perMachine: false
   allowElevation: false
 npmRebuild: false
+# Electron fuses: switches baked into the executable, so a user (or malware running as the user) cannot turn the
+# app into a general-purpose Node interpreter or attach a debugger through environment variables or flags.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableCookieEncryption: true
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  grantFileProtocolExtraPrivileges: false

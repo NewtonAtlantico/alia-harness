@@ -58,6 +58,12 @@ export const rendererSchemas = {
   'interaction.respond': strict({ id: z.string().min(1).max(100), response: interactionResponse }),
   'interaction.pending': none,
   'projects.pick': none,
+  'window.minimize': none,
+  'window.toggleMaximize': none,
+  'window.close': none,
+  'window.state': none,
+  'app.info': none,
+  'app.openExternal': strict({ url: z.string().min(1).max(2048) }),
 } satisfies { [K in RendererRequestName]: z.ZodType<RendererRequests[K]['request']> };
 
 export function isRendererRequest(name: unknown): name is RendererRequestName {
