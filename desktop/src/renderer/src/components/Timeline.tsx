@@ -52,6 +52,7 @@ function titleOf(s: ToolSummary): string {
 
 /** The small status tag at the end of a tool row, and the tone that colors it. */
 function badgeOf(row: ToolRow): { text: string; tone: 'ok' | 'bad' | 'muted' | 'run' } | null {
+  if (row.permission === 'pending') return { text: t.approval.pending, tone: 'run' };
   if (row.name === 'run_bash') {
     const o = bashOutcome(row);
     switch (o.state) {
@@ -67,6 +68,8 @@ function badgeOf(row: ToolRow): { text: string; tone: 'ok' | 'bad' | 'muted' | '
         return { text: t.timeline.status.timeout, tone: 'bad' };
       case 'denied':
         return { text: t.timeline.status.denied, tone: 'muted' };
+      case 'unknown':
+        return null;
       default:
         return { text: t.timeline.status.error, tone: 'bad' };
     }
@@ -99,6 +102,8 @@ function ToolBlock({ row }: { row: ToolRow }) {
           {row.status === 'running' ? '' : open ? '▾' : '▸'}
         </span>
         <span className="tool-title">{titleOf(summary)}</span>
+        {row.permission === 'allow_once' && <span className="perm-tag">{t.approval.allowedOnce}</span>}
+        {row.permission === 'allow_always' && <span className="perm-tag">{t.approval.allowedAlways}</span>}
         {stats && (
           <span className="tool-stats">
             <span className="add">+{stats.added}</span> <span className="rem">−{stats.removed}</span>

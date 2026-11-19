@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
-import type { CommandInfo, ContextUsage } from '../../../shared/ipc';
+import type { CommandInfo, ContextUsage, InteractionResponse } from '../../../shared/ipc';
 import type { OpenConversation } from '../hooks/useWorkspace';
 import { t } from '../i18n/pt-BR';
 import { parseSlash, withAttachments } from '../lib/composer';
+import { forSession, type Pending } from '../lib/interactions';
 import { compactMessage, helpText, isLocalCommand, modelsText, skillsText, tokensText } from '../lib/localCommands';
 import { projectName } from '../lib/projectName';
 import { stateOf, type SessionStates } from '../lib/sessionStates';
 import { applyPush, rowsFromMessages } from '../lib/timeline';
 import { Composer, type ComposerSubmit } from './Composer';
 import { ContextMeter, ModelChip } from './ConversationHeader';
+import { InteractionCards } from './InteractionCards';
 import { Timeline } from './Timeline';
 
 interface PaneProps {
@@ -22,6 +24,11 @@ interface PaneProps {
   onOpenSettings: () => void;
   /** The first message of a new conversation was sent. */
   onStarted: () => void;
+  /** Everything waiting for an answer, in every conversation; this pane shows its own. */
+  interactions: Pending;
+  onRespond: (id: string, response: InteractionResponse) => void;
+  /** Who owns an assumption by default (the user's name). */
+  defaultOwner: string;
 }
 
 /**
@@ -29,7 +36,7 @@ interface PaneProps {
  * from what is saved and then follows the engine's events live; give the pane a `key` of the conversation id so
  * switching conversations starts fresh.
  */
-export function ConversationPane({ conversation, states, loading, intro, configured, onOpenSettings, onStarted }: PaneProps) {
+export function ConversationPane({ conversation, states, loading, intro, configured, onOpenSettings, onStarted, interactions, onRespond, defaultOwner }: PaneProps) {
   const { info, opened } = conversation;
   const state = stateOf(states, info.id);
   const [timeline, dispatch] = useReducer(applyPush, conversation.messages, (messages) => rowsFromMessages(messages, { running: state.running }));
@@ -164,11 +171,15 @@ export function ConversationPane({ conversation, states, loading, intro, configu
         </div>
         {state.waiting > 0 && (
           <p className="notice waiting" role="status">
-            {t.conversation.waiting}
+            {t.conversation.waiting}{' '}
+            <button type="button" className="link-btn" onClick={() => root.current?.querySelector('[data-testid=interaction-card]')?.scrollIntoView({ block: 'center' })}>
+              {t.approval.goTo}
+            </button>
           </p>
         )}
       </header>
       {timeline.rows.length === 0 && !timeline.modelBusy ? (starting ? null : <p className="hint">{t.conversation.empty}</p>) : <Timeline state={timeline} />}
+      <InteractionCards interactions={forSession(interactions, info.id)} defaultOwner={defaultOwner} onRespond={onRespond} />
       <div className="composer-dock">
         <Composer sessionId={info.id} running={running} blockedReason={configured ? undefined : t.composer.notConfigured} onOpenSettings={onOpenSettings} onSubmit={submit} onStop={stop} />
       </div>

@@ -59,6 +59,8 @@ export interface ToolRow {
   subagent?: { id: string; label: string; status: string; steps?: number; maxSteps?: number };
   /** What a subagent did (its tool calls), nested under the row that started it. */
   children: ToolRow[];
+  /** The approval this call needed: `pending` while the card is open, then the user's decision. */
+  permission?: 'pending' | 'allow_once' | 'allow_always' | 'deny' | 'cancelled';
 }
 /** What a slash command that only the app handles printed (/help, /models, /tokens...). Not part of the saved conversation. */
 export interface LocalRow {
@@ -207,6 +209,18 @@ function applyEvent(state: TimelineState, event: AgentEvent): TimelineState {
       return rows ? { ...state, rows } : state;
     }
 
+    case 'permission_requested': {
+      if (!event.toolCallId) return state;
+      const rows = mapTool(state.rows, event.toolCallId, (t) => ({ ...t, permission: 'pending' }));
+      return rows ? { ...state, rows } : state;
+    }
+
+    case 'permission_resolved': {
+      if (!event.toolCallId) return state;
+      const rows = mapTool(state.rows, event.toolCallId, (t) => ({ ...t, permission: event.decision }));
+      return rows ? { ...state, rows } : state;
+    }
+
     case 'context_compacted':
       return withSeq(state, (id) => ({ kind: 'notice', id, code: 'compacted', message: '', tokensBefore: event.tokensBefore, tokensAfter: event.tokensAfter }));
 
@@ -229,7 +243,7 @@ function applyEvent(state: TimelineState, event: AgentEvent): TimelineState {
     }
 
     default:
-      return state; // permission_requested / permission_resolved belong to the approval card (A8)
+      return state;
   }
 }
 
@@ -304,7 +318,8 @@ export function groupReads(rows: Row[]): DisplayItem[] {
 
 /** How a shell command ended, read from the result text. */
 export interface BashOutcome {
-  state: 'running' | 'passed' | 'failed' | 'cancelled' | 'timeout' | 'denied' | 'error';
+  /** `unknown`: the result says nothing about how it ended (an archived output, for instance): no tag is better than a wrong one. */
+  state: 'running' | 'passed' | 'failed' | 'cancelled' | 'timeout' | 'denied' | 'error' | 'unknown';
   exitCode?: number;
 }
 
@@ -312,15 +327,19 @@ export function bashOutcome(row: Pick<ToolRow, 'status' | 'result'>): BashOutcom
   if (row.status === 'running') return { state: 'running' };
   const result = row.result ?? '';
   if (row.status === 'cancelled' || result.startsWith(CANCELLED_PREFIX) || result.startsWith(INTERRUPTED_PREFIX)) return { state: 'cancelled' };
-  if (/^User denied permission/.test(result) || /^Error: .*denied/i.test(result)) return { state: 'denied' };
-  if (/^\[Execution timed out/m.test(result.slice(0, 200))) return { state: 'timeout' };
-  const code = /^\[Exit Code: (-?\d+)\]/.exec(result) ?? /\(exit code: (-?\d+)\)/.exec(result);
+  // Core's own refusals: the user cancelled before approving, said no, or there was nobody to ask.
+  if (/^Cancelled by user before/.test(result)) return { state: 'cancelled' };
+  if (/^User denied permission/.test(result) || /^Error: .*denied/i.test(result) || /needs the user's approval, but no confirmation handler/.test(result) || /^Potentially destructive command detected/.test(result)) return { state: 'denied' };
+  // An output archived to save context keeps its first characters, where the exit code is.
+  const head = result.replace(/^\[Previous tool output archived to save context: /, '').slice(0, 200);
+  if (/^\[Execution timed out/m.test(head)) return { state: 'timeout' };
+  const code = /^\[Exit Code: (-?\d+)\]/.exec(head) ?? /\(exit code: (-?\d+)\)/.exec(head);
   if (code) {
     const exitCode = Number(code[1]);
     return { state: exitCode === 0 ? 'passed' : 'failed', exitCode };
   }
   if (row.status === 'error' || isErrorResult(result)) return { state: 'error' };
-  return { state: 'passed', exitCode: 0 };
+  return { state: 'unknown' };
 }
 
 export type ToolSummary =

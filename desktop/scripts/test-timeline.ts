@@ -154,6 +154,23 @@ console.log('\n=== shell commands: passed, failed, timed out, denied, cancelled 
   check('Stop mid-command: the call is cancelled, and the run ends with a "cancelled" row', bashOutcome(c1).state === 'cancelled' && c1.status === 'cancelled' && stopped.state.rows.at(-1)!.kind === 'notice' && (stopped.state.rows.at(-1) as any).code === 'cancelled' && stopped.state.running === false);
 }
 
+console.log('\n=== approvals leave their mark on the command that needed them ===');
+{
+  const once = await record([tool('run_bash', { command: 'echo uma vez' }, 'p1'), { content: 'ok' }], 'rode', { mode: 'ask-commands', respond: 'allow_once' });
+  check('allowed once: the call says so', toolRows(once.state)[0].permission === 'allow_once' && bashOutcome(toolRows(once.state)[0]).state === 'passed');
+  const denied = await record([tool('run_bash', { command: 'echo nunca' }, 'p2'), { content: 'ok' }], 'rode', { mode: 'ask-commands', respond: 'deny' });
+  check('denied: the call says so', toolRows(denied.state)[0].permission === 'deny');
+  const auto = await record([tool('run_bash', { command: 'echo sem perguntar' }, 'p3'), { content: 'ok' }], 'rode', { mode: 'auto' });
+  check('in auto mode nobody asked, so nothing is recorded', toolRows(auto.state)[0].permission === undefined);
+  const ev = (event: any): PushMessage => ({ kind: 'event', sessionId: 's', event });
+  let s = [ev({ type: 'tool_call_started', id: 'c', name: 'run_bash', args: '{}' }), ev({ type: 'permission_requested', id: 'i', toolCallId: 'c', command: 'x', reasons: [], dangerous: false, canAlwaysAllow: true })].reduce(applyPush, emptyTimeline);
+  check('while the card is open, the call is "pending"', toolRows(s)[0].permission === 'pending');
+  s = applyPush(s, ev({ type: 'permission_resolved', id: 'i', toolCallId: 'c', decision: 'cancelled' }));
+  check('a cancelled run closes it as cancelled', toolRows(s)[0].permission === 'cancelled');
+  s = [ev({ type: 'permission_requested', id: 'i', toolCallId: 'unknown', command: 'x', reasons: [], dangerous: false, canAlwaysAllow: true }), ev({ type: 'permission_requested', id: 'j', command: 'x', reasons: [], dangerous: false, canAlwaysAllow: true })].reduce(applyPush, emptyTimeline);
+  check('a request for a call that is not shown, or with no call id, changes nothing', s.rows.length === 0);
+}
+
 console.log('\n=== skills and subagents ===');
 {
   const r = await record([tool('use_skill', { name: 'greet' }, 'u1'), { content: 'carregada' }], 'use a skill', { skills: true });
@@ -275,6 +292,9 @@ console.log('\n=== small helpers ===');
   check('file names', baseName('src/app/main.ts') === 'main.ts' && baseName('C:\\x\\y.txt') === 'y.txt' && baseName('solo') === 'solo');
   check('a long command is shortened for the title, whitespace collapsed', (summarizeTool({ kind: 'tool', id: '1', name: 'run_bash', args: { command: 'echo   a\n  b ' + 'x'.repeat(200) }, status: 'done', children: [] }) as any).target.length <= 120);
   check('other tools are named', JSON.stringify(summarizeTool({ kind: 'tool', id: '1', name: 'mcp__x__y', args: {}, status: 'done', children: [] })) === JSON.stringify({ kind: 'other', name: 'mcp__x__y' }) && (summarizeTool({ kind: 'tool', id: '1', name: 'pipeline_state', args: { action: 'update' }, status: 'done', children: [] }) as any).action === 'update' && summarizeTool({ kind: 'tool', id: '1', name: 'ask_user', args: {}, status: 'done', children: [] }).kind === 'ask');
+  check('core\'s refusals are not "passed": cancelled before approval, no one to ask, destructive and unconfirmed', bashOutcome({ status: 'done', result: 'Cancelled by user before the command was approved: "echo x"' }).state === 'cancelled' && bashOutcome({ status: 'done', result: 'Command "x" needs the user\'s approval, but no confirmation handler is available.' }).state === 'denied' && bashOutcome({ status: 'done', result: 'Potentially destructive command detected: "rm -rf x". Reasons: y, but no confirmation handler is available.' }).state === 'denied');
+  check('an archived output still says how it ended, when its first characters do', bashOutcome({ status: 'done', result: '[Previous tool output archived to save context: [Exit Code: 3]\nstderr...]' }).state === 'failed' && bashOutcome({ status: 'done', result: '[Previous tool output archived to save context: [Exit Code: 0]\nok...]' }).state === 'passed');
+  check('a result that says nothing about how it ended gets no tag, rather than a wrong one', bashOutcome({ status: 'done', result: 'something unexpected' }).state === 'unknown' && bashOutcome({ status: 'done', result: '' }).state === 'unknown' && bashOutcome({ status: 'done', result: '[Previous tool output archived to save context: lots of text...]' }).state === 'unknown');
   check('outcomes of odd shell results', bashOutcome({ status: 'running' }).state === 'running' && bashOutcome({ status: 'done', result: 'Command executed successfully with no output (exit code: 0).' }).state === 'passed' && bashOutcome({ status: 'error', result: 'Error: boom' }).state === 'error' && bashOutcome({ status: 'done', result: 'User denied permission to run the command: "x"' }).state === 'denied');
 }
 

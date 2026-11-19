@@ -52,7 +52,9 @@
     "desktop:test:timeline": "npm --prefix desktop run test:timeline",
     "desktop:test:timeline-app": "npm --prefix desktop run test:timeline-app",
     "desktop:test:composer-logic": "npm --prefix desktop run test:composer-logic",
-    "desktop:test:composer-app": "npm --prefix desktop run test:composer-app"
+    "desktop:test:composer-app": "npm --prefix desktop run test:composer-app",
+    "desktop:test:interactions-logic": "npm --prefix desktop run test:interactions-logic",
+    "desktop:test:interactions-app": "npm --prefix desktop run test:interactions-app"
   },
   "keywords": [
     "ai",

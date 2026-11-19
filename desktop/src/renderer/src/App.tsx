@@ -6,6 +6,7 @@ import { SettingsScreen } from './components/SettingsScreen';
 import { Sidebar } from './components/Sidebar';
 import { TitleBar } from './components/TitleBar';
 import { TrustDialog } from './components/TrustDialog';
+import { useInteractions } from './hooks/useInteractions';
 import { useWorkspace } from './hooks/useWorkspace';
 import { t } from './i18n/pt-BR';
 
@@ -17,6 +18,7 @@ export function App() {
   const [settings, setSettings] = useState<SettingsView>();
   const [now, setNow] = useState(() => new Date());
   const ws = useWorkspace(() => setScreen('chat'));
+  const inter = useInteractions();
 
   useEffect(() => {
     window.alia.request('settings.get', {}).then((s) => {
@@ -90,6 +92,9 @@ export function App() {
               configured={settings?.configured ?? true}
               onOpenSettings={() => setScreen('settings')}
               onStarted={ws.actions.markStarted}
+              interactions={inter.pending}
+              onRespond={(id, response) => void inter.respond(id, response)}
+              defaultOwner={settings?.displayName ?? ''}
               intro={<Home name={settings?.displayName ?? ''} project={ws.currentProject} now={now} configured={settings?.configured ?? true} onSetup={() => setScreen('settings')} />}
             />
           ) : (
