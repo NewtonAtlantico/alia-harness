@@ -130,6 +130,34 @@ export class EngineRuntime {
   }
 
   /** Keeps messages small: a long tool output is cut here (the model still saw all of it). */
+  /**
+   * Sends an event to the page. Pieces of an answer (deltas) arrive many times a second; they are merged for a few milliseconds
+   * so the page redraws a handful of times a second, not hundreds. Any other event first sends what is waiting, so the order
+   * the page sees is the order things happened.
+   */
+  private readonly pendingDeltas = new Map<string, { event: Extract<AgentEvent, { type: 'assistant_delta' | 'thinking_delta' }>; timer: ReturnType<typeof setTimeout> }>();
+  private flushDeltas(sessionId: string): void {
+    const pending = this.pendingDeltas.get(sessionId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingDeltas.delete(sessionId);
+    this.options.post({ kind: 'event', sessionId, event: pending.event });
+  }
+  private deliver(sessionId: string, event: AgentEvent): void {
+    if ((event.type === 'assistant_delta' || event.type === 'thinking_delta') && !event.subagentId) {
+      const pending = this.pendingDeltas.get(sessionId);
+      if (pending && pending.event.type === event.type && pending.event.step === event.step) {
+        pending.event = { ...pending.event, text: pending.event.text + event.text };
+        return;
+      }
+      this.flushDeltas(sessionId);
+      this.pendingDeltas.set(sessionId, { event, timer: setTimeout(() => this.flushDeltas(sessionId), 40) });
+      return;
+    }
+    this.flushDeltas(sessionId);
+    this.options.post({ kind: 'event', sessionId, event: this.capEvent(event) });
+  }
+
   private capEvent(e: AgentEvent): AgentEvent {
     switch (e.type) {
       case 'tool_call_started':
@@ -267,6 +295,7 @@ export class EngineRuntime {
       const session = createSession({
         workspace,
         config,
+        streaming: true, // the answer appears as it is written; core falls back to whole answers by itself when the endpoint cannot stream
         client: this.options.clientFor?.(config),
         // Project skills are instructions the agent follows: they load only for a folder the user trusts (main decides).
         skillRoots: trustedProject ? [...this.skillRoots, { label: 'project', dir: path.join(workspace, '.alia', 'skills') }] : this.skillRoots,
@@ -296,7 +325,7 @@ export class EngineRuntime {
               e.controller = undefined;
             }
           }
-          post({ kind: 'event', sessionId: id, event: this.capEvent(event) });
+          this.deliver(id, event);
         },
         onConfirm: async (ctx) => {
           const answer = await this.ask(

@@ -20,6 +20,14 @@ export type AgentEventBody =
   /** Reasoning text returned by the model (reasoning_content and friends). */
   | { type: 'thinking'; text: string }
   /**
+   * Streaming only (`stream: true`): a piece of the assistant's text as it arrives. The same text comes again, whole, in the
+   * `assistant_message` that ends the step, so a front-end that ignores deltas loses nothing, and one that shows them replaces
+   * what it showed with the final text.
+   */
+  | { type: 'assistant_delta'; step: number; text: string }
+  /** Streaming only: a piece of the model's reasoning. The whole reasoning follows in a `thinking` event. */
+  | { type: 'thinking_delta'; step: number; text: string }
+  /**
    * Assistant text. `final: true` is the answer that ends the run; `final: false` is text the model
    * wrote alongside tool calls ("I'll read the file first..."), which the terminal UI does not show.
    */

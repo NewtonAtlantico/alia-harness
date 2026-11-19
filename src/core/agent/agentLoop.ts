@@ -32,6 +32,12 @@ export interface AgentOptions {
   onHistory?: (messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]) => void;
   /** Legacy observer: adapted from the event stream (see `eventsToAgentUI`). May be combined with `onEvent`. */
   ui?: AgentUI;
+  /**
+   * Ask the endpoint to stream, and emit `assistant_delta` / `thinking_delta` as pieces arrive. Off by default. If the endpoint
+   * cannot stream (it refuses the request, or answers with something that is not a stream) the step is repeated without
+   * streaming, the agent remembers, and the run goes on: streaming is never a reason for a run to fail.
+   */
+  stream?: boolean;
 }
 
 /**
@@ -68,6 +74,17 @@ Follow these principles:
 2. Use tools step-by-step to gather context and verify changes.
 3. Be concise and direct in your final responses. Do not hallucinate file contents or command outputs.`;
 
+class StreamNotSupported extends Error {}
+
+/** Whether an error means "this endpoint will not stream" (as opposed to "the request failed": a bad key, a full quota, a server error). */
+function refusedStreaming(err: any): boolean {
+  if (err instanceof StreamNotSupported) return true;
+  const status: number | undefined = err?.status;
+  if (typeof status === 'number') return [400, 404, 405, 415, 422, 501].includes(status);
+  // A stream that broke before the first piece, or a body that was not a stream at all.
+  return /stream|event-stream|JSON|Unexpected token/i.test(String(err?.message ?? ''));
+}
+
 export class AliaAgent {
   private client: OpenAI;
   private model: string;
@@ -81,6 +98,9 @@ export class AliaAgent {
   private emit: EventSink;
   private onHistory?: AgentOptions['onHistory'];
   private changeTracker?: ChangeTracker;
+  private stream: boolean;
+  /** Set after a plain request succeeded where a streaming one was refused: from then on this agent does not ask again. */
+  private streamRefused = false;
   private messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
 
   constructor(options: AgentOptions) {
@@ -95,6 +115,7 @@ export class AliaAgent {
     this.maxSteps = options.maxSteps || 30;
     this.onHistory = options.onHistory;
     this.changeTracker = options.changeTracker;
+    this.stream = options.stream === true;
     this.emit = combineSinks(options.ui ? eventsToAgentUI(options.ui) : undefined, options.onEvent);
 
     this.reset();
@@ -171,6 +192,78 @@ export class AliaAgent {
     return result;
   }
 
+  /** One model round-trip: streamed when asked to (and when the endpoint allows), otherwise in one piece. */
+  private async requestModel(step: number, signal: AbortSignal | undefined): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+    const params = { model: this.model, messages: this.messages, tools: this.toolRegistry.getOpenAITools(), tool_choice: 'auto' as const };
+    const options = signal ? { signal } : undefined;
+    let streamAttemptFailed = false;
+    if (this.stream && !this.streamRefused) {
+      try {
+        return await raceAbort(this.streamResponse(params, options, step), signal);
+      } catch (err: any) {
+        // A cancelled run, or an endpoint that answered and failed (bad key, rate limit, server error), is not about streaming.
+        if (signal?.aborted || !refusedStreaming(err)) throw err;
+        streamAttemptFailed = true;
+      }
+    }
+    const response = await raceAbort(this.client.chat.completions.create(params, options), signal);
+    // The plain request worked where the stream did not: this endpoint cannot stream. Say so once, and stop asking.
+    if (streamAttemptFailed) {
+      this.streamRefused = true;
+      this.emit({ type: 'notice', level: 'info', message: 'This endpoint does not stream: answers will appear when they are complete.' });
+    }
+    return response;
+  }
+
+  /** Reads a streamed answer into the same shape a plain one has, emitting the deltas on the way. */
+  private async streamResponse(params: { model: string; messages: any; tools: any; tool_choice: 'auto' }, options: { signal: AbortSignal } | undefined, step: number): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+    const stream: any = await this.client.chat.completions.create({ ...params, stream: true } as any, options);
+    // An endpoint that ignores the flag answers with the whole completion: that is the answer, and it will not stream.
+    if (stream?.choices && typeof stream[Symbol.asyncIterator] !== 'function') {
+      this.streamRefused = true;
+      return stream as OpenAI.Chat.Completions.ChatCompletion;
+    }
+    if (!stream || typeof stream[Symbol.asyncIterator] !== 'function') throw new StreamNotSupported('the endpoint did not answer with a stream');
+    let content = '';
+    let reasoning = '';
+    let finish: string | undefined;
+    let chunks = 0;
+    const calls = new Map<number, { id: string; name: string; args: string }>();
+    for await (const chunk of stream) {
+      chunks++;
+      const choice = chunk?.choices?.[0];
+      if (!choice) continue;
+      if (choice.finish_reason) finish = choice.finish_reason;
+      const delta = choice.delta ?? {};
+      const thought: string | undefined = delta.reasoning_content ?? delta.reasoning ?? delta.provider_specific_fields?.reasoning;
+      if (thought) {
+        reasoning += thought;
+        this.emit({ type: 'thinking_delta', step, text: thought });
+      }
+      if (typeof delta.content === 'string' && delta.content) {
+        content += delta.content;
+        this.emit({ type: 'assistant_delta', step, text: delta.content });
+      }
+      for (const tc of delta.tool_calls ?? []) {
+        const at = typeof tc.index === 'number' ? tc.index : calls.size;
+        const call = calls.get(at) ?? { id: '', name: '', args: '' };
+        if (tc.id) call.id = tc.id;
+        if (tc.function?.name) call.name += tc.function.name;
+        if (tc.function?.arguments) call.args += tc.function.arguments;
+        calls.set(at, call);
+      }
+    }
+    if (chunks === 0) throw new StreamNotSupported('the stream was empty');
+    const message: any = { role: 'assistant', content: content || null };
+    if (reasoning) message.reasoning_content = reasoning;
+    if (calls.size > 0) {
+      message.tool_calls = [...calls.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([, c], i) => ({ id: c.id || `call_${randomUUID().slice(0, 8)}_${i}`, type: 'function', function: { name: c.name, arguments: c.args } }));
+    }
+    return { id: 'stream', object: 'chat.completion', created: 0, model: params.model, choices: [{ index: 0, finish_reason: finish ?? (message.tool_calls ? 'tool_calls' : 'stop'), message }] } as unknown as OpenAI.Chat.Completions.ChatCompletion;
+  }
+
   private cancelled(step: number): AgentResult {
     this.emit({ type: 'notice', level: 'info', message: 'Run cancelled.' });
     return { status: 'cancelled', text: 'Run cancelled by user.', steps: step };
@@ -203,18 +296,7 @@ export class AliaAgent {
       try {
         // The signal is handed to the client (so the HTTP request is dropped) and also raced here,
         // so a client that ignores it still cannot keep a cancelled run waiting.
-        response = await raceAbort(
-          this.client.chat.completions.create(
-            {
-              model: this.model,
-              messages: this.messages,
-              tools: this.toolRegistry.getOpenAITools(),
-              tool_choice: 'auto',
-            },
-            signal ? { signal } : undefined
-          ),
-          signal
-        );
+        response = await this.requestModel(step, signal);
       } catch (err: any) {
         this.emit({ type: 'model_finished', step });
         if (signal?.aborted) return this.cancelled(step);

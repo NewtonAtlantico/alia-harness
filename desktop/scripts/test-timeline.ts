@@ -299,6 +299,57 @@ console.log('\n=== the same conversation, reopened from disk ===');
   check('text stored as parts reads as text', (parts.rows[0] as any).text === 'em partes');
 }
 
+console.log('\n=== streaming: the answer as it is written ===');
+{
+  const ev = (event: any) => ({ kind: 'event', sessionId: 's', event }) as any;
+  let st: TimelineState = emptyTimeline;
+  const rows = () => st.rows as any[];
+  st = applyPush(st, ev({ type: 'run_started', runId: 'r' }));
+  st = applyPush(st, ev({ type: 'model_started', step: 1 }));
+  st = applyPush(st, ev({ type: 'thinking_delta', step: 1, text: 'Vou ' }));
+  st = applyPush(st, ev({ type: 'thinking_delta', step: 1, text: 'pensar.' }));
+  st = applyPush(st, ev({ type: 'assistant_delta', step: 1, text: 'Olá' }));
+  st = applyPush(st, ev({ type: 'assistant_delta', step: 1, text: ', mundo' }));
+  check('pieces build one live row for the reasoning and one for the answer, in the order they began', rows().length === 2 && rows()[0].kind === 'thinking' && rows()[0].live && rows()[0].text === 'Vou pensar.' && rows()[1].kind === 'assistant' && rows()[1].live && rows()[1].text === 'Olá, mundo' && rows()[1].final === false);
+  check('nothing is final yet: the run is still waiting for the end of the step', st.finalSeen === false && st.running);
+  st = applyPush(st, ev({ type: 'model_finished', step: 1 }));
+  st = applyPush(st, ev({ type: 'thinking', text: 'Vou pensar.' }));
+  st = applyPush(st, ev({ type: 'assistant_message', text: 'Olá, mundo!', final: true }));
+  check('the whole messages take the live rows\' place: nothing is shown twice, and the text is the whole one', rows().length === 2 && !rows()[0].live && rows()[0].text === 'Vou pensar.' && !rows()[1].live && rows()[1].text === 'Olá, mundo!' && rows()[1].final === true && st.finalSeen);
+
+  // A step with tool calls: the text beside them is not the final answer.
+  let t2: TimelineState = emptyTimeline;
+  t2 = applyPush(t2, ev({ type: 'assistant_delta', step: 1, text: 'Vou ler o arquivo.' }));
+  t2 = applyPush(t2, ev({ type: 'assistant_message', text: 'Vou ler o arquivo.', final: false }));
+  check('text beside tool calls ends as an aside, not a final answer', (t2.rows as any[]).length === 1 && (t2.rows[0] as any).final === false && !(t2.rows[0] as any).live && !t2.finalSeen);
+  t2 = applyPush(t2, ev({ type: 'tool_call_started', id: 'c1', name: 'read_file', args: '{}' }));
+  t2 = applyPush(t2, ev({ type: 'assistant_delta', step: 2, text: 'Li.' }));
+  check('the next step starts a new live row below the tool, never reusing the earlier one', (t2.rows as any[]).length === 3 && (t2.rows[2] as any).live && (t2.rows[2] as any).text === 'Li.' && (t2.rows[0] as any).text === 'Vou ler o arquivo.');
+
+  // Cut off in the middle: what arrived stays as text, no longer "being written".
+  let t3: TimelineState = emptyTimeline;
+  t3 = applyPush(t3, ev({ type: 'run_started', runId: 'r' }));
+  t3 = applyPush(t3, ev({ type: 'assistant_delta', step: 1, text: 'Uma resposta que será interrom' }));
+  t3 = applyPush(t3, ev({ type: 'run_finished', runId: 'r', result: { status: 'cancelled', text: 'Run cancelled by user.', steps: 1 } }));
+  check('cancelled mid-answer: the part that arrived stays, no longer live, followed by the cancelled notice', (t3.rows[0] as any).text === 'Uma resposta que será interrom' && !(t3.rows[0] as any).live && (t3.rows[1] as any).code === 'cancelled' && !t3.running);
+
+  // A step that only called tools: its (empty) whole message removes the empty live row, if any.
+  let t4: TimelineState = emptyTimeline;
+  t4 = applyPush(t4, ev({ type: 'assistant_delta', step: 1, text: ' ' }));
+  t4 = applyPush(t4, ev({ type: 'assistant_message', text: ' ', final: false }));
+  check('a step with no text leaves no row behind', t4.rows.length === 0);
+
+  // The engine merges pieces before sending them: far fewer messages than the model's chunks, in order, adding up to the text.
+  const long = 'Esta é uma resposta comprida, escrita aos poucos, para ver os pedaços chegando juntos. '.repeat(4).trim();
+  const rec = await record([{ content: long, reasoning: 'Penso aos poucos antes de responder à pergunta.' }], 'oi');
+  const events = rec.pushes.filter((m) => m.kind === 'event' && m.sessionId === rec.sessionId).map((m: any) => m.event);
+  const deltas = events.filter((e) => e.type === 'assistant_delta');
+  check(`the engine merges the pieces (${deltas.length} messages for ${Math.ceil(long.length / 4)} chunks), and they add up to the answer`, deltas.length >= 1 && deltas.length < 15 && deltas.map((d: any) => d.text).join('') === long);
+  const kinds = events.map((e) => e.type);
+  check('every piece is sent before the model finishes and before the whole message (the order the page sees is the order it happened)', kinds.lastIndexOf('assistant_delta') < kinds.indexOf('model_finished') && kinds.lastIndexOf('thinking_delta') < kinds.indexOf('model_finished') && kinds.indexOf('model_finished') < kinds.indexOf('assistant_message'), kinds.join());
+  check('folded as the page does, the conversation has one reasoning row and one answer row, whole', rec.state.rows.filter((r: any) => r.kind === 'assistant').length === 1 && (rec.state.rows.find((r: any) => r.kind === 'assistant') as any).text === long && !(rec.state.rows.find((r: any) => r.kind === 'assistant') as any).live && rec.state.rows.filter((r: any) => r.kind === 'thinking').length === 1);
+}
+
 console.log('\n=== small helpers ===');
 {
   check('how long a call took', formatDuration(undefined) === '' && formatDuration(340) === '340 ms' && formatDuration(1200) === '1,2 s' && formatDuration(12_400) === '12 s' && formatDuration(125_000) === '2 min 5 s');

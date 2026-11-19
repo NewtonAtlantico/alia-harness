@@ -31,11 +31,15 @@ export interface AssistantRow {
   text: string;
   /** False for the text a model writes beside tool calls ("Vou ler o arquivo..."). */
   final: boolean;
+  /** Still being written: the text so far, from the stream. The whole message replaces it when the step ends. */
+  live?: boolean;
 }
 export interface ThinkingRow {
   kind: 'thinking';
   id: string;
   text: string;
+  /** Still being written (from the stream); the whole reasoning replaces it when the step ends. */
+  live?: boolean;
 }
 export interface NoticeRow {
   kind: 'notice';
@@ -167,13 +171,41 @@ function applyEvent(state: TimelineState, event: AgentEvent): TimelineState {
     case 'model_finished':
       return { ...state, modelBusy: false };
 
+    // Pieces of an answer as they arrive (streaming). They build a row marked live at the end of the list; the whole text, which
+    // always follows, takes that row's place, so nothing is shown twice and a front-end that never sees a delta works as before.
+    case 'assistant_delta':
+    case 'thinking_delta': {
+      const kind = event.type === 'assistant_delta' ? 'assistant' : 'thinking';
+      const at = liveIndex(state.rows, kind);
+      if (at >= 0) {
+        const rows = state.rows.slice();
+        rows[at] = { ...rows[at], text: `${(rows[at] as AssistantRow | ThinkingRow).text}${event.text}` } as Row;
+        return { ...state, rows };
+      }
+      return withSeq(state, (id) => (kind === 'assistant' ? { kind, id, text: event.text, final: false, live: true } : { kind, id, text: event.text, live: true }));
+    }
+
     case 'thinking': {
+      const live = liveIndex(state.rows, 'thinking');
+      if (live >= 0) {
+        const rows = state.rows.slice();
+        rows[live] = { ...(rows[live] as ThinkingRow), text: event.text, live: false };
+        return { ...state, rows };
+      }
       const last = state.rows.at(-1);
       if (last?.kind === 'thinking') return { ...state, rows: [...state.rows.slice(0, -1), { ...last, text: `${last.text}${event.text}` }] };
       return withSeq(state, (id) => ({ kind: 'thinking', id, text: event.text }));
     }
 
     case 'assistant_message': {
+      const live = liveIndex(state.rows, 'assistant');
+      if (live >= 0) {
+        const rows = state.rows.slice();
+        // The whole message may be empty (a step that only called tools): the live row then had nothing to say.
+        if (!event.text.trim()) rows.splice(live, 1);
+        else rows[live] = { ...(rows[live] as AssistantRow), text: event.text, final: event.final, live: false };
+        return event.final ? { ...state, rows, finalSeen: true } : { ...state, rows };
+      }
       if (!event.text.trim()) return state;
       const next = withSeq(state, (id) => ({ kind: 'assistant', id, text: event.text, final: event.final }));
       return event.final ? { ...next, finalSeen: true } : next;
@@ -228,7 +260,8 @@ function applyEvent(state: TimelineState, event: AgentEvent): TimelineState {
       return withSeq(state, (id) => ({ kind: 'notice', id, code: event.level === 'error' ? 'error' : event.level, message: event.message }));
 
     case 'run_finished': {
-      let next: TimelineState = { ...state, running: false, modelBusy: false };
+      // A step that was cut off (cancelled, or the stream broke) leaves what was written as plain text.
+      let next: TimelineState = { ...state, running: false, modelBusy: false, rows: state.rows.map((r) => ((r.kind === 'assistant' || r.kind === 'thinking') && r.live ? { ...r, live: false } : r)) };
       const { status, text } = event.result;
       if (status === 'cancelled') return withSeq(next, (id) => ({ kind: 'notice', id, code: 'cancelled', message: text }));
       if (status === 'failed' || status === 'max_steps') {
@@ -248,6 +281,17 @@ function applyEvent(state: TimelineState, event: AgentEvent): TimelineState {
 }
 
 /** Folds one pushed message of THIS conversation into the timeline. Messages for other conversations are the caller's to filter. */
+/** The live row of this kind among the rows at the end of the list (a step's reasoning and its answer are both live at once). */
+function liveIndex(rows: Row[], kind: 'assistant' | 'thinking'): number {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i];
+    if ((r.kind === 'assistant' || r.kind === 'thinking') && r.live) {
+      if (r.kind === kind) return i;
+    } else return -1;
+  }
+  return -1;
+}
+
 export function applyPush(state: TimelineState, message: TimelineAction): TimelineState {
   if (message.kind === 'cleared') return { ...emptyTimeline, seq: state.seq };
   if (message.kind === 'local') return withSeq(state, (id) => ({ kind: 'local', id, command: message.command, text: message.text }));

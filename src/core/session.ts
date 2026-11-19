@@ -41,6 +41,8 @@ import {
 export interface SessionOptions {
   /** Workspace root the agent works in. Resolved to an absolute path. */
   workspace: string;
+  /** Stream the model's answers (`assistant_delta` and `thinking_delta` events). Off by default; falls back to plain requests by itself when the endpoint cannot stream. Subagents never stream. */
+  streaming?: boolean;
   /** Config object. Build it with `loadConfig(...)` or in memory (e.g. API key from a secret store). */
   config: AliaConfig;
   /** Model id or name from the config (or any id served by the endpoint). Default: first configured model. */
@@ -269,6 +271,7 @@ export class AliaSession {
       onEvent: emit,
       onHistory: (messages) => this.recorder?.sync(messages),
       changeTracker: this.changes,
+      stream: options.streaming === true,
     });
 
     if (options.sessionStore) {

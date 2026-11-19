@@ -491,6 +491,7 @@ export const t = {
     you: 'Você',
     assistant: 'alia',
     thinking: 'Pensando…',
+    writing: 'escrevendo…',
     reasoning: 'Raciocínio',
     showOutput: 'Mostrar detalhes',
     hideOutput: 'Ocultar detalhes',

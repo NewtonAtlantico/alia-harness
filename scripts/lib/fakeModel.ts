@@ -34,19 +34,26 @@ export interface RecordedRequest {
   toolNames: string[];
   /** Whether the caller passed an AbortSignal in the request options. */
   signalPassed: boolean;
+  /** Whether the request asked for a stream. */
+  stream: boolean;
 }
+
+/** How the fake endpoint behaves when asked to stream. */
+export type StreamBehaviour = 'ok' | 'refuse-400' | 'ignore-flag' | 'empty' | 'unauthorized' | 'slow';
 
 export class FakeModel {
   readonly requests: RecordedRequest[] = [];
   private turns: ScriptedTurn[];
   private nextId = 1;
+  /** Scripted turns used so far (a refused request does not count). */
+  private served = 0;
 
   /**
    * @param turns scripted turns, consumed in order.
    * @param onExhausted what to do when the script runs out. 'throw' (default) fails the test
    *   loudly; 'repeat-last' replays the final turn forever (handy for step-cap tests).
    */
-  constructor(turns: ScriptedTurn[], private onExhausted: 'throw' | 'repeat-last' = 'throw') {
+  constructor(turns: ScriptedTurn[], private onExhausted: 'throw' | 'repeat-last' = 'throw', private streaming: StreamBehaviour = 'ok') {
     this.turns = [...turns];
   }
 
@@ -71,10 +78,18 @@ export class FakeModel {
       messages: structuredClone(params.messages),
       toolNames: (params.tools ?? []).map((t: any) => t.function?.name),
       signalPassed: options?.signal !== undefined,
+      stream: params.stream === true,
     };
     this.requests.push(req);
 
-    const index = this.requests.length - 1;
+    // A request the endpoint refuses (a stream it cannot serve) does not use up a scripted turn: the repeat gets it.
+    if (params.stream === true) {
+      if (this.streaming === 'refuse-400') throw Object.assign(new Error('400 stream is not supported by this endpoint'), { status: 400 });
+      if (this.streaming === 'unauthorized') throw Object.assign(new Error('401 Incorrect API key'), { status: 401 });
+      if (this.streaming === 'empty') return (async function* () {})() as any;
+    }
+
+    const index = this.served++;
     let turn: ScriptedTurn | undefined = this.turns[index];
     if (!turn) {
       if (this.onExhausted === 'repeat-last' && this.turns.length > 0) {
@@ -108,12 +123,43 @@ export class FakeModel {
         },
       }));
     }
-    return {
+    const completion = {
       id: `fake-${index}`,
       object: 'chat.completion',
       created: 0,
       model: params.model,
       choices: [{ index: 0, finish_reason: message.tool_calls ? 'tool_calls' : 'stop', message }],
     } as unknown as OpenAI.Chat.Completions.ChatCompletion;
+    if (params.stream === true && this.streaming !== 'ignore-flag') return this.asStream(message, options?.signal) as any;
+    return completion;
+  }
+
+  /** The same answer as a stream: the text in pieces of 4 characters, the reasoning in pieces, each tool call's arguments in two. */
+  private async *asStream(message: any, signal?: AbortSignal): AsyncGenerator<any> {
+    const slow = this.streaming === 'slow';
+    const pause = async () => {
+      if (!slow) return;
+      await new Promise((r) => setTimeout(r, 40));
+    };
+    const chunk = (delta: any, finish: string | null = null) => ({ id: 'fake-stream', object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason: finish }] });
+    const pieces = (text: string, n: number) => Array.from({ length: Math.ceil(text.length / n) }, (_, i) => text.slice(i * n, (i + 1) * n));
+    yield chunk({ role: 'assistant' });
+    for (const p of pieces(message.reasoning_content ?? '', 6)) {
+      if (signal?.aborted) throw Object.assign(new Error('Request was aborted.'), { name: 'AbortError' });
+      await pause();
+      yield chunk({ reasoning_content: p });
+    }
+    for (const p of pieces(message.content ?? '', 4)) {
+      if (signal?.aborted) throw Object.assign(new Error('Request was aborted.'), { name: 'AbortError' });
+      await pause();
+      yield chunk({ content: p });
+    }
+    for (const [i, tc] of (message.tool_calls ?? []).entries()) {
+      const args: string = tc.function.arguments;
+      const half = Math.ceil(args.length / 2);
+      yield chunk({ tool_calls: [{ index: i, id: tc.id, type: 'function', function: { name: tc.function.name, arguments: args.slice(0, half) } }] });
+      yield chunk({ tool_calls: [{ index: i, function: { arguments: args.slice(half) } }] });
+    }
+    yield chunk({}, message.tool_calls ? 'tool_calls' : 'stop');
   }
 }

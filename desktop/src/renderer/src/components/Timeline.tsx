@@ -184,18 +184,20 @@ function UserBlock({ row }: { row: UserRow }) {
 
 function AssistantBlock({ row }: { row: AssistantRow }) {
   return (
-    <li className={`turn assistant ${row.final ? 'final' : 'aside'}`} data-final={row.final}>
-      {row.final && <strong className="who">{t.timeline.assistant}</strong>}
-      <div className="bubble assistant-bubble">
+    <li className={`turn assistant ${row.live ? 'live' : row.final ? 'final' : 'aside'}`} data-final={row.final} data-live={row.live ? 'true' : undefined}>
+      {(row.final || row.live) && <strong className="who">{t.timeline.assistant}</strong>}
+      {/* While it is being written the text is kept from the screen reader (it would be read again at every piece); the whole message is announced once, when it replaces this. */}
+      <div className="bubble assistant-bubble" aria-hidden={row.live ? 'true' : undefined}>
         <Markdown text={row.text} />
       </div>
+      {row.live && <span className="sr-only">{t.timeline.writing}</span>}
     </li>
   );
 }
 
 function ThinkingBlock({ row }: { row: ThinkingRow }) {
   return (
-    <li className="thinking">
+    <li className="thinking" data-live={row.live ? 'true' : undefined}>
       <details>
         <summary>{t.timeline.reasoning}</summary>
         <p>{row.text}</p>

@@ -46,7 +46,8 @@
     "test:contrast": "tsx --tsconfig tsconfig.node.json scripts/test-contrast.ts",
     "test:performance-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-performance-app.ts",
     "test:strings": "tsx --tsconfig tsconfig.node.json scripts/test-strings.ts",
-    "test:keyboard-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-keyboard-app.ts"
+    "test:keyboard-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-keyboard-app.ts",
+    "test:streaming-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-streaming-app.ts"
   },
   "devDependencies": {
     "@babel/parser": "^7.29.14",

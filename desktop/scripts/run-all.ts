@@ -24,8 +24,8 @@ interface Suite {
 
 const tsx = (script: string): string[] => ['npx', 'tsx', '--tsconfig', 'tsconfig.node.json', `scripts/${script}.ts`];
 const unit = ['engine', 'security', 'settings', 'projects', 'ui-logic', 'timeline', 'composer-logic', 'interactions-logic', 'panel-logic', 'intake-logic', 'run-logic', 'diagnostics', 'contrast', 'strings'];
-const e2e = ['app', 'hardening', 'settings-app', 'sidebar-app', 'timeline-app', 'composer-app', 'interactions-app', 'panel-app', 'intake-app', 'run-app', 'gates-app', 'report-app', 'diagnostics-app', 'keyboard-app', 'performance-app', 'journey-app'];
-const coreSuites = ['mentions', 'skills', 'agent', 'subagents', 'session', 'events', 'cancel', 'permissions', 'store', 'commands', 'changes', 'documents', 'office', 'askuser', 'pipeline', 'resume', 'intake', 'report', 'issues'];
+const e2e = ['app', 'hardening', 'settings-app', 'sidebar-app', 'timeline-app', 'composer-app', 'interactions-app', 'panel-app', 'intake-app', 'run-app', 'gates-app', 'report-app', 'diagnostics-app', 'keyboard-app', 'performance-app', 'streaming-app', 'journey-app'];
+const coreSuites = ['mentions', 'skills', 'agent', 'subagents', 'session', 'events', 'cancel', 'permissions', 'store', 'commands', 'changes', 'documents', 'office', 'askuser', 'pipeline', 'resume', 'intake', 'report', 'streaming', 'issues'];
 
 const suites: Suite[] = [
   { name: 'typecheck', command: ['npm', 'run', 'typecheck'], cwd: desktop, group: 'static' },
@@ -40,12 +40,15 @@ const suites: Suite[] = [
 const selected = suites.filter((s) => !only || s.name.includes(only) || s.group === 'build');
 const results: Array<{ name: string; ok: boolean; seconds: number }> = [];
 const win = process.platform === 'win32';
+// tsx tells what it starts which tsconfig to use (this folder's): a suite of core, in another folder, must choose its own.
+const childEnv = { ...process.env, FORCE_COLOR: '0' } as NodeJS.ProcessEnv;
+delete childEnv.TSX_TSCONFIG_PATH;
 
 for (const suite of selected) {
   const started = Date.now();
   process.stdout.write(`▶ ${suite.name} … `);
   const [cmd, ...rest] = suite.command;
-  const run = spawnSync(win && (cmd === 'npm' || cmd === 'npx') ? `${cmd}.cmd` : cmd, rest, { cwd: suite.cwd, encoding: 'utf8', shell: win, env: { ...process.env, FORCE_COLOR: '0' }, maxBuffer: 64 * 1024 * 1024 });
+  const run = spawnSync(win && (cmd === 'npm' || cmd === 'npx') ? `${cmd}.cmd` : cmd, rest, { cwd: suite.cwd, encoding: 'utf8', shell: win, env: childEnv, maxBuffer: 64 * 1024 * 1024 });
   const ok = run.status === 0;
   const seconds = Math.round((Date.now() - started) / 100) / 10;
   results.push({ name: suite.name, ok, seconds });

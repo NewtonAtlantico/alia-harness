@@ -174,7 +174,9 @@ try {
   check('and closes them again', (await failedRow.getByRole('button').getAttribute('aria-expanded')) === 'false');
   check('the spinner is gone when the run ends', (await page.getByTestId('thinking').count()) === 0 && !(await chip.isDisabled()));
   const after = await ok('session.usage', { sessionId: s.sessionId });
-  check('the context meter follows the conversation as it grows', Number(await meter.getAttribute('aria-valuenow')) === after.percent && after.percent >= usage.percent);
+  // The meter is read again a moment after the run ends (it is not part of the run), so give it that moment.
+  await page.waitForFunction((p) => Number(document.querySelector('[data-testid=context-meter]')?.getAttribute('aria-valuenow')) === p, after.percent, { timeout: 5000 }).catch(() => {});
+  check('the context meter follows the conversation as it grows', Number(await meter.getAttribute('aria-valuenow')) === after.percent && after.percent >= usage.percent, `meter=${await meter.getAttribute('aria-valuenow')} after=${after.percent} before=${usage.percent}`);
 
   console.log('\n=== markdown is rendered, and nothing in it can act ===');
   const md = page.locator('.turn.assistant.final').last().locator('.md');
