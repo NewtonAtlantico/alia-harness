@@ -39,7 +39,11 @@ export function createPipelineStateTool(): ToolDefinition<PipelineStateArgs> {
       'set_stage (stage 1-4, status pending|running|done|blocked|stale, artifact, reason); add_question (gate G1-G3, id, prompt, kind, category, options, source, confidence); ' +
       'answer_question (id, answer, by); defer_question (id, owner, assumption); reopen_question (id); set_gate (gate, status passed|open); ' +
       'set_spec_review (spec, status draft|in_review|reviewed, by); add_assumption (text, owner, stage); add_decision (question, answer, by, adr); ' +
-      'add_adr (id, title, status, path); add_note (text); mark_stale (after_stage, reason).',
+      'add_adr (id, title, status, path); add_note (text); mark_stale (after_stage, reason). ' +
+      'Summaries the app shows on screen (record them when you finish the stage, in addition to the markdown artifact): ' +
+      'set_architecture (style, driver, contexts [names or {name, role}], recommendation approve|approve_with_notes|request_changes, notes); ' +
+      'set_adr_alignment (adr, alignment aligned|misaligned, note: required when misaligned); ' +
+      'set_spec (slug, title, persona, depends_on [spec slugs], constraints, path). A spec recorded with set_spec must be reviewed (set_spec_review) before gate G3 can pass.',
     parameters: {
       type: 'object',
       properties: {
@@ -81,6 +85,16 @@ export function createPipelineStateTool(): ToolDefinition<PipelineStateArgs> {
               adr: { type: 'string' },
               title: { type: 'string' },
               after_stage: { description: '1, 2 or 3: the stage whose artifact changed.' },
+              style: { type: 'string', description: 'set_architecture: the architectural style.' },
+              driver: { type: 'string', description: 'set_architecture: what drove the choice of style.' },
+              contexts: { type: 'array', description: 'set_architecture: bounded contexts, as names or { name, role }.', items: {} },
+              recommendation: { type: 'string', enum: ['approve', 'approve_with_notes', 'request_changes'] },
+              alignment: { type: 'string', enum: ['aligned', 'misaligned'], description: 'set_adr_alignment' },
+              note: { type: 'string', description: 'set_adr_alignment: where the proposal departs from the ADR.' },
+              slug: { type: 'string', description: 'set_spec: the spec slug (for example login-sso).' },
+              persona: { type: 'string' },
+              depends_on: { type: 'array', items: { type: 'string' }, description: 'set_spec: slugs of the specs this one depends on.' },
+              constraints: { type: 'array', items: { type: 'string' } },
             },
             required: ['op'],
           },
@@ -113,6 +127,9 @@ export function createPipelineStateTool(): ToolDefinition<PipelineStateArgs> {
             assumptions: state.assumptions,
             decisions: state.decisions,
             adrs: state.adrs,
+            ...(state.architecture ? { architecture: state.architecture } : {}),
+            adrAlignment: state.adrAlignment,
+            specs: state.specs,
             notes: state.notes,
             tasks: { taskCount: tasks.taskCount, points: tasks.points, files: tasks.files.map((f) => ({ file: f.file, taskCount: f.taskCount, points: f.points })), problems: tasks.problems },
           },

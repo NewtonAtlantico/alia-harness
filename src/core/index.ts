@@ -6,6 +6,7 @@ export * from './agent/subagentResult.js';
 export * from './safety/safetyChecker.js';
 export * from './safety/permissionStore.js';
 export * from './sessions/sessionStore.js';
+export * from './sessions/repairHistory.js';
 export * from './commands/commandRegistry.js';
 export * from './changes/changeTracker.js';
 export * from './documents/readDocument.js';

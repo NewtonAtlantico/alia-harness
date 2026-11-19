@@ -5,6 +5,7 @@ import { AliaConfig } from '../src/core/config.js';
 import { createSession } from '../src/core/session.js';
 import { projectFolderName } from '../src/core/projectKey.js';
 import { SessionStore, ChatMessage, deriveTitle, messageText } from '../src/core/sessions/sessionStore.js';
+import { INTERRUPTED_OUTPUT_PREFIX, repairInterruptedHistory } from '../src/core/sessions/repairHistory.js';
 import { FakeModel, ScriptedTurn } from './lib/fakeModel.js';
 
 let failures = 0;
@@ -345,6 +346,37 @@ console.log('\n=== opt-in, lazy, resilient ===');
   const broken = open(new SessionStore({ dir: path.join(blocker, 'sub') }), ws, say('still works'));
   const r = await broken.session.run('save me if you can');
   check('an unwritable store does not break the run', r.status === 'completed' && r.text === 'still works');
+}
+
+console.log('\n=== a run that was cut short can be resumed ===');
+{
+  const call = (id: string) => ({ id, type: 'function' as const, function: { name: 'list_files', arguments: '{}' } });
+  const history: ChatMessage[] = [
+    { role: 'user', content: 'go' },
+    { role: 'assistant', content: null, tool_calls: [call('a'), call('b'), call('c')] },
+    { role: 'tool', tool_call_id: 'a', content: 'ok' },
+  ];
+  const fixed = repairInterruptedHistory(history);
+  check('missing tool results are added right after the turn, in call order', fixed.repaired === 2 && fixed.messages.map((m) => (m.role === 'tool' ? (m as any).tool_call_id : m.role)).join() === 'user,assistant,a,b,c');
+  check('...saying they did not finish', String((fixed.messages[3] as any).content).startsWith(INTERRUPTED_OUTPUT_PREFIX));
+  check('the input is not changed, and a valid history comes back as it is', history.length === 3 && repairInterruptedHistory(fixed.messages).messages === fixed.messages && repairInterruptedHistory(fixed.messages).repaired === 0);
+  const twoTurns: ChatMessage[] = [...history, { role: 'assistant', content: null, tool_calls: [call('d')] }];
+  check('every turn is checked, including a last one with no results at all', repairInterruptedHistory(twoTurns).repaired === 3);
+
+  // The real thing: a saved file that stops after one of two results, resumed and run.
+  const store = newStore();
+  const ws = mk('ws');
+  const first = open(store, ws, [{ toolCalls: [{ name: 'list_files', args: { path: '.' }, id: 'x1' }, { name: 'list_files', args: { path: '.' }, id: 'x2' }] }, { content: 'done' }], { sessionId: 'cut' });
+  await first.session.run('list twice');
+  const file = sessionFile(store, ws, 'cut');
+  const kept = lines(file);
+  // Drop the second tool result and the final answer: the process died between them.
+  fs.writeFileSync(file, kept.slice(0, kept.findIndex((l) => l.includes('"tool_call_id":"x2"'))).join('\n') + '\n');
+  const resumed = open(store, ws, say('picking up'), { resume: 'cut' });
+  const r = await resumed.session.run('what happened?');
+  const sent = resumed.model.requests[0].messages;
+  const toolIds = sent.filter((m) => m.role === 'tool').map((m: any) => m.tool_call_id);
+  check('the resumed conversation answers every tool call it announced', r.status === 'completed' && toolIds.join() === 'x1,x2');
 }
 
 if (failures > 0) {

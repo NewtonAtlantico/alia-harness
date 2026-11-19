@@ -356,6 +356,81 @@ console.log('\n=== STATE.md: generated, deterministic, golden ===');
   check('backlog problems are listed in STATE.md', fs.readFileSync(path.join(bad, STATE_MD_FILE), 'utf8').includes('## Backlog problems') && fs.readFileSync(path.join(bad, STATE_MD_FILE), 'utf8').includes('13 points'));
 }
 
+console.log('\n=== structured summaries: architecture, ADR alignment, specs (A13) ===');
+{
+  const ok = (ops: unknown[], from = newState(NOW)) => {
+    const r = applyOps(from, ops, { now: NOW });
+    return r.ok ? r.state : undefined;
+  };
+  const err = (ops: unknown[], from = newState(NOW)) => {
+    const r = applyOps(from, ops, { now: NOW });
+    return r.ok ? '' : r.error;
+  };
+
+  const arch = ok([{ op: 'set_architecture', style: 'Monólito modular', driver: 'Time pequeno e prazo curto', contexts: ['Acesso', { name: 'Pedidos', role: 'Consulta e histórico' }, 'Acesso'], recommendation: 'approve_with_notes', notes: 'Rever o dono dos logs' }]);
+  check('set_architecture records style, driver, contexts (names or objects, without duplicates) and the recommendation', arch?.architecture?.style === 'Monólito modular' && json(arch.architecture.contexts) === json([{ name: 'Acesso' }, { name: 'Pedidos', role: 'Consulta e histórico' }]) && arch.architecture.recommendation === 'approve_with_notes' && arch.architecture.driver === 'Time pequeno e prazo curto');
+  check('...and recording it again replaces it', ok([{ op: 'set_architecture', style: 'Microsserviços' }], arch!)?.architecture?.contexts.length === 0);
+  check('style is required; a recommendation must be a known one; contexts must be a list', err([{ op: 'set_architecture' }]).includes('"style" is required') && err([{ op: 'set_architecture', style: 'x', recommendation: 'maybe' }]).includes('"recommendation" must be one of') && err([{ op: 'set_architecture', style: 'x', contexts: 'a' }]).includes('"contexts" must be a list') && err([{ op: 'set_architecture', style: 'x', contexts: [{ role: 'r' }] }]).includes('needs a "name"'));
+
+  const align = ok([{ op: 'set_adr_alignment', adr: 'ADR-0001', alignment: 'aligned' }, { op: 'set_adr_alignment', adr: 'ADR-0003', alignment: 'misaligned', note: 'O CRM é dono das gravações' }, { op: 'set_adr_alignment', adr: 'ADR-0001', alignment: 'aligned', note: 'ok' }]);
+  check('set_adr_alignment records each ADR once (a repeat replaces it)', align?.adrAlignment.length === 2 && align.adrAlignment[0].note === 'ok' && align.adrAlignment[1].status === 'misaligned');
+  check('a misaligned ADR needs a note, and the alignment must be known', err([{ op: 'set_adr_alignment', adr: 'ADR-3', alignment: 'misaligned' }]).includes('needs a "note"') && err([{ op: 'set_adr_alignment', adr: 'ADR-3', alignment: 'so-so' }]).includes('"alignment" must be one of') && err([{ op: 'set_adr_alignment', alignment: 'aligned' }]).includes('"adr" is required'));
+
+  const specs = ok([
+    { op: 'set_spec', slug: 'login-sso', title: 'Login com SSO', persona: 'Cliente corporativo', constraints: ['LGPD', 'WCAG AA'] },
+    { op: 'set_spec', slug: 'consultar-pedidos', title: 'Consultar pedidos', persona: 'Cliente', depends_on: 'login-sso, , login-sso' },
+    { op: 'set_spec', slug: 'abrir-chamado', title: 'Abrir chamado', depends_on: ['login-sso', 'consultar-pedidos'] },
+  ]);
+  check('set_spec records slug, title, persona, dependencies (list or comma-separated, without blanks or repeats) and constraints', specs?.specs.length === 3 && json(specs.specs[1].dependsOn) === json(['login-sso']) && json(specs.specs[0].constraints) === json(['LGPD', 'WCAG AA']) && specs.specs[0].persona === 'Cliente corporativo' && json(specs.specs[2].dependsOn) === json(['login-sso', 'consultar-pedidos']));
+  check('every recorded spec starts as a draft review, so gate 3 cannot skip it', json(specs?.specReviews.map((r) => [r.spec, r.status])) === json([['login-sso', 'draft'], ['consultar-pedidos', 'draft'], ['abrir-chamado', 'draft']]));
+  const cannot = err([{ op: 'set_gate', gate: 'G3', status: 'passed' }], specs!);
+  check('...and gate G3 refuses until all are reviewed', cannot.includes('not reviewed yet') && cannot.includes('login-sso'), cannot);
+  const reviewed = ok(['login-sso', 'consultar-pedidos', 'abrir-chamado'].map((spec) => ({ op: 'set_spec_review', spec, status: 'reviewed', by: 'Newton' })).concat([{ op: 'set_gate', gate: 'G3', status: 'passed' } as any]), specs!);
+  check('once they are reviewed the gate passes', reviewed?.gates[2].status === 'passed');
+  const added = ok([{ op: 'set_spec', slug: 'novo', title: 'Novo' }], reviewed!);
+  check('a spec added after the gate passed reopens it', added?.gates[2].status === 'open' && added.specReviews.at(-1)?.status === 'draft');
+  const edited = ok([{ op: 'set_spec', slug: 'login-sso', title: 'Login com SSO (v2)' }], reviewed!);
+  check('editing a spec that was already reviewed does not undo its review', edited?.gates[2].status === 'passed' && edited.specReviews.find((r) => r.spec === 'login-sso')?.status === 'reviewed' && edited.specs[0].title === 'Login com SSO (v2)');
+  check('a spec needs a plain slug and a title, cannot depend on itself, and dependencies must be a list', err([{ op: 'set_spec', title: 'x' }]).includes('"slug" is required') && err([{ op: 'set_spec', slug: 'a b', title: 'x' }]).includes('"slug" is required') && err([{ op: 'set_spec', slug: 'a' }]).includes('"title" is required') && err([{ op: 'set_spec', slug: 'a', title: 'x', depends_on: ['a'] }]).includes('cannot depend on itself') && err([{ op: 'set_spec', slug: 'a', title: 'x', depends_on: 5 }]).includes('"depends_on" must be a list') && err([{ op: 'set_spec', slug: 'a', title: 'x', constraints: [1] }]).includes('"constraints" must be a list'));
+  check('a batch with one bad summary changes nothing (all or nothing)', err([{ op: 'set_architecture', style: 'x' }, { op: 'set_spec', slug: 'a' }]).includes('Nothing was changed'));
+
+  // Round trip through the store and the tool; states without summaries keep working.
+  const ws = mk();
+  const st = store(ws);
+  st.apply([{ op: 'set_project', name: 'Portal do cliente' }]);
+  check('a state without summaries renders no summary sections', !fs.readFileSync(path.join(ws, STATE_MD_FILE), 'utf8').match(/## (Architecture|ADR alignment|Specs)\n/));
+  fs.writeFileSync(path.join(ws, STATE_FILE), JSON.stringify({ version: 1, project: 'old' }));
+  const old = st.load()!;
+  check('an older state.json (no summaries) loads with empty ones', old.architecture === undefined && old.adrAlignment.length === 0 && old.specs.length === 0);
+
+  const tool = createPipelineStateTool();
+  const ws2 = mk();
+  const call = (args: object) => tool.execute(args as any, ctxOf(ws2) as any);
+  const r = JSON.parse(await call({ action: 'update', ops: [{ op: 'set_architecture', style: 'Monólito modular', contexts: ['Acesso'] }, { op: 'set_adr_alignment', adr: 'ADR-0001', alignment: 'aligned' }, { op: 'set_spec', slug: 'login-sso', title: 'Login', depends_on: [] }] }));
+  check('through the tool: update accepts them', r.ok === true && r.applied === 3);
+  const g = JSON.parse(await call({ action: 'get' }));
+  check('get returns them', g.architecture.style === 'Monólito modular' && g.adrAlignment[0].adr === 'ADR-0001' && g.specs[0].slug === 'login-sso' && g.specReviews[0].status === 'draft');
+  check('the tool lists the new operations for the model', /set_architecture/.test(tool.description) && /set_adr_alignment/.test(tool.description) && /set_spec\b/.test(tool.description));
+
+  // Golden: the rendered sections.
+  const gws = mk();
+  const gst = store(gws);
+  gst.apply([
+    { op: 'set_project', name: 'Portal do cliente' },
+    { op: 'set_architecture', style: 'Monólito modular', driver: 'Time pequeno e prazo curto', contexts: [{ name: 'Acesso', role: 'Login e perfis' }, { name: 'Pedidos | histórico', role: 'Consulta' }], recommendation: 'approve_with_notes', notes: 'Definir o dono dos logs' },
+    { op: 'set_adr_alignment', adr: 'ADR-0001', alignment: 'aligned' },
+    { op: 'set_adr_alignment', adr: 'ADR-0003', alignment: 'misaligned', note: 'O CRM é dono das gravações de cliente' },
+    { op: 'set_spec', slug: 'login-sso', title: 'Login com SSO', persona: 'Cliente corporativo', constraints: ['LGPD', 'WCAG AA'] },
+    { op: 'set_spec', slug: 'consultar-pedidos', title: 'Consultar pedidos', persona: 'Cliente', depends_on: ['login-sso'] },
+    { op: 'set_spec_review', spec: 'login-sso', status: 'reviewed', by: 'Newton' },
+  ]);
+  const gmd = fs.readFileSync(path.join(gws, STATE_MD_FILE), 'utf8');
+  const gfile = path.join(FIXTURES, 'expected-STATE-structured.md');
+  if (UPDATE) fs.writeFileSync(gfile, gmd);
+  check('STATE.md with summaries equals its golden file', gmd === fs.readFileSync(gfile, 'utf8').replace(/\r\n/g, '\n'), 'run with UPDATE_GOLDEN=1 to regenerate, then review the diff');
+  check('the golden shows the recommendation, the misaligned ADR and a spec that waits for review', gmd.includes('**Review recommendation:** approve with notes') && gmd.includes('| ADR-0003 | misaligned |') && gmd.includes('| consultar-pedidos | draft |'));
+}
+
 console.log('\n=== loading is strict about damage, tolerant about gaps ===');
 {
   const ws = mk();

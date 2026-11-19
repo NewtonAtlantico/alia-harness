@@ -116,6 +116,43 @@ export interface SpecReview {
   date?: string;
 }
 
+export type ArchitectureRecommendation = 'approve' | 'approve_with_notes' | 'request_changes';
+export type AdrAlignmentStatus = 'aligned' | 'misaligned';
+
+export interface ArchitectureContext {
+  name: string;
+  /** What the context is responsible for, in a few words. */
+  role?: string;
+}
+
+/** The architecture proposal in a few fields (what the gate 2 screen shows), recorded by the model. */
+export interface ArchitectureSummary {
+  style: string;
+  /** What drove the choice of style. */
+  driver?: string;
+  contexts: ArchitectureContext[];
+  recommendation?: ArchitectureRecommendation;
+  notes?: string;
+}
+
+/** Whether the proposal agrees with an existing ADR. */
+export interface AdrAlignment {
+  adr: string;
+  status: AdrAlignmentStatus;
+  note?: string;
+}
+
+/** What gate 3 shows about a spec (the spec file itself holds the rest). */
+export interface SpecSummary {
+  slug: string;
+  title: string;
+  persona?: string;
+  /** Slugs of the specs this one depends on. */
+  dependsOn: string[];
+  constraints: string[];
+  path?: string;
+}
+
 export interface PipelineState {
   version: 1;
   updatedAt: string;
@@ -129,6 +166,10 @@ export interface PipelineState {
   assumptions: Assumption[];
   adrs: AdrRef[];
   notes: string[];
+  /** Structured summaries (absent in states written before they existed, or when the model did not record them). */
+  architecture?: ArchitectureSummary;
+  adrAlignment: AdrAlignment[];
+  specs: SpecSummary[];
 }
 
 export class PipelineStateError extends Error {
@@ -152,6 +193,8 @@ export function newState(now: Date = new Date()): PipelineState {
     assumptions: [],
     adrs: [],
     notes: [],
+    adrAlignment: [],
+    specs: [],
   };
 }
 
@@ -184,6 +227,15 @@ export function normalizeState(raw: unknown): PipelineState {
     assumptions: list(raw.assumptions, 'assumptions'),
     adrs: list(raw.adrs, 'adrs'),
     notes: list(raw.notes, 'notes'),
+    ...(isObject(raw.architecture)
+      ? { architecture: { ...raw.architecture, contexts: Array.isArray(raw.architecture.contexts) ? raw.architecture.contexts : [] } as ArchitectureSummary }
+      : {}),
+    adrAlignment: list(raw.adrAlignment, 'adrAlignment'),
+    specs: list(raw.specs, 'specs').map((x) => ({
+      ...x,
+      dependsOn: Array.isArray(x?.dependsOn) ? x.dependsOn : [],
+      constraints: Array.isArray(x?.constraints) ? x.constraints : [],
+    })),
   };
   return state;
 }
@@ -226,7 +278,10 @@ export interface ApplyContext {
 const OP_NAMES = [
   'set_project', 'add_input', 'set_stage', 'add_question', 'answer_question', 'defer_question', 'reopen_question',
   'set_gate', 'set_spec_review', 'add_assumption', 'add_decision', 'add_adr', 'add_note', 'mark_stale',
+  'set_architecture', 'set_adr_alignment', 'set_spec',
 ];
+const RECOMMENDATIONS: ArchitectureRecommendation[] = ['approve', 'approve_with_notes', 'request_changes'];
+const ALIGNMENTS: AdrAlignmentStatus[] = ['aligned', 'misaligned'];
 const INPUT_KINDS: InputKind[] = ['document', 'transcript', 'brief', 'recording', 'other'];
 const STAGE_STATUSES: StageStatus[] = ['pending', 'running', 'done', 'blocked', 'stale'];
 const QUESTION_KINDS: QuestionKind[] = ['choice', 'text', 'confirm'];
@@ -234,6 +289,18 @@ const CATEGORIES: QuestionCategory[] = ['open_question', 'contradiction', 'low_c
 const REVIEW_STATUSES: SpecReviewStatus[] = ['draft', 'in_review', 'reviewed'];
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+
+/** A list of strings, from an array or from a comma-separated string; undefined if it is neither. */
+function strList(v: unknown): string[] | undefined {
+  const items = Array.isArray(v) ? v : typeof v === 'string' ? v.split(',') : undefined;
+  if (!items || items.some((x) => typeof x !== 'string')) return undefined;
+  const out: string[] = [];
+  for (const x of items) {
+    const t = str(x);
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out;
+}
 const day = (now: Date) => now.toISOString().slice(0, 10);
 
 function stageNumber(v: unknown): StageNumber | undefined {
@@ -495,6 +562,67 @@ export function applyOps(
         break;
       }
 
+      case 'set_architecture': {
+        const style = str(op.style);
+        if (!style) return fail('"style" is required (for example "modular monolith")');
+        if (op.recommendation !== undefined && !RECOMMENDATIONS.includes(op.recommendation)) return fail(`"recommendation" must be one of: ${RECOMMENDATIONS.join(', ')}`);
+        const contexts: ArchitectureContext[] = [];
+        if (op.contexts !== undefined) {
+          if (!Array.isArray(op.contexts)) return fail('"contexts" must be a list of names, or of { name, role } objects');
+          for (const c of op.contexts) {
+            const name = typeof c === 'string' ? str(c) : str(c?.name);
+            if (!name) return fail('every context needs a "name"');
+            const role = typeof c === 'string' ? undefined : str(c?.role);
+            if (!contexts.some((x) => x.name === name)) contexts.push({ name, ...(role ? { role } : {}) });
+          }
+        }
+        state.architecture = {
+          style,
+          ...(str(op.driver) ? { driver: str(op.driver) } : {}),
+          contexts,
+          ...(op.recommendation ? { recommendation: op.recommendation } : {}),
+          ...(str(op.notes) ? { notes: str(op.notes) } : {}),
+        };
+        break;
+      }
+
+      case 'set_adr_alignment': {
+        const adr = str(op.adr);
+        if (!adr) return fail('"adr" is required (the ADR id, for example ADR-0003)');
+        const status = op.alignment ?? op.status;
+        if (!ALIGNMENTS.includes(status)) return fail(`"alignment" must be one of: ${ALIGNMENTS.join(', ')}`);
+        const note = str(op.note);
+        if (status === 'misaligned' && !note) return fail('a misaligned ADR needs a "note" saying where the proposal departs from it');
+        const row: AdrAlignment = { adr, status, ...(note ? { note } : {}) };
+        const at = state.adrAlignment.findIndex((a) => a.adr === adr);
+        if (at >= 0) state.adrAlignment[at] = row;
+        else state.adrAlignment.push(row);
+        break;
+      }
+
+      case 'set_spec': {
+        const slug = str(op.slug);
+        const title = str(op.title);
+        if (!slug || !/^[\w.-]+$/.test(slug)) return fail('"slug" is required and must be a short name without spaces (for example "login-sso")');
+        if (!title) return fail('"title" is required');
+        const dependsOn = op.depends_on === undefined ? [] : strList(op.depends_on);
+        if (!dependsOn) return fail('"depends_on" must be a list of spec slugs (or a comma-separated string)');
+        if (dependsOn.includes(slug)) return fail('a spec cannot depend on itself');
+        const constraints = op.constraints === undefined ? [] : strList(op.constraints);
+        if (!constraints) return fail('"constraints" must be a list of short texts');
+        const spec: SpecSummary = { slug, title, ...(str(op.persona) ? { persona: str(op.persona) } : {}), dependsOn, constraints, ...(str(op.path) ? { path: str(op.path) } : {}) };
+        const at = state.specs.findIndex((x) => x.slug === slug);
+        if (at >= 0) state.specs[at] = spec;
+        else state.specs.push(spec);
+        // A spec nobody has reviewed yet must be reviewed before gate 3 can pass.
+        if (!state.specReviews.some((r) => r.spec === slug)) {
+          state.specReviews.push({ spec: slug, status: 'draft' });
+          const g3 = state.gates.find((g) => g.id === 'G3')!;
+          if (g3.status === 'passed') g3.status = 'open';
+        }
+        break;
+      }
+
       case 'mark_stale': {
         const after = stageNumber(op.after_stage);
         const reason = str(op.reason);
@@ -564,6 +692,23 @@ export function renderStateMd(state: PipelineState, tasks?: TaskStats): string {
   state.assumptions.forEach((a) => out.push(`| ${cell(a.text)} | ${cell(a.owner)} | ${a.stage ?? ''} |`));
   if (state.assumptions.length === 0) out.push('| _none_ | | |');
 
+  if (state.architecture) {
+    const a = state.architecture;
+    const labels: Record<ArchitectureRecommendation, string> = { approve: 'approve', approve_with_notes: 'approve with notes', request_changes: 'request changes' };
+    out.push('', '## Architecture', `**Style:** ${cell(a.style)}`);
+    if (a.driver) out.push(`**Driver:** ${cell(a.driver)}`);
+    if (a.recommendation) out.push(`**Review recommendation:** ${labels[a.recommendation] ?? cell(a.recommendation)}`);
+    if (a.notes) out.push(`**Notes:** ${cell(a.notes)}`);
+    if (a.contexts.length > 0) out.push('', '| Context | Responsibility |', '|---|---|', ...a.contexts.map((c) => `| ${cell(c.name)} | ${cell(c.role ?? '')} |`));
+  }
+  if (state.adrAlignment.length > 0) {
+    out.push('', '## ADR alignment', '| ADR | Alignment | Note |', '|---|---|---|');
+    state.adrAlignment.forEach((a) => out.push(`| ${cell(a.adr)} | ${a.status} | ${cell(a.note ?? '')} |`));
+  }
+  if (state.specs.length > 0) {
+    out.push('', '## Specs', '| Spec | Title | Persona | Depends on | Constraints |', '|---|---|---|---|---|');
+    state.specs.forEach((s) => out.push(`| ${cell(s.slug)} | ${cell(s.title)} | ${cell(s.persona ?? '')} | ${cell(s.dependsOn.join(', ') || '—')} | ${cell(s.constraints.join('; '))} |`));
+  }
   if (state.specReviews.length > 0) {
     out.push('', '## Spec review (gate 3)', '| Spec | Status | By | Date |', '|---|---|---|---|');
     state.specReviews.forEach((r) => out.push(`| ${cell(r.spec)} | ${r.status} | ${cell(r.by ?? '')} | ${cell(r.date ?? '')} |`));

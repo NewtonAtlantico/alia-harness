@@ -110,6 +110,10 @@ assumptions with an owner — not dropped.
    architecture docs and `adr/`.
 2. Run `architecture-from-requirements`. Let it run its own ADR and `architecture-review` steps.
 3. Save the proposal to `docs/architecture/architecture.md` and list the ADRs created.
+4. With `pipeline_state`: record the proposal's summary with `set_architecture` (style, driver, contexts,
+   and your `recommendation` from the review: `approve`, `approve_with_notes` or `request_changes`) and,
+   for each existing ADR the proposal was checked against, `set_adr_alignment` (`aligned` or `misaligned`
+   with a note). The app shows these fields; without the tool, the markdown alone is enough.
 
 **GATE 2.** Read the architecture's *Open questions* and `architecture-review` findings. If
 anything blocks specs (an undecided style, unresolved ownership, a conflict with an existing ADR),
@@ -128,6 +132,9 @@ gap — let the skill flag it.
    story).
 2. Verify `INDEX.md` lists every spec with status and dependencies, and that every spec
    references `constraints.md` instead of restating it.
+3. With `pipeline_state`: record each spec with `set_spec` (`slug`, `title`, `persona`, `depends_on` as spec
+   slugs, `constraints`, `path`). Each one then waits for a human `set_spec_review`; gate 3 cannot pass
+   before they are all reviewed. Without the tool, `INDEX.md` is enough.
 
 **GATE 3.** If the skill flagged a gap or a conflicting constraints pair, resolve it with the user
 (and, if it traces to a requirement, update `requirements.md`/`architecture.md` and note the
@@ -169,7 +176,8 @@ anything blocked, and the suggested next step (`issue-writer` to publish tasks).
 ## STATE.md template
 
 **When the `pipeline_state` tool is available, use it for every state change** (`set_stage`, `add_question`,
-`answer_question`, `defer_question`, `set_gate`, `set_spec_review`, `add_adr`, `add_assumption`, `mark_stale`):
+`answer_question`, `defer_question`, `set_gate`, `set_spec_review`, `add_adr`, `add_assumption`, `mark_stale`,
+`set_architecture`, `set_adr_alignment`, `set_spec`):
 it writes `docs/pipeline/state.json` and regenerates STATE.md for you, and it refuses a stage that starts
 before the previous one is done and its gate has passed. **Otherwise, write STATE.md by hand** following the
 template below.

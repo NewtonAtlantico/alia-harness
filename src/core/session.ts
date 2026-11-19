@@ -17,6 +17,7 @@ import {
 } from './safety/safetyChecker.js';
 import { PermissionStore } from './safety/permissionStore.js';
 import { SessionRecorder, SessionStore, newSessionId } from './sessions/sessionStore.js';
+import { repairInterruptedHistory } from './sessions/repairHistory.js';
 import { sameWorkspace } from './projectKey.js';
 import { CommandRegistry } from './commands/commandRegistry.js';
 import { ChangeTracker } from './changes/changeTracker.js';
@@ -269,7 +270,9 @@ export class AliaSession {
       });
       if (resumed) {
         // Same conversation, current system prompt.
-        const rest = resumed.messages[0]?.role === 'system' ? resumed.messages.slice(1) : resumed.messages;
+        // A run cut short (the app or engine died) can leave tool calls without results; the endpoint would reject those.
+        const { messages: whole } = repairInterruptedHistory(resumed.messages);
+        const rest = whole[0]?.role === 'system' ? whole.slice(1) : whole;
         this.agent.setMessages([{ role: 'system', content: this.systemPrompt }, ...rest]);
       }
     } else {
