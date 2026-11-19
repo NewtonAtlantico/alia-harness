@@ -48,7 +48,9 @@
     "desktop:test:settings-app": "npm --prefix desktop run test:settings-app",
     "desktop:test:projects": "npm --prefix desktop run test:projects",
     "desktop:test:ui-logic": "npm --prefix desktop run test:ui-logic",
-    "desktop:test:sidebar-app": "npm --prefix desktop run test:sidebar-app"
+    "desktop:test:sidebar-app": "npm --prefix desktop run test:sidebar-app",
+    "desktop:test:timeline": "npm --prefix desktop run test:timeline",
+    "desktop:test:timeline-app": "npm --prefix desktop run test:timeline-app"
   },
   "keywords": [
     "ai",

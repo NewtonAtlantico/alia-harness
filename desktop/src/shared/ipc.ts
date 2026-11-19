@@ -341,6 +341,8 @@ export type EngineReplyMessage =
 /** Pushed to the renderer (through main) whenever something happens in a session. */
 export type PushMessage =
   | { kind: 'event'; sessionId: string; event: AgentEvent }
+  /** What the user said, when a run starts (whoever started it: the composer, another window, a test). */
+  | { kind: 'user_message'; sessionId: string; text: string }
   | { kind: 'interaction'; interaction: Interaction }
   | { kind: 'interaction_closed'; id: string; sessionId: string }
   /** The engine process died and was started again: its sessions are gone, so reopen them with `resumeId`. */
@@ -348,7 +350,7 @@ export type PushMessage =
   | { kind: 'window_state'; maximized: boolean }
   | { kind: 'command'; command: AppCommand };
 
-export type EngineMessage = EngineRequestMessage | EngineReplyMessage | { kind: 'ready' } | Extract<PushMessage, { kind: 'event' | 'interaction' | 'interaction_closed' }>;
+export type EngineMessage = EngineRequestMessage | EngineReplyMessage | { kind: 'ready' } | Extract<PushMessage, { kind: 'event' | 'user_message' | 'interaction' | 'interaction_closed' }>;
 
 // ------------------------------------------------------------------------------------ renderer API
 

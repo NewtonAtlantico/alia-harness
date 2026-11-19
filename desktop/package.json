@@ -20,7 +20,9 @@
     "test:settings-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-settings-app.ts",
     "test:projects": "tsx --tsconfig tsconfig.node.json scripts/test-projects.ts",
     "test:ui-logic": "tsx --tsconfig tsconfig.node.json scripts/test-ui-logic.ts",
-    "test:sidebar-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-sidebar-app.ts"
+    "test:sidebar-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-sidebar-app.ts",
+    "test:timeline": "tsx --tsconfig tsconfig.node.json scripts/test-timeline.ts",
+    "test:timeline-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-timeline-app.ts"
   },
   "devDependencies": {
     "@electron/fuses": "^2.1.3",
@@ -37,6 +39,8 @@
     "playwright": "^1.65.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",

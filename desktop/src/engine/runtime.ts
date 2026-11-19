@@ -267,6 +267,7 @@ export class EngineRuntime {
       }
       for (const message of errors) this.notice(sessionId, 'error', message);
 
+      this.options.post({ kind: 'user_message', sessionId, text });
       const controller = new AbortController();
       e.busy = true;
       e.controller = controller;
