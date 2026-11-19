@@ -19,6 +19,7 @@ export * from './context/contextManager.js';
 export * from './context/fileMentions.js';
 export * from './skills/skillLoader.js';
 export * from './tools/index.js';
+export { detectBinaryFile } from './tools/fileUtils.js';
 export * from './tools/runSubagent.js';
 export * from './tools/useSkill.js';
 export * from './session.js';

@@ -68,6 +68,8 @@ export const rendererSchemas = {
   'model.switch': strict({ sessionId, model: z.string().min(1).max(200) }),
   'commands.list': strict({ sessionId }),
   'files.search': strict({ sessionId, query: z.string().max(500), limit: limit.optional() }),
+  'files.children': strict({ sessionId, dir: z.string().max(1024).optional() }),
+  'files.preview': strict({ sessionId, path: relPath }),
   'changes.list': strict({ sessionId }),
   'changes.diff': strict({ sessionId, path: relPath }),
   'changes.revert': strict({ sessionId, paths: paths.optional() }),

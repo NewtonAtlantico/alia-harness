@@ -11,6 +11,7 @@ import { EngineRuntime } from '../src/engine/runtime';
 import { Broker, ProjectRegistry } from '../src/main/broker';
 import type { Interaction, PushMessage } from '../src/shared/ipc';
 import { IpcValidationError } from '../src/shared/schemas';
+import { makePdf } from '../../scripts/lib/pdfFixture';
 import { startFakeServer } from './lib/fakeServer';
 import { makeHang, sleep } from './lib/hang';
 
@@ -546,6 +547,54 @@ console.log('\n=== @ mentions can only read the project, or what the user attach
   fs.mkdirSync(sibling, { recursive: true });
   fs.writeFileSync(path.join(sibling, 'x.txt'), 'NEIGHBOUR');
   check('a folder whose name merely starts the same is not covered', (await refused(`@"${path.join(sibling, 'x.txt')}"`)).includes('outside the project folder'));
+}
+
+console.log('\n=== the project tree and a read-only preview ===');
+{
+  const r = await rig(say('x'));
+  const w = r.ws;
+  fs.mkdirSync(path.join(w, 'src'), { recursive: true });
+  fs.mkdirSync(path.join(w, 'node_modules', 'pkg'), { recursive: true });
+  fs.writeFileSync(path.join(w, 'README.md'), '# Título\ncorpo\n');
+  fs.writeFileSync(path.join(w, 'src', 'app.ts'), 'export const a = 1;\n');
+  fs.writeFileSync(path.join(w, 'logo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 0]));
+  fs.writeFileSync(path.join(w, 'big.txt'), 'x'.repeat(250_000));
+  fs.writeFileSync(path.join(w, 'brd.pdf'), makePdf([['Primeira página'], ['Segunda página']]));
+  fs.writeFileSync(path.join(w, 'bin.dat'), Buffer.from([1, 2, 0, 3, 4]));
+  const { sessionId } = await r.open();
+
+  const top = await r.call('files.children', { sessionId });
+  const names: string[] = top.entries.map((e: any) => e.name);
+  const files = names.slice(1);
+  check('the root lists folders first, then files by name, without the noise folders', names[0] === 'src' && !names.includes('node_modules') && files.length === 5 && files.every((n, i) => i === 0 || files[i - 1].localeCompare(n) <= 0), names.join());
+  const sub = await r.call('files.children', { sessionId, dir: 'src' });
+  check('a folder lists its own children, with paths from the project root', sub.entries.length === 1 && sub.entries[0].path === 'src/app.ts' && sub.entries[0].size === 20);
+  const outside = await r.call('files.children', { sessionId, dir: '..' }).then(() => '', (e) => e.message);
+  check('a folder outside the project is refused', outside.includes('outside the project folder'), outside);
+
+  const text = await r.call('files.preview', { sessionId, path: 'README.md' });
+  check('a text file is shown as text', text.kind === 'text' && text.text === '# Título\ncorpo\n' && text.truncated === false && text.path === 'README.md');
+  const big = await r.call('files.preview', { sessionId, path: 'big.txt' });
+  check('a large file is cut at 200 KB and says so', big.kind === 'text' && big.text.length === 200_000 && big.truncated === true && big.size === 250_000);
+  const pdf = await r.call('files.preview', { sessionId, path: 'brd.pdf' });
+  check('a PDF is shown as the text the agent would read, with page markers', pdf.kind === 'document' && pdf.text.includes('[p. 1]') && pdf.text.includes('Segunda página'), JSON.stringify(pdf).slice(0, 200));
+  check('a binary file says there is nothing to show (by extension, or by NUL bytes)', (await r.call('files.preview', { sessionId, path: 'logo.png' })).kind === 'binary' && (await r.call('files.preview', { sessionId, path: 'bin.dat' })).kind === 'binary');
+  check('a folder and a file that is gone are named as such', (await r.call('files.preview', { sessionId, path: 'src' })).kind === 'not_a_file' && (await r.call('files.preview', { sessionId, path: 'nao-existe.txt' })).kind === 'missing');
+  const leaving = await r.call('files.preview', { sessionId, path: '../fora.txt' }).then(() => '', (e) => e.message);
+  check('a path that leaves the project is refused', leaving.includes('outside the project folder'), leaving);
+  const link = path.join(w, 'atalho');
+  let linked = false;
+  try {
+    fs.symlinkSync(path.join(path.dirname(w), 'segredo.txt'), link);
+    linked = true;
+  } catch {
+    /* creating a link may need rights on Windows: that case is then not testable here */
+  }
+  if (linked) {
+    fs.writeFileSync(path.join(path.dirname(w), 'segredo.txt'), 'NAO-LER');
+    const viaLink = await r.call('files.preview', { sessionId, path: 'atalho' }).then((p) => JSON.stringify(p), (e) => e.message);
+    check('a link inside the project that leads outside is refused, and the content was not read', !viaLink.includes('NAO-LER') && viaLink.includes('outside'), viaLink);
+  }
 }
 
 // ===================================================================================== broker

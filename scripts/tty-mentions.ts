@@ -68,7 +68,8 @@ async function main() {
   let pending = begin();
   type('@');
   check('file preview box appears on @', out.includes('Files'));
-  check('preview lists workspace files', out.includes('README.md') || out.includes('package.json'));
+  // The first rows are the shallowest entries by name, so which files show depends on what is at the repository's root.
+  check('preview lists workspace files', /README\.md|package\.json|package-lock\.json|alia-config\.json|tsconfig\.json|\.pdf/.test(out));
   press(undefined, 'return');
   await pending;
 

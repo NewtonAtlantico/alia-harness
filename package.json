@@ -54,7 +54,9 @@
     "desktop:test:composer-logic": "npm --prefix desktop run test:composer-logic",
     "desktop:test:composer-app": "npm --prefix desktop run test:composer-app",
     "desktop:test:interactions-logic": "npm --prefix desktop run test:interactions-logic",
-    "desktop:test:interactions-app": "npm --prefix desktop run test:interactions-app"
+    "desktop:test:interactions-app": "npm --prefix desktop run test:interactions-app",
+    "desktop:test:panel-logic": "npm --prefix desktop run test:panel-logic",
+    "desktop:test:panel-app": "npm --prefix desktop run test:panel-app"
   },
   "keywords": [
     "ai",

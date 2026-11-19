@@ -17,6 +17,13 @@ export function App() {
   const [screen, setScreen] = useState<Screen>('chat');
   const [settings, setSettings] = useState<SettingsView>();
   const [now, setNow] = useState(() => new Date());
+  const [panelOpen, setPanelOpen] = useState(() => {
+    try {
+      return window.localStorage.getItem('alia.panelOpen') === '1';
+    } catch {
+      return false;
+    }
+  });
   const inter = useInteractions();
   const ws = useWorkspace(() => setScreen('chat'), inter.pending);
 
@@ -27,6 +34,7 @@ export function App() {
     });
     const off = window.alia.onMessage((m) => {
       if (m.kind === 'command' && m.command === 'open_settings') setScreen('settings');
+      if (m.kind === 'command' && m.command === 'toggle_panel') setPanelOpen((open) => !open);
     });
     const tick = setInterval(() => setNow(new Date()), 60_000); // the greeting and "há 5 min" follow the clock
     return () => {
@@ -34,6 +42,14 @@ export function App() {
       clearInterval(tick);
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('alia.panelOpen', panelOpen ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, [panelOpen]);
 
   return (
     <div className="app">
@@ -72,7 +88,7 @@ export function App() {
           onDelete={ws.actions.remove}
           onOpenSettings={() => setScreen('settings')}
         />
-        <main className="content">
+        <main className={`content ${screen === 'chat' && ws.open ? 'pane-host' : ''}`}>
           {ws.error && (
             <p className="banner error-banner" role="alert">
               {t.common.errorGeneric(ws.error)}{' '}
@@ -95,6 +111,8 @@ export function App() {
               interactions={inter.pending}
               onRespond={(id, response) => void inter.respond(id, response)}
               defaultOwner={settings?.displayName ?? ''}
+              panelOpen={panelOpen}
+              onTogglePanel={() => setPanelOpen((open) => !open)}
               intro={<Home name={settings?.displayName ?? ''} project={ws.currentProject} now={now} configured={settings?.configured ?? true} onSetup={() => setScreen('settings')} />}
             />
           ) : (

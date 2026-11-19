@@ -11,6 +11,7 @@ import { applyPush, rowsFromMessages } from '../lib/timeline';
 import { Composer, type ComposerSubmit } from './Composer';
 import { ContextMeter, ModelChip } from './ConversationHeader';
 import { InteractionCards } from './InteractionCards';
+import { SidePanel } from './SidePanel';
 import { Timeline } from './Timeline';
 
 interface PaneProps {
@@ -29,6 +30,9 @@ interface PaneProps {
   onRespond: (id: string, response: InteractionResponse) => void;
   /** Who owns an assumption by default (the user's name). */
   defaultOwner: string;
+  /** The panel beside the conversation (changes, files, terminal). */
+  panelOpen: boolean;
+  onTogglePanel: () => void;
 }
 
 /**
@@ -36,7 +40,7 @@ interface PaneProps {
  * from what is saved and then follows the engine's events live; give the pane a `key` of the conversation id so
  * switching conversations starts fresh.
  */
-export function ConversationPane({ conversation, states, loading, intro, configured, onOpenSettings, onStarted, interactions, onRespond, defaultOwner }: PaneProps) {
+export function ConversationPane({ conversation, states, loading, intro, configured, onOpenSettings, onStarted, interactions, onRespond, defaultOwner, panelOpen, onTogglePanel }: PaneProps) {
   const { info, opened } = conversation;
   const state = stateOf(states, info.id);
   const [timeline, dispatch] = useReducer(applyPush, conversation.messages, (messages) => rowsFromMessages(messages, { running: state.running, annotations: conversation.annotations, interrupted: opened.interrupted }));
@@ -67,7 +71,7 @@ export function ConversationPane({ conversation, states, loading, intro, configu
 
   // Stay at the bottom while the answer grows, unless the user has scrolled up to read.
   useEffect(() => {
-    const scroller = root.current?.closest('.content') as HTMLElement | null;
+    const scroller = root.current?.closest('.pane-main') as HTMLElement | null;
     if (!scroller) return;
     const onScroll = () => {
       stick.current = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 140;
@@ -76,7 +80,7 @@ export function ConversationPane({ conversation, states, loading, intro, configu
     return () => scroller.removeEventListener('scroll', onScroll);
   }, []);
   useEffect(() => {
-    const scroller = root.current?.closest('.content') as HTMLElement | null;
+    const scroller = root.current?.closest('.pane-main') as HTMLElement | null;
     if (scroller && stick.current) scroller.scrollTop = scroller.scrollHeight;
   }, [timeline.rows, timeline.modelBusy]);
 
@@ -150,8 +154,13 @@ export function ConversationPane({ conversation, states, loading, intro, configu
 
   const stop = useCallback(() => void api('session.cancel', { sessionId: info.id }), [api, info.id]);
   const starting = conversation.draft && timeline.rows.length === 0 && !timeline.modelBusy;
+  // The panel reloads when a tool call finishes (it may have written something) and when the run starts or ends.
+  const finishedCalls = timeline.rows.filter((r) => r.kind === 'tool' && r.status !== 'running').length;
+  const panelKey = `${finishedCalls}:${timeline.running ? 'run' : 'idle'}`;
 
   return (
+    <div className="pane">
+    <div className="pane-main">
     <article className="conversation" ref={root} aria-labelledby={starting ? undefined : 'conv-title'} aria-busy={loading || running}>
       {starting && intro}
       <header className="conv-header">
@@ -168,6 +177,9 @@ export function ConversationPane({ conversation, states, loading, intro, configu
         <div className="conv-tools">
           <ModelChip sessionId={info.id} model={model} disabled={running} onSwitched={(id, u) => { setModel(id); if (u) setUsage(u); }} />
           <ContextMeter usage={usage} />
+          <button type="button" className="btn small" aria-pressed={panelOpen} title={t.panel.toggleTitle} onClick={onTogglePanel} data-testid="panel-toggle">
+            {t.panel.toggle}
+          </button>
         </div>
         {state.waiting > 0 && (
           <p className="notice waiting" role="status">
@@ -184,5 +196,8 @@ export function ConversationPane({ conversation, states, loading, intro, configu
         <Composer sessionId={info.id} running={running} blockedReason={configured ? undefined : t.composer.notConfigured} onOpenSettings={onOpenSettings} onSubmit={submit} onStop={stop} />
       </div>
     </article>
+    </div>
+    {panelOpen && <SidePanel sessionId={info.id} rows={timeline.rows} refreshKey={panelKey} onClose={onTogglePanel} />}
+    </div>
   );
 }

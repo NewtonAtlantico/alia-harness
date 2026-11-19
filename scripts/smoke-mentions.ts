@@ -1,5 +1,7 @@
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { FileIndex } from '../src/core/context/fileIndex.js';
+import { FileIndex, listDirectory } from '../src/core/context/fileIndex.js';
 import { resolveFileMentions, hasFileMentions, extractMentionPaths } from '../src/core/context/fileMentions.js';
 import { DynamicPrompt } from '../src/cli/ui/prompt.js';
 import pc from 'picocolors';
@@ -82,6 +84,37 @@ check('no mentions -> prompt unchanged', res6.prompt === 'no mentions here' && r
 
 check('hasFileMentions true', hasFileMentions('see @src/index.ts') === true);
 check('hasFileMentions false for email', hasFileMentions('a@b.com') === false);
+
+console.log('\n=== the @ index offers documents the harness can read ===');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alia-index-'));
+  for (const f of ['brd.pdf', 'spec.docx', 'deck.pptx', 'notes.md', 'logo.png', 'data.zip', 'old.doc', 'old.ppt', 'sheet.xlsx']) fs.writeFileSync(path.join(dir, f), 'x');
+  const names = new FileIndex(dir, 0).search('').matches.map((m) => m.path).sort();
+  check('PDF, Word and PowerPoint files are offered (they can be read), with ordinary text', ['brd.pdf', 'spec.docx', 'deck.pptx', 'notes.md'].every((f) => names.includes(f)), names.join(' '));
+  check('images, archives and the old binary Office formats are not (nothing to read)', !['logo.png', 'data.zip', 'old.doc', 'old.ppt', 'sheet.xlsx'].some((f) => names.includes(f)));
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+console.log('\n=== listDirectory ===');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alia-list-'));
+  fs.mkdirSync(path.join(dir, 'src', 'deep'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'node_modules', 'x'), { recursive: true });
+  fs.mkdirSync(path.join(dir, '.git'));
+  fs.mkdirSync(path.join(dir, 'docs'));
+  fs.writeFileSync(path.join(dir, 'zeta.txt'), '12345');
+  fs.writeFileSync(path.join(dir, 'alpha.png'), 'x');
+  fs.writeFileSync(path.join(dir, 'src', 'a.ts'), 'a');
+  fs.writeFileSync(path.join(dir, 'src', 'deep', 'b.ts'), 'b');
+  const top = listDirectory(dir);
+  check('folders come first, then files, each sorted by name; noise folders are left out', top.map((e) => e.name).join() === 'docs,src,alpha.png,zeta.txt', top.map((e) => e.name).join());
+  check('each entry has its relative path, size, kind, child count and whether it is binary', JSON.stringify(top.find((e) => e.name === 'src')) === JSON.stringify({ name: 'src', path: 'src', isDir: true, size: 0, childCount: 2, binary: false }) && top.find((e) => e.name === 'zeta.txt')!.size === 5 && top.find((e) => e.name === 'alpha.png')!.binary === true && top.find((e) => e.name === 'zeta.txt')!.binary === false);
+  check('a sub-folder lists its own children with paths from the root', listDirectory(dir, 'src').map((e) => e.path).join() === 'src/deep,src/a.ts');
+  check('a path may be written with a trailing slash or a leading ./', listDirectory(dir, 'src/').length === 2 && listDirectory(dir, './src').length === 2);
+  check('a path that leaves the folder is refused', (() => { try { listDirectory(dir, '..'); return false; } catch (e: any) { return /outside/.test(e.message); } })() && (() => { try { listDirectory(dir, 'src/../../'); return false; } catch { return true; } })());
+  check('a folder that does not exist is an error, not an empty list', (() => { try { listDirectory(dir, 'nope'); return false; } catch { return true; } })());
+  fs.rmSync(dir, { recursive: true, force: true });
+}
 
 console.log('\n=== extractMentionPaths ===');
 {

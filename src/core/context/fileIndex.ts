@@ -15,6 +15,12 @@ export interface WorkspaceEntry {
   childCount: number;
 }
 
+/**
+ * Documents the harness can read as text (`readDocument`). They are binary files, but a mention of one works, so the
+ * `@` menu must offer them: a business requirements document is usually a PDF or a Word file.
+ */
+const READABLE_DOCUMENTS = new Set(['.pdf', '.docx', '.pptx']);
+
 /** Hard caps so huge repositories cannot stall the interactive prompt. */
 const MAX_ENTRIES = 10_000;
 const MAX_DEPTH = 8;
@@ -148,7 +154,7 @@ export class FileIndex {
         this.collect(childAbs, childRel, depth + 1, out, true);
       } else if (dirent.isFile()) {
         const ext = path.extname(dirent.name).toLowerCase();
-        if (BINARY_EXTENSIONS.has(ext)) continue;
+        if (BINARY_EXTENSIONS.has(ext) && !READABLE_DOCUMENTS.has(ext)) continue;
         let size = 0;
         try {
           size = fs.statSync(childAbs).size;
@@ -190,4 +196,60 @@ function fuzzyScore(target: string, query: string): number {
   }
 
   return Math.max(1, score - Math.floor(target.length / 4));
+}
+
+
+/** One entry of a directory listing (a project tree, one level at a time). */
+export interface DirectoryEntry {
+  name: string;
+  /** Relative to the root, with forward slashes. */
+  path: string;
+  isDir: boolean;
+  size: number;
+  /** Direct children, for a directory. */
+  childCount: number;
+  /** A file with a binary extension (it is listed, but there is no text to show). */
+  binary: boolean;
+}
+
+const MAX_DIRECTORY_ENTRIES = 2000;
+
+/**
+ * The direct children of a folder inside `root`, folders first, then by name. Unlike the index it lists everything a person
+ * would expect to see (binary files and documents too), skipping only the noise folders and symbolic links. A path that
+ * leaves the root throws.
+ */
+export function listDirectory(root: string, dir = ''): DirectoryEntry[] {
+  const base = path.resolve(root);
+  const abs = path.resolve(base, dir);
+  const rel = path.relative(base, abs);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) throw new Error(`"${dir}" is outside the project folder.`);
+
+  const dirents = fs.readdirSync(abs, { withFileTypes: true });
+  const out: DirectoryEntry[] = [];
+  for (const d of dirents) {
+    if (out.length >= MAX_DIRECTORY_ENTRIES) break;
+    if (d.isSymbolicLink()) continue;
+    const childRel = (rel ? `${rel.split(path.sep).join('/')}/` : '') + d.name;
+    const childAbs = path.join(abs, d.name);
+    if (d.isDirectory()) {
+      if (IGNORED_DIRS.has(d.name)) continue;
+      let childCount = 0;
+      try {
+        childCount = fs.readdirSync(childAbs).length;
+      } catch {
+        /* unreadable: shown as empty */
+      }
+      out.push({ name: d.name, path: childRel, isDir: true, size: 0, childCount, binary: false });
+    } else if (d.isFile()) {
+      let size = 0;
+      try {
+        size = fs.statSync(childAbs).size;
+      } catch {
+        /* unknown size */
+      }
+      out.push({ name: d.name, path: childRel, isDir: false, size, childCount: 0, binary: BINARY_EXTENSIONS.has(path.extname(d.name).toLowerCase()) });
+    }
+  }
+  return out.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
 }

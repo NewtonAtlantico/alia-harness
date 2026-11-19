@@ -20,8 +20,10 @@ import {
   newSessionId,
   getPipelineStatus,
   extractMentionPaths,
+  listDirectory,
   readDocument,
 } from 'alia-harness/core';
+import { previewFile } from './preview';
 import type {
   ActiveSession,
   ChangeInfo,
@@ -339,6 +341,10 @@ export class EngineRuntime {
     'commands.list': ({ sessionId }) => this.entry(sessionId).session.commands.list(),
 
     'files.search': ({ sessionId, query, limit }) => this.entry(sessionId).files.search(query, limit),
+
+    'files.children': ({ sessionId, dir }) => ({ entries: listDirectory(this.entry(sessionId).workspace, dir ?? '') }),
+
+    'files.preview': ({ sessionId, path: file }) => previewFile(this.entry(sessionId).workspace, file),
 
     'changes.list': ({ sessionId }): ChangeInfo[] =>
       this.entry(sessionId).session.changes.list().map((c) => ({ path: c.path, kind: c.kind, added: c.added, removed: c.removed, ...(c.untracked ? { untracked: String(c.untracked) } : {}) })),

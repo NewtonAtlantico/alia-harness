@@ -25,10 +25,11 @@ import type {
   UserAnswer,
   UserQuestion,
   WorkspaceEntry,
+  DirectoryEntry,
 } from 'alia-harness/core';
 
 export type { PermissionMode };
-export type { ToolAnnotation };
+export type { ToolAnnotation, DirectoryEntry };
 export type { AgentEvent, AliaModelConfig, ChatMessage, CommandInfo, CompactResult, ContextUsage, PermissionDecision, PermissionRule, RevertResult, SearchHit, SessionInfo, SwitchModelResult, UserAnswer, UserQuestion, WorkspaceEntry };
 
 // ------------------------------------------------------------------------------------ results
@@ -119,6 +120,19 @@ export interface DiffResult {
   diff: string | null;
   /** True when the diff was cut to keep the message small. */
   truncated: boolean;
+}
+
+/** A read-only look at one file of the project (the Files tab). */
+export interface FilePreview {
+  path: string;
+  size: number;
+  /** `document`: a PDF, Word or PowerPoint file shown as the text the agent would read. */
+  kind: 'text' | 'document' | 'binary' | 'too_large' | 'missing' | 'not_a_file';
+  text?: string;
+  /** More exists than is shown. */
+  truncated?: boolean;
+  /** Why there is nothing to show, or a warning from reading a document. */
+  note?: string;
 }
 
 export interface ModelList {
@@ -242,6 +256,9 @@ export interface RendererRequests {
   'model.switch': { request: { sessionId: string; model: string }; result: SwitchModelResult };
   'commands.list': { request: { sessionId: string }; result: CommandInfo[] };
   'files.search': { request: { sessionId: string; query: string; limit?: number }; result: { matches: WorkspaceEntry[]; total: number } };
+  /** One level of the project's folders and files (a tree, expanded as the user opens it). */
+  'files.children': { request: { sessionId: string; dir?: string }; result: { entries: DirectoryEntry[] } };
+  'files.preview': { request: { sessionId: string; path: string }; result: FilePreview };
   'changes.list': { request: { sessionId: string }; result: ChangeInfo[] };
   'changes.diff': { request: { sessionId: string; path: string }; result: DiffResult };
   'changes.revert': { request: { sessionId: string; paths?: string[] }; result: RevertResult };
