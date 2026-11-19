@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright';
 import { startFakeServer } from './lib/fakeServer';
+import { audit, describeViolations } from './lib/axe';
 
 let failures = 0;
 function check(name: string, cond: boolean, extra = '') {
@@ -66,6 +67,7 @@ try {
     check('and it holds no secret: not the key, not the address of the service', !clip.includes(KEY) && !clip.includes(server.url) && !/sk-/.test(clip), clip);
     await page.getByRole('button', { name: 'Verificar de novo' }).click();
     await page.waitForFunction(() => document.querySelectorAll('[data-testid=diagnostics] [data-diag]').length === 6);
+    { const v = await audit(page); check('settings with the missing and warning results: no accessibility violations', v.length === 0, '\n' + describeViolations(v)); }
     check('it can be checked again', (await row(page, 'bash').getAttribute('data-status')) === 'missing');
     const unnamed = await page.evaluate(() => Array.from(document.querySelectorAll('[data-testid=diagnostics] button')).filter((b) => !(b.textContent || '').trim()).length);
     check('every button has a name, and each result is a word as well as a colour', unnamed === 0 && (await row(page, 'bash').innerText()).includes('faltando'));

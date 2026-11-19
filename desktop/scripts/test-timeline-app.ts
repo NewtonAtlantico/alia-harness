@@ -232,7 +232,7 @@ try {
     return bad;
   });
   check('every button in the conversation has a name', unnamed.length === 0, unnamed.join(' | '));
-  check('the timeline is a live log region, labelled', (await page.getByRole('log', { name: 'Linha do tempo da conversa' }).count()) === 1 && (await page.locator('.timeline').getAttribute('aria-live')) === 'polite');
+  check('the timeline is a live log region, labelled', (await page.getByRole('log', { name: 'Linha do tempo da conversa' }).count()) === 1 && (await page.getByRole('log', { name: 'Linha do tempo da conversa' }).getAttribute('aria-live')) === 'polite');
   check('every row that can be opened says whether it is open', (await page.locator('.tool-head:not([aria-expanded])').count()) === 0);
 } catch (err: any) {
   failures++;

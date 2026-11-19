@@ -41,9 +41,9 @@ export function FinalReport({ view, sessionId, onOpen, onStarted }: { view: Pipe
 
   return (
     <section className="stage-panel final-report" aria-labelledby="report-title" data-testid="final-report">
-      <h3 id="report-title">
+      <h2 id="report-title">
         {t.run.report.title} <span className="hint" data-testid="report-totals">{totalsLine(report)}</span>
-      </h3>
+      </h2>
 
       {blocked ? (
         <div className="notice blocked" data-testid="report-blocked">
@@ -60,7 +60,7 @@ export function FinalReport({ view, sessionId, onOpen, onStarted }: { view: Pipe
         </div>
       )}
 
-      <h4>{t.run.report.backlog}</h4>
+      <h3>{t.run.report.backlog}</h3>
       {report.backlog.length === 0 && <p className="hint">{t.run.report.noBacklog}</p>}
       {report.backlog.map((spec) => (
         <details key={spec.slug} className="backlog-spec" data-backlog={spec.slug}>
@@ -91,7 +91,7 @@ export function FinalReport({ view, sessionId, onOpen, onStarted }: { view: Pipe
         </details>
       ))}
 
-      <h4>{t.run.report.checksTitle}</h4>
+      <h3>{t.run.report.checksTitle}</h3>
       <ul className="checks" data-testid="checks">
         {rows.map((c) => (
           <li key={c.key} className={`check ${c.state}`} data-check={c.key} data-state={c.state}>
@@ -113,7 +113,7 @@ export function FinalReport({ view, sessionId, onOpen, onStarted }: { view: Pipe
         ))}
       </ul>
 
-      <h4>{t.run.report.assumptions}</h4>
+      <h3>{t.run.report.assumptions}</h3>
       {state.assumptions.length === 0 && <p className="hint">{t.run.report.noAssumptions}</p>}
       <ul className="assumptions">
         {state.assumptions.map((a, n) => (
@@ -125,7 +125,7 @@ export function FinalReport({ view, sessionId, onOpen, onStarted }: { view: Pipe
 
       {state.adrs.length > 0 && (
         <>
-          <h4>{t.run.report.adrs}</h4>
+          <h3>{t.run.report.adrs}</h3>
           <ul className="adrs">
             {state.adrs.map((a) => (
               <li key={a.id} data-adr={a.id}>

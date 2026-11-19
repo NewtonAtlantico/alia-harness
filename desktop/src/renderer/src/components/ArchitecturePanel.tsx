@@ -13,7 +13,7 @@ export function ArchitecturePanel({ data, sessionId, onOpen }: { data: Architect
   const { summary } = data;
   return (
     <section className="stage-panel architecture" aria-labelledby="arch-title" data-testid="architecture-panel">
-      <h3 id="arch-title">{t.run.arch.title}</h3>
+      <h2 id="arch-title">{t.run.arch.title}</h2>
       {summary ? (
         <>
           <dl className="facts">
@@ -28,7 +28,7 @@ export function ArchitecturePanel({ data, sessionId, onOpen }: { data: Architect
           </dl>
           {summary.contexts.length > 0 && (
             <>
-              <h4>{t.run.arch.contexts}</h4>
+              <h3>{t.run.arch.contexts}</h3>
               <ul className="contexts">
                 {summary.contexts.map((c) => (
                   <li key={c.name} data-context={c.name}>
@@ -41,7 +41,7 @@ export function ArchitecturePanel({ data, sessionId, onOpen }: { data: Architect
           )}
           {summary.notes && (
             <>
-              <h4>{t.run.arch.notes}</h4>
+              <h3>{t.run.arch.notes}</h3>
               <p>{summary.notes}</p>
             </>
           )}
@@ -62,7 +62,7 @@ export function ArchitecturePanel({ data, sessionId, onOpen }: { data: Architect
         </div>
       )}
 
-      <h4>{t.run.arch.adrs}</h4>
+      <h3>{t.run.arch.adrs}</h3>
       {data.adrs.length === 0 ? (
         <p className="hint">{t.run.arch.noAdrs}</p>
       ) : (
@@ -71,7 +71,7 @@ export function ArchitecturePanel({ data, sessionId, onOpen }: { data: Architect
             <li key={a.id} data-adr={a.id}>
               <strong>{a.id}</strong> {a.title} <span className="chip small">{a.status}</span>
               {a.path && (
-                <button type="button" className="link-btn" onClick={() => onOpen(a.path!)} aria-label={t.run.panel.open(a.path)}>
+                <button type="button" className="link-btn" onClick={() => onOpen(a.path!)} aria-label={`${t.run.arch.openDocument}: ${a.path}`}>
                   {t.run.arch.openDocument}
                 </button>
               )}
@@ -82,7 +82,7 @@ export function ArchitecturePanel({ data, sessionId, onOpen }: { data: Architect
 
       {data.alignment.length > 0 && (
         <>
-          <h4>{t.run.arch.alignment}</h4>
+          <h3>{t.run.arch.alignment}</h3>
           <ul className="alignment">
             {data.alignment.map((a) => (
               <li key={a.adr} data-alignment={a.adr} data-aligned={a.aligned}>
@@ -95,7 +95,7 @@ export function ArchitecturePanel({ data, sessionId, onOpen }: { data: Architect
         </>
       )}
 
-      <h4>{t.run.arch.assumptions}</h4>
+      <h3>{t.run.arch.assumptions}</h3>
       {data.assumptions.length === 0 ? (
         <p className="hint">{t.run.arch.noAssumptions}</p>
       ) : (

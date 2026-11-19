@@ -36,7 +36,15 @@ export function Dialog({ labelledBy, onCancel, children }: { labelledBy: string;
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('keydown', onKey);
-      previous?.focus?.();
+      // Back to where it was. A row's buttons only show while the row has the focus, so they cannot take it back until the row
+      // does: focus the row first (that shows them), then the button.
+      if (previous?.isConnected) {
+        previous.focus?.();
+        if (document.activeElement !== previous) {
+          previous.closest<HTMLElement>('.conv')?.querySelector<HTMLElement>('.conv-main')?.focus();
+          previous.focus?.();
+        }
+      }
     };
   }, []);
 

@@ -29,7 +29,7 @@ export function QuestionCard({ interaction, queued, defaultOwner, onAnswer }: { 
       <span className="sr-only" role="alert">
         {t.approval.questionsTitle}
       </span>
-      <h3 id={titleId}>{t.approval.questionsTitle}</h3>
+      <h2 id={titleId}>{t.approval.questionsTitle}</h2>
       <QuestionFields questions={questions} forms={forms} set={set} defaultOwner={defaultOwner} missingOwner={showErrors ? missingOwner : []} />
       <div className="actions">
         <button type="button" className="btn primary" onClick={send} disabled={done === 0}>

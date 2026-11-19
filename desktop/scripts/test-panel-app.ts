@@ -12,6 +12,7 @@ import { _electron as electron, type ElectronApplication, type Page } from 'play
 import { makePdf } from '../../scripts/lib/pdfFixture';
 import { startFakeServer } from './lib/fakeServer';
 import { sleep } from './lib/hang';
+import { audit, describeViolations } from './lib/axe';
 
 let failures = 0;
 function check(name: string, cond: boolean, extra = '') {
@@ -113,14 +114,15 @@ try {
   check('it says, always, that changes made by commands are not tracked', (await page.getByTestId('not-tracked').innerText()).includes('não são rastreadas'));
 
   console.log('\n=== changes: the diff ===');
-  await row('a.txt').getByRole('button', { name: /Mostrar o que mudou/ }).click();
+  await row('a.txt').locator('.change-main').click();
   const diff = row('a.txt').getByTestId('diff');
   await diff.waitFor();
   check('a file opens to its diff: removed line red, added lines green, with line numbers', (await diff.locator('.dl.remove').count()) === 1 && (await diff.locator('.dl.add').count()) === 2 && (await diff.locator('.dl.remove .code').innerText()).trim() === 'beta' && (await diff.locator('.dl.add .code').first().innerText()).trim() === 'BETA');
   const geometry = await diff.evaluate((el) => ({ overflowX: getComputedStyle(el).overflowX, scrollable: el.scrollWidth > el.clientWidth, wrap: getComputedStyle(el.querySelector('.dl')!).whiteSpace }));
   check('a long line scrolls sideways instead of wrapping', geometry.overflowX === 'auto' && geometry.scrollable && geometry.wrap === 'pre', JSON.stringify(geometry));
+  { const v = await audit(page); check('the changes tab with a diff open: no accessibility violations', v.length === 0, '\n' + describeViolations(v)); }
   check('the diff is a focusable region with a name (the keyboard can scroll it)', (await diff.getAttribute('tabindex')) === '0' && (await diff.getAttribute('aria-label')) === 'a.txt');
-  await row('a.txt').getByRole('button', { name: /Mostrar o que mudou/ }).click();
+  await row('a.txt').locator('.change-main').click();
   check('clicking again closes it', (await diff.count()) === 0);
 
   console.log('\n=== keep one, undo one ===');
@@ -145,6 +147,7 @@ try {
   const entries = term.locator('.term-entry');
   check('the commands the agent ran are logged, in order, with their output', (await entries.count()) === 2 && (await entries.nth(0).innerText()).includes('echo ola-terminal') && (await entries.nth(0).innerText()).includes('ola-terminal') && (await entries.nth(1).innerText()).includes('falhou feio'));
   check('each says how it ended: passed, and failed with the exit code', (await entries.nth(0).innerText()).includes('passou') && (await entries.nth(1).innerText()).includes('falhou (código 4)'));
+  { const v = await audit(page); check('the terminal tab: no accessibility violations', v.length === 0, '\n' + describeViolations(v)); }
   check('it is a log, not a terminal: nothing can be typed into it, and it says so', (await term.locator('input, textarea, [contenteditable]').count()) === 0 && (await term.getAttribute('role')) === 'log' && (await term.innerText()).includes('Somente leitura'));
 
   console.log('\n=== files ===');
@@ -158,6 +161,7 @@ try {
   await tree.getByRole('button', { name: /BRD.pdf/ }).click();
   const preview = page.getByTestId('file-preview');
   await preview.getByText('Primeira página do BRD').waitFor();
+  { const v = await audit(page); check('the files tab with a preview: no accessibility violations', v.length === 0, '\n' + describeViolations(v)); }
   check('a PDF is shown as the text the agent would read, with its page markers', (await preview.innerText()).includes('[p. 1]') && (await preview.innerText()).includes('Texto extraído do documento'));
   await tree.getByRole('button', { name: /README.md/ }).click();
   await preview.getByText('Leia-me do projeto.').waitFor();
@@ -178,7 +182,7 @@ try {
   fs.writeFileSync(path.join(project, 'b.txt'), 'minha edição\n'); // the user edits it too, after the agent
   await said('crie o grande', 4);
   await row('big.txt').waitFor();
-  check('a file too large to keep a copy of is listed as "sem diff", with no diff to open and nothing to undo', (await row('big.txt').innerText()).includes('sem diff') && await row('big.txt').getByRole('button', { name: /Mostrar o que mudou/ }).isDisabled() && await row('big.txt').getByRole('button', { name: /Desfazer/ }).isDisabled());
+  check('a file too large to keep a copy of is listed as "sem diff", with no diff to open and nothing to undo', (await row('big.txt').innerText()).includes('sem diff') && await row('big.txt').locator('.change-main').isDisabled() && await row('big.txt').getByRole('button', { name: /Desfazer/ }).isDisabled());
   await row('b.txt').getByRole('button', { name: /Desfazer as alterações em b.txt/ }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Desfazer' }).click();
   const conflict = row('b.txt').getByTestId('conflict');

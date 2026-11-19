@@ -285,13 +285,13 @@ export function Composer({ sessionId, running, blockedReason, onOpenSettings, on
       )}
 
       {menuOpen && (slash || mention) && (
-        <ul id={listId} className="composer-menu" role="listbox" aria-label={slash ? t.composer.slashMenu : t.composer.mentionMenu} data-testid="composer-menu">
+        <ul id={listId} className="composer-menu" role={rows > 0 ? 'listbox' : 'presentation'} aria-label={rows > 0 ? (slash ? t.composer.slashMenu : t.composer.mentionMenu) : undefined} data-testid="composer-menu">
           {slash &&
             slashRows.map((c, i) => (
               <li key={c.name} id={optionId(i)} role="option" aria-selected={i === selected} className={i === selected ? 'selected' : ''} onMouseDown={(e) => { e.preventDefault(); setSelected(i); place(applyCommand(text, slash, c)); }}>
                 <code>/{c.name}</code>
                 <span className="hint">{c.description}</span>
-                {c.kind === 'skill' && <span className="chip small">skill</span>}
+                {c.kind === 'skill' && <span className="chip small">{t.composer.skillTag}</span>}
               </li>
             ))}
           {mention &&

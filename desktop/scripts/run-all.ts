@@ -23,8 +23,8 @@ interface Suite {
 }
 
 const tsx = (script: string): string[] => ['npx', 'tsx', '--tsconfig', 'tsconfig.node.json', `scripts/${script}.ts`];
-const unit = ['engine', 'security', 'settings', 'projects', 'ui-logic', 'timeline', 'composer-logic', 'interactions-logic', 'panel-logic', 'intake-logic', 'run-logic', 'diagnostics'];
-const e2e = ['app', 'hardening', 'settings-app', 'sidebar-app', 'timeline-app', 'composer-app', 'interactions-app', 'panel-app', 'intake-app', 'run-app', 'gates-app', 'report-app', 'diagnostics-app', 'journey-app'];
+const unit = ['engine', 'security', 'settings', 'projects', 'ui-logic', 'timeline', 'composer-logic', 'interactions-logic', 'panel-logic', 'intake-logic', 'run-logic', 'diagnostics', 'contrast', 'strings'];
+const e2e = ['app', 'hardening', 'settings-app', 'sidebar-app', 'timeline-app', 'composer-app', 'interactions-app', 'panel-app', 'intake-app', 'run-app', 'gates-app', 'report-app', 'diagnostics-app', 'keyboard-app', 'performance-app', 'journey-app'];
 const coreSuites = ['mentions', 'skills', 'agent', 'subagents', 'session', 'events', 'cancel', 'permissions', 'store', 'commands', 'changes', 'documents', 'office', 'askuser', 'pipeline', 'resume', 'intake', 'report', 'issues'];
 
 const suites: Suite[] = [

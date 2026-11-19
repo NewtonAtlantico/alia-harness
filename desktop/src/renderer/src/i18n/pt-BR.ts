@@ -440,6 +440,7 @@ export const t = {
     needOwner: 'Informe quem é o responsável por esta suposição.',
   },
   composer: {
+    skillTag: 'skill',
     label: 'Mensagem',
     placeholder: 'Escreva uma mensagem… (/ para comandos, @ para arquivos)',
     send: 'Enviar',
@@ -486,6 +487,7 @@ export const t = {
   },
   timeline: {
     label: 'Linha do tempo da conversa',
+    older: (next: number, total: number) => `Mostrar ${next} anteriores (${total} escondidas)`,
     you: 'Você',
     assistant: 'alia',
     thinking: 'Pensando…',

@@ -114,7 +114,7 @@ try {
   check('with the model done, it can be resumed, and there is no Pausar', (await page.getByTestId('pipeline-resume').count()) === 1 && (await page.getByTestId('pipeline-pause').count()) === 0);
 
   console.log('\n=== the gate card ===');
-  check('the card is for the gate, with its stage and progress', (await card().getByRole('heading', { level: 3 }).innerText()).includes('Gate 1 · Requisitos') && (await card().getByRole('heading', { level: 3 }).innerText()).includes('1 de 4'));
+  check('the card is for the gate, with its stage and progress', (await card().getByRole('heading', { level: 2 }).innerText()).includes('Gate 1 · Requisitos') && (await card().getByRole('heading', { level: 2 }).innerText()).includes('1 de 4'));
   check('answered questions are collapsed, and open with who answered and when', (await card().getByTestId('gate-settled').evaluate((el) => (el as HTMLDetailsElement).open)) === false && (await card().getByTestId('gate-settled').locator('summary').innerText()) === '1 pergunta respondida');
   await card().getByTestId('gate-settled').locator('summary').click();
   check('...the question, the answer as Sim, and Ana with the date', (await card().getByTestId('gate-settled').innerText()).includes('O portal atende parceiros?') && (await card().getByTestId('gate-settled').innerText()).includes('Sim') && (await card().getByTestId('gate-settled').innerText()).includes('Ana · 2026-11-18'));

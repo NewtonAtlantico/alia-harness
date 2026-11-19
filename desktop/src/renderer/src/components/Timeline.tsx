@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { t } from '../i18n/pt-BR';
 import {
   baseName,
@@ -116,11 +116,11 @@ function ToolBlock({ row }: { row: ToolRow }) {
         <div id={bodyId} className="tool-body">
           {hasArgs && row.name !== 'run_bash' && (
             <>
-              <h4>{t.timeline.arguments}</h4>
+              <strong className="subhead">{t.timeline.arguments}</strong>
               <pre>{clip(JSON.stringify(row.args, null, 2))}</pre>
             </>
           )}
-          <h4>{t.timeline.result}</h4>
+          <strong className="subhead">{t.timeline.result}</strong>
           <pre>{row.result ? clip(row.result) : t.timeline.noOutput}</pre>
         </div>
       )}
@@ -262,16 +262,48 @@ function renderItem(item: DisplayItem) {
 }
 
 /** The conversation as rows. A live region, so a screen reader hears the answer arrive. */
+/** How many rows of a long conversation are drawn at first, and how many more each "mostrar anteriores" adds. */
+export const WINDOW = 300;
+
 export function Timeline({ state }: { state: TimelineState }) {
   const items = groupReads(state.rows);
+  // A conversation of thousands of rows draws only the last ones (the page stays smooth) and says how many are before them.
+  // The window only grows as rows arrive: what the user opened to read does not slide away.
+  const [start, setStart] = useState(() => Math.max(0, items.length - WINDOW));
+  const first = start > items.length ? 0 : start; // the conversation was cleared: start over
+  const hidden = first;
+  const list = useRef<HTMLOListElement>(null);
+  const anchor = useRef<{ top: number; height: number } | undefined>(undefined);
+  const more = () => {
+    const scroller = list.current?.closest('.pane-main') as HTMLElement | null;
+    if (scroller) anchor.current = { top: scroller.scrollTop, height: scroller.scrollHeight };
+    setStart(Math.max(0, first - WINDOW));
+  };
+  // After the older rows are in, keep what the user was looking at where it was.
+  useLayoutEffect(() => {
+    const scroller = list.current?.closest('.pane-main') as HTMLElement | null;
+    if (anchor.current && scroller) {
+      scroller.scrollTop = anchor.current.top + (scroller.scrollHeight - anchor.current.height);
+      anchor.current = undefined;
+    }
+  }, [first]);
   return (
-    <ol className="timeline" role="log" aria-live="polite" aria-label={t.timeline.label}>
-      {items.map(renderItem)}
+    <div role="log" aria-live="polite" aria-label={t.timeline.label}>
+      <ol className="timeline" ref={list}>
+      {hidden > 0 && (
+        <li className="older" data-testid="older">
+          <button type="button" className="btn small" onClick={more}>
+            {t.timeline.older(Math.min(WINDOW, hidden), hidden)}
+          </button>
+        </li>
+      )}
+      {items.slice(first).map(renderItem)}
       {state.modelBusy && (
         <li className="thinking-now" role="status" data-testid="thinking">
           <span className="mark spinner" aria-hidden="true" /> {t.timeline.thinking}
         </li>
       )}
-    </ol>
+      </ol>
+    </div>
   );
 }

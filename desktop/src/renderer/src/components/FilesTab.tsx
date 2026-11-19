@@ -85,8 +85,8 @@ export function FilesTab({ sessionId, refreshKey }: { sessionId: string; refresh
       <li key={e.path}>
         {e.isDir ? (
           <>
-            <button type="button" className="tree-row dir" style={{ paddingLeft: depth * 14 + 8 }} aria-expanded={expanded.has(e.path)} aria-label={expanded.has(e.path) ? t.panel.files.close(e.name) : t.panel.files.open(e.name)} onClick={() => toggleDir(e.path)}>
-              <span aria-hidden="true">{expanded.has(e.path) ? '▾' : '▸'}</span> <span className="name">{e.name}/</span>
+            <button type="button" className="tree-row dir" style={{ paddingLeft: depth * 14 + 8 }} aria-expanded={expanded.has(e.path)} aria-label={`${expanded.has(e.path) ? t.panel.files.close(e.name) : t.panel.files.open(e.name)}: ${e.name}/ ${t.panel.files.items(e.childCount)}`} onClick={() => toggleDir(e.path)}>
+              <span aria-hidden="true">{expanded.has(e.path) ? '▾' : '▸'}</span> <span className="name">{e.name}/</span>{' '}
               <span className="hint">{t.panel.files.items(e.childCount)}</span>
             </button>
             {expanded.has(e.path) && <ul>{render(e.path, depth + 1)}</ul>}

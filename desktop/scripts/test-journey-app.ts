@@ -14,6 +14,7 @@ import { PipelineStateStore, summarizeTasks } from 'alia-harness/core';
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright';
 import { makePdf } from '../../scripts/lib/pdfFixture';
 import { startFakeServer, type FakeTurn } from './lib/fakeServer';
+import { audit, describeViolations, focusAudit, type Violation } from './lib/axe';
 import { sleep } from './lib/hang';
 
 let failures = 0;
@@ -136,7 +137,10 @@ const ok = async (name: string, payload: object = {}) => {
   return r.result;
 };
 const drop = (...files: string[]) => app.evaluate(({ BrowserWindow }, f) => (globalThis as any).__aliaTest.handleDropped(BrowserWindow.getAllWindows()[0].webContents, f), files);
+/** Accessibility audit of every screen the journey shows (axe-core, WCAG 2.1 A and AA): judged at the end, so one run lists everything. */
+const found: Array<{ screen: string; violations: Violation[]; hidden: string[] }> = [];
 const shot = async (name: string) => {
+  found.push({ screen: name, violations: await audit(page), hidden: await focusAudit(page) });
   if (shots) {
     fs.mkdirSync(shots, { recursive: true });
     await sleep(250);
@@ -231,6 +235,9 @@ try {
   await shot('10-publicar-rascunhos');
   await dialog.getByRole('button', { name: 'Gerar rascunhos' }).click();
   await page.waitForFunction(() => document.body.innerText.includes('Rascunhos gerados em docs/issues/.'), undefined, { timeout: 30000 });
+
+  console.log('\n=== accessibility of every screen ===');
+  for (const f of found) check(`${f.screen}: no violations, and every control shows where the keyboard is`, f.violations.length === 0 && f.hidden.length === 0, '\n' + describeViolations(f.violations) + (f.hidden.length ? '\nno focus ring: ' + f.hidden.join(', ') : ''));
 
   console.log('\n=== what is on disk ===');
   const final = store().load()!;

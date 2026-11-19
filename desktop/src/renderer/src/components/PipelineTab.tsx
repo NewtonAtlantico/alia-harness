@@ -17,7 +17,7 @@ export function PipelineTab({ view, onOpen, error }: { view?: PipelineView; onOp
         </p>
       )}
       <section aria-labelledby="pt-artifacts">
-        <h3 id="pt-artifacts">{t.run.panel.artifacts}</h3>
+        <h2 id="pt-artifacts">{t.run.panel.artifacts}</h2>
         {artifacts.every((a) => !a.exists) ? (
           <p className="hint">{t.run.panel.noArtifacts}</p>
         ) : null}
@@ -39,7 +39,7 @@ export function PipelineTab({ view, onOpen, error }: { view?: PipelineView; onOp
         </ul>
       </section>
       <section aria-labelledby="pt-inputs">
-        <h3 id="pt-inputs">{t.run.panel.inputs}</h3>
+        <h2 id="pt-inputs">{t.run.panel.inputs}</h2>
         {state.inputs.length === 0 && <p className="hint">{t.run.panel.noInputs}</p>}
         <ul>
           {state.inputs.map((i) => (
@@ -52,7 +52,7 @@ export function PipelineTab({ view, onOpen, error }: { view?: PipelineView; onOp
         </ul>
       </section>
       <section aria-labelledby="pt-assumptions">
-        <h3 id="pt-assumptions">{t.run.panel.assumptions}</h3>
+        <h2 id="pt-assumptions">{t.run.panel.assumptions}</h2>
         {state.assumptions.length === 0 && <p className="hint">{t.run.panel.noAssumptions}</p>}
         <ul>
           {state.assumptions.map((a, n) => (
@@ -63,7 +63,7 @@ export function PipelineTab({ view, onOpen, error }: { view?: PipelineView; onOp
         </ul>
       </section>
       <section aria-labelledby="pt-note">
-        <h3 id="pt-note">{t.run.panel.note}</h3>
+        <h2 id="pt-note">{t.run.panel.note}</h2>
         {state.notes.length === 0 && <p className="hint">{t.run.panel.noNote}</p>}
         <ul>
           {state.notes.map((n, i) => (

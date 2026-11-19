@@ -24,7 +24,7 @@
 
   /* Text */
   --text: #1f2937;
-  --text-muted: #6b7280;
+  --text-muted: #5b6472; /* sampled #6b7280, darkened: it was 4.2:1 on the sidebar and 3.9:1 on a selected row (AA needs 4.5:1) */
 
   /* Primary */
   --primary: #2f61c0; /* sampled */
@@ -33,7 +33,7 @@
 
   /* Status */
   --success: #1c7a3b; /* sampled */
-  --warning: #c25d00; /* sampled */
+  --warning: #a64a00; /* sampled #c25d00, darkened: it was 4.0:1 on the warning card (AA needs 4.5:1); white on it is 5.8:1 */
   --warning-bg: #fff6ed; /* sampled: the permission card */
   --danger: #b42318;
   --diff-add: #e8f3ea; /* sampled */

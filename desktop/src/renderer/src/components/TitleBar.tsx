@@ -24,17 +24,17 @@ export function TitleBar() {
         <span className="titlebar-version">{version ? t.titleBar.version(version) : ''}</span>
       </div>
       <div className="titlebar-controls">
-        <button type="button" aria-label={t.titleBar.minimize} title={t.titleBar.minimize} onClick={call('window.minimize')}>
+        <button type="button" tabIndex={-1} aria-label={t.titleBar.minimize} title={t.titleBar.minimize} onClick={call('window.minimize')}>
           <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5h10" stroke="currentColor" strokeWidth="1" /></svg>
         </button>
-        <button type="button" aria-label={maximized ? t.titleBar.restore : t.titleBar.maximize} title={maximized ? t.titleBar.restore : t.titleBar.maximize} onClick={call('window.toggleMaximize')}>
+        <button type="button" tabIndex={-1} aria-label={maximized ? t.titleBar.restore : t.titleBar.maximize} title={maximized ? t.titleBar.restore : t.titleBar.maximize} onClick={call('window.toggleMaximize')}>
           {maximized ? (
             <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 2.5h6v6h-6zM2.5 2.5V.5h7v7h-1" fill="none" stroke="currentColor" strokeWidth="1" /></svg>
           ) : (
             <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1" /></svg>
           )}
         </button>
-        <button type="button" className="close" aria-label={t.titleBar.close} title={t.titleBar.close} onClick={call('window.close')}>
+        <button type="button" tabIndex={-1} className="close" aria-label={t.titleBar.close} title={t.titleBar.close} onClick={call('window.close')}>
           <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" strokeWidth="1" /></svg>
         </button>
       </div>

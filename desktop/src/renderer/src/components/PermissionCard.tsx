@@ -16,7 +16,7 @@ export function PermissionCard({ interaction, queued, onDecide }: { interaction:
       <span className="sr-only" role="alert">
         {t.approval.announce(command)}
       </span>
-      <h3 id={titleId}>{dangerous ? t.approval.dangerousTitle : t.approval.title}</h3>
+      <h2 id={titleId}>{dangerous ? t.approval.dangerousTitle : t.approval.title}</h2>
       {requester && <p className="hint">{t.approval.requestedBy(requester)}</p>}
       <pre className="cmd" aria-label={t.approval.command}>
         {command}

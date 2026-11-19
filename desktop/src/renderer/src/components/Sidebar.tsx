@@ -165,8 +165,8 @@ export function Sidebar(p: SidebarProps) {
                   const chip = chipFor(brief)!;
                   return (
                     <li key={project} className="conv">
-                      <button type="button" className="conv-main" aria-label={t.sidebar.pipelineOf(projectName(project))} title={brief.summary} onClick={() => p.onOpenPipeline(project)}>
-                        <span className="conv-title">{brief.project ?? projectName(project)}</span>
+                      <button type="button" className="conv-main" aria-label={`${t.sidebar.pipelineOf(projectName(project))}: ${brief.project ?? projectName(project)} ${chip.label}`} title={brief.summary} onClick={() => p.onOpenPipeline(project)}>
+                        <span className="conv-title">{brief.project ?? projectName(project)}</span>{' '}
                         <span className={`chip ${chip.tone}`} data-testid="pipeline-chip">
                           {chip.label}
                         </span>

@@ -83,9 +83,9 @@ export function SpecsPanel({
 
   return (
     <section className="stage-panel specs" aria-labelledby="specs-title" data-testid="specs-panel" aria-busy={working}>
-      <h3 id="specs-title">
+      <h2 id="specs-title">
         {t.run.specs.title} <span className="hint">{data.rows.length > 0 ? t.run.specs.count(data.reviewed, data.rows.length) : ''}</span>
-      </h3>
+      </h2>
 
       {data.resolvedGaps.length > 0 && (
         <div className="notice ok" role="status" data-testid="resolved-gap">
@@ -143,7 +143,7 @@ export function SpecsPanel({
 
       {row && (
         <div className="spec-review" role="group" aria-label={t.run.specs.preview(row.title)} data-testid="spec-review">
-          <h4>{t.run.specs.preview(row.title)}</h4>
+          <h3>{t.run.specs.preview(row.title)}</h3>
           {text.state === 'loading' && <p className="hint">{t.run.specs.loading}</p>}
           {(text.state === 'missing' || text.state === 'none') && <p className="hint">{t.run.specs.noFile}</p>}
           {text.state === 'ready' && (

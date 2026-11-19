@@ -117,12 +117,12 @@ try {
   if (process.env.ALIA_SHOTS) await page.screenshot({ path: path.join(process.env.ALIA_SHOTS, 'gate2.png') });
 
   console.log('\n=== gate 2: the proposed architecture ===');
-  check('the screen is "Arquitetura proposta", with the style and what drove it', (await arch().getByRole('heading', { level: 3 }).innerText()) === 'Arquitetura proposta' && (await arch().getByTestId('arch-style').innerText()) === 'Monolito modular' && (await arch().innerText()).includes('Equipe pequena e prazo curto'));
+  check('the screen is "Arquitetura proposta", with the style and what drove it', (await arch().getByRole('heading', { level: 2 }).innerText()) === 'Arquitetura proposta' && (await arch().getByTestId('arch-style').innerText()) === 'Monolito modular' && (await arch().innerText()).includes('Equipe pequena e prazo curto'));
   check('the contexts come with their role', (await arch().locator('[data-context="Atendimento"]').innerText()).includes('Abertura e acompanhamento de chamados') && (await arch().locator('[data-context]').count()) === 2);
   check('ADRs are listed with their status', (await arch().locator('[data-adr="ADR-001"]').innerText()).includes('Usar PostgreSQL') && (await arch().locator('[data-adr="ADR-001"]').innerText()).includes('accepted') && (await arch().locator('[data-adr="ADR-002"]').innerText()).includes('proposed'));
   check('alignment with the ADRs that exist: Alinhado, and Desalinhado with the note', (await arch().locator('[data-alignment="ADR-001"]').innerText()).includes('Alinhado') && (await arch().locator('[data-alignment="ADR-002"]').innerText()).includes('Desalinhado') && (await arch().locator('[data-alignment="ADR-002"]').innerText()).includes('A proposta usa uma fila própria.'));
   check('what goes forward without blocking is listed as assumptions with their owner', (await arch().locator('[data-assumption]').innerText()).includes('Sem multi-região no MVP') && (await arch().locator('[data-assumption]').innerText()).includes('responsável: Ana'));
-  check('the gate card is the architecture review, with the recommendation as a chip', (await card().getByRole('heading', { level: 3 }).innerText()).includes('Revisão da arquitetura') && (await card().getByTestId('gate-chip').innerText()) === 'Aprovar com notas');
+  check('the gate card is the architecture review, with the recommendation as a chip', (await card().getByRole('heading', { level: 2 }).innerText()).includes('Revisão da arquitetura') && (await card().getByTestId('gate-chip').innerText()) === 'Aprovar com notas');
   check('the blocking question is in the card, with its category and source', (await card().innerText()).includes('Quem é o dono das gravações dos chamados?') && (await card().innerText()).includes('Bloqueia as specs') && (await card().innerText()).includes('Fonte: Kickoff.pdf · p. 3'));
   check('the stepper shows Arquitetura waiting', (await page.locator('[data-step="2"]').getAttribute('data-state')) === 'waiting');
 
@@ -152,7 +152,7 @@ try {
   console.log('\n=== gate 3: the specs ===');
   if (process.env.ALIA_SHOTS) await page.screenshot({ path: path.join(process.env.ALIA_SHOTS, 'gate3.png') });
   check('the spec table has persona, what each depends on, and the status', (await spec('login-sso').innerText()).includes('Login com SSO') && (await spec('login-sso').innerText()).includes('Cliente') && (await spec('login-sso').innerText()).includes('Rascunho') && (await spec('abrir-chamado').innerText()).includes('login-sso') && (await specs().locator('tbody tr').count()) === 2);
-  check('the progress is counted', (await specs().getByRole('heading', { level: 3 }).innerText()).includes('0 de 2 revisadas'));
+  check('the progress is counted', (await specs().getByRole('heading', { level: 2 }).innerText()).includes('0 de 2 revisadas'));
   check('"Seguir para Tarefas" is off, and says why (the specs come first)', (await page.getByTestId('follow-tasks').isDisabled()) && (await specs().innerText()).includes('Faltam revisar 2 specs.'));
   check('the gap the skill raised is a question in the card, which does not approve the gate', (await card().innerText()).includes('Qual persona usa o painel do atendente?') && (await card().getByRole('button', { name: /^Enviar/ }).count()) === 1);
   await card().getByRole('textbox').first().fill('O atendente de primeira linha.');
@@ -171,7 +171,7 @@ try {
   await specs().getByTestId('specs-message').waitFor();
   const reviewed = store().load()!;
   check('approving records the review as the user and keeps the comment as a note', reviewed.specReviews.find((r) => r.spec === 'login-sso')!.status === 'reviewed' && reviewed.specReviews.find((r) => r.spec === 'login-sso')!.by === 'Newton' && reviewed.notes.some((n) => n.includes('Conferi com o BRD.')));
-  check('the table shows who approved it and when, and the count', (await spec('login-sso').innerText()).includes('Aprovada por Newton em') && (await specs().getByRole('heading', { level: 3 }).innerText()).includes('1 de 2 revisadas') && (await specs().innerText()).includes('Falta revisar 1 spec.'));
+  check('the table shows who approved it and when, and the count', (await spec('login-sso').innerText()).includes('Aprovada por Newton em') && (await specs().getByRole('heading', { level: 2 }).innerText()).includes('1 de 2 revisadas') && (await specs().innerText()).includes('Falta revisar 1 spec.'));
   check('the stepper for specs is still waiting', (await page.locator('[data-step="3"]').getAttribute('data-state')) === 'waiting');
 
   console.log('\n=== asking for changes ===');

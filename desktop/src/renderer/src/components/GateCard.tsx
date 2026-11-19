@@ -98,7 +98,7 @@ export function GateCard({
 
   return (
     <section className="interaction-card gate-card" role="group" aria-labelledby={titleId} data-testid="gate-card" data-gate={card.gate} aria-busy={working}>
-      <h3 id={titleId}>
+      <h2 id={titleId}>
         {title ?? card.title}{' '}
         {chip && (
           <span className={`chip small rec-${chip.tone}`} data-testid="gate-chip">
@@ -106,7 +106,7 @@ export function GateCard({
           </span>
         )}{' '}
         <span className="hint">{t.run.gate.progress(card.settled.length, card.settled.length + card.open.length)}</span>
-      </h3>
+      </h2>
 
       {card.settled.length > 0 && (
         <details className="settled" data-testid="gate-settled">

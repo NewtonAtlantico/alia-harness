@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright';
 import { startFakeServer } from './lib/fakeServer';
+import { audit, describeViolations } from './lib/axe';
 import { makeHang, sleep } from './lib/hang';
 
 let failures = 0;
@@ -134,6 +135,7 @@ try {
   console.log('\n=== the @ menu ===');
   await box().fill('@sr');
   await menu().waitFor();
+  { const v = await audit(page); check('the @ menu open: no accessibility violations', v.length === 0, '\n' + describeViolations(v)); }
   check('typing @ offers the project\'s files, with the folder marked "pasta inteira"', (await options().filter({ hasText: 'src/' }).first().innerText()).includes('pasta inteira') && (await options().filter({ hasText: 'src/' }).first().innerText()).includes('2 itens'));
   check('the box says what it is: a combobox with the list it controls, and the active option', (await box().getAttribute('aria-expanded')) === 'true' && !!(await box().getAttribute('aria-controls')) && !!(await box().getAttribute('aria-activedescendant')) && (await options().first().getAttribute('aria-selected')) === 'true');
   await box().press('Tab');

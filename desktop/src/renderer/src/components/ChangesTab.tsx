@@ -123,7 +123,7 @@ export function ChangesTab({ sessionId, refreshKey }: { sessionId: string; refre
             return (
               <li key={c.path} className={`change ${c.kind}`} data-path={c.path}>
                 <div className="change-row">
-                  <button type="button" className="change-main" aria-expanded={tracked ? !!diff : undefined} disabled={!tracked} onClick={() => void toggle(c)} title={t.panel.changes.showDiff(c.path)} aria-label={t.panel.changes.showDiff(c.path)}>
+                  <button type="button" className="change-main" aria-expanded={tracked ? !!diff : undefined} disabled={!tracked} onClick={() => void toggle(c)} title={t.panel.changes.showDiff(c.path)}>
                     <span className="tool-icon" aria-hidden="true">{tracked ? (diff ? '▾' : '▸') : '·'}</span>
                     <code className="path">{c.path}</code>
                     <span className={`badge ${c.kind === 'created' ? 'ok' : c.kind === 'untracked' ? 'muted' : ''}`}>{t.panel.changes.kind[c.kind]}</span>
