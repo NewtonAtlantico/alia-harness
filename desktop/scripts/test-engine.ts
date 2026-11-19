@@ -655,6 +655,59 @@ async function fails2(h: Rig, _label: string, sessionId: string): Promise<string
   return h.call('pipeline.start', { sessionId, inputs: [{ path: path.join(h.ws, 'a.txt') }] }).then(() => '', (e) => e.message as string);
 }
 
+console.log('\n=== pipeline run: state, answers and approvals made by the user ===');
+{
+  const r = await rig(new FakeModel([{ content: 'ok' }], 'repeat-last'));
+  const { sessionId } = await r.open();
+  const store = new PipelineStateStore(r.ws);
+  fs.mkdirSync(path.join(r.ws, 'docs', 'requirements'), { recursive: true });
+  fs.writeFileSync(path.join(r.ws, 'docs', 'requirements', 'requirements.md'), '# Requisitos');
+  store.apply([
+    { op: 'set_project', name: 'Portal' },
+    { op: 'add_input', name: 'brd.pdf', input_kind: 'document' },
+    { op: 'set_stage', stage: 1, status: 'running' },
+    { op: 'add_question', gate: 'G1', id: 'q1', prompt: 'Qual versão é a oficial?', kind: 'choice', category: 'contradiction', source: 'BRD_v2.pdf · p. 14', options: [{ id: 'v2', label: 'v2', source: 'BRD_v2.pdf' }, { id: 'v3', label: 'v3' }] },
+    { op: 'add_question', gate: 'G1', id: 'q2', prompt: 'Quantos usuários simultâneos?', kind: 'text' },
+    { op: 'add_question', gate: 'G1', id: 'q3', prompt: 'Há integração com o ERP?', kind: 'confirm', category: 'blocker' },
+    { op: 'add_question', gate: 'G2', id: 'q9', prompt: 'Quem é dono das gravações?', kind: 'text' },
+    { op: 'add_assumption', text: 'Usuários do portal são clientes', owner: 'Newton', stage: 1 },
+  ]);
+
+  const view = await r.call('pipeline.state', { projectPath: r.ws });
+  check('the state, status and artifacts come together for the run view', view.status.next.kind === 'answer_questions' && view.state.project === 'Portal' && view.state.gates[0].questions.length === 3 && view.state.assumptions.length === 1 && view.markdownExists === true);
+  check('each stage artifact says whether it exists yet', view.artifacts.find((a: any) => a.stage === 1).exists === true && view.artifacts.find((a: any) => a.stage === 2).exists === false && view.artifacts.find((a: any) => a.stage === 4).path === 'docs/tasks/');
+  const stateFile = path.join(r.ws, 'docs', 'pipeline', 'state.json');
+  const good = fs.readFileSync(stateFile, 'utf8');
+  fs.writeFileSync(stateFile, '{ broken');
+  const damaged = await r.call('pipeline.state', { projectPath: r.ws });
+  check('a damaged state gives a status that says so and no state', damaged.state === undefined && damaged.status.next.kind === 'damaged' && damaged.artifacts.length === 0);
+  fs.writeFileSync(stateFile, good);
+
+  const fails = (name: string, payload: object) => r.call(name, payload).then(() => '', (e) => e.message as string);
+  check('a question of another gate cannot be answered here', (await fails('pipeline.answer', { sessionId, gate: 'G1', answers: [{ id: 'q9', answer: 'CRM' }], by: 'Newton' })).includes('no question "q9" at gate G1'));
+  check('nothing is written when any answer is wrong', (await fails('pipeline.answer', { sessionId, gate: 'G1', answers: [{ id: 'q1', answer: 'v2' }, { id: 'zz', answer: 'x' }], by: 'Newton' })).includes('no question "zz"') && store.load()!.gates[0].questions[0].status === 'open');
+
+  const partial = await r.call('pipeline.answer', { sessionId, gate: 'G1', answers: [{ id: 'q1', answer: 'v2' }, { id: 'q2', deferred: true, owner: 'Newton' }], by: 'Newton' });
+  const g1 = store.load()!.gates[0];
+  check('answers and deferrals are recorded as the person who gave them, and the progress says what is left', partial.clean === false && partial.progress.open === 1 && g1.questions[0].status === 'answered' && g1.questions[0].answerLabel === 'v2' && g1.questions[0].by === 'Newton' && g1.questions[1].status === 'deferred' && g1.questions[1].owner === 'Newton');
+  check('a deferral becomes an assumption with its owner', store.load()!.assumptions.some((a) => a.questionId === 'q2' && a.owner === 'Newton'));
+  check('a question already settled cannot be rewritten from here', (await fails('pipeline.answer', { sessionId, gate: 'G1', answers: [{ id: 'q1', answer: 'v3' }], by: 'Newton' })).includes('already answered'));
+  check('a gate with a question still open cannot be approved, and says which', (await fails('pipeline.approveGate', { sessionId, gate: 'G1' })).includes('q3'));
+
+  const done = await r.call('pipeline.answer', { sessionId, gate: 'G1', answers: [{ id: 'q3', answer: false }], by: 'Newton' });
+  check('a yes/no answer is recorded, and the gate is clean', done.clean === true && store.load()!.gates[0].questions[2].answer === 'no');
+  store.apply([{ op: 'set_stage', stage: 1, status: 'done' }]);
+  const approved = await r.call('pipeline.approveGate', { sessionId, gate: 'G1' });
+  check('the approval of the user passes the gate, and what comes next is the next gate (its question is open)', store.load()!.gates[0].status === 'passed' && approved.status.next.kind === 'answer_questions' && (approved.status.next as any).gate === 'G2');
+
+  // Not while the model is working on the same file.
+  const busy = await rig(new FakeModel([{ content: 'x', delayMs: 800 } as any], 'repeat-last'), { ws: r.ws, dirs: r.dirs });
+  const bs = (await busy.open()).sessionId;
+  await busy.call('session.run', { sessionId: bs, text: 'oi' });
+  check('while the conversation is running, answers and approvals are refused', (await busy.call('pipeline.answer', { sessionId: bs, gate: 'G2', answers: [{ id: 'q9', answer: 'CRM' }], by: 'N' }).then(() => '', (e) => e.message)).includes('running') && (await busy.call('pipeline.approveGate', { sessionId: bs, gate: 'G2' }).then(() => '', (e) => e.message)).includes('running'));
+  await busy.finished(bs, 0);
+}
+
 // ===================================================================================== broker
 
 console.log('\n=== the broker: strict validation ===');
@@ -681,6 +734,8 @@ console.log('\n=== the broker: strict validation ===');
   check('a response of an unknown shape is rejected', (await reject('interaction.respond', { id: 'i', response: { decision: 'maybe' } })).includes('response') && (await reject('interaction.respond', { id: 'i', response: { decision: 'deny', extra: 1 } })).includes('response'));
   check('a request that has no fields takes {} or nothing, but not extras', (await broker.handle('interaction.pending', undefined) as any).forwarded === 'interaction.pending' && (await reject('interaction.pending', { x: 1 })).includes('Unrecognized key'));
   check('the pipeline requests are strict too: no files, an extra field, or a bad id', (await reject('pipeline.start', { sessionId: 's-1', inputs: [] })).includes('inputs') && (await reject('pipeline.inspect', { projectPath: 'C:/x', paths: ['a'], more: 1 })).includes('Unrecognized key') && (await reject('pipeline.start', { sessionId: '../x', inputs: [{ path: 'a' }] })).includes('not a valid id'));
+  check('answers need the name of a person, a known gate and at least one answer', (await reject('pipeline.answer', { sessionId: 's', gate: 'G1', answers: [], by: 'N' })).includes('answers') && (await reject('pipeline.answer', { sessionId: 's', gate: 'G9', answers: [{ id: 'q', answer: 'x' }], by: 'N' })).includes('gate') && (await reject('pipeline.answer', { sessionId: 's', gate: 'G1', answers: [{ id: 'q', answer: 'x' }], by: '  ' })).includes('by'));
+  check('opening a project file names a folder the user opened', (await reject('projects.openFile', { projectPath: 'C:/never/opened', path: 'STATE.md' })).includes('folder dialog'));
   check('nothing rejected reached the engine', calls.length === before + 1, `${calls.length - before - 1} extra`);
 
   console.log('\n=== the broker: only folders the user opened ===');

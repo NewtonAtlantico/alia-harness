@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import type { UserAnswer, UserQuestion } from '../../../shared/ipc';
 import { t } from '../i18n/pt-BR';
 import { OTHER, answeredCount, buildAnswers, needsOwner, type Forms, type QuestionForm, type QuestionInteraction } from '../lib/interactions';
@@ -11,7 +11,6 @@ import { OTHER, answeredCount, buildAnswers, needsOwner, type Forms, type Questi
  */
 export function QuestionCard({ interaction, queued, defaultOwner, onAnswer }: { interaction: QuestionInteraction; queued: number; defaultOwner: string; onAnswer: (answers: UserAnswer[]) => void }) {
   const titleId = useId();
-  const groupId = useId();
   const [forms, setForms] = useState<Forms>({});
   const [showErrors, setShowErrors] = useState(false);
   const { questions } = interaction;
@@ -31,6 +30,46 @@ export function QuestionCard({ interaction, queued, defaultOwner, onAnswer }: { 
         {t.approval.questionsTitle}
       </span>
       <h3 id={titleId}>{t.approval.questionsTitle}</h3>
+      <QuestionFields questions={questions} forms={forms} set={set} defaultOwner={defaultOwner} missingOwner={showErrors ? missingOwner : []} />
+      <div className="actions">
+        <button type="button" className="btn primary" onClick={send} disabled={done === 0}>
+          {done < questions.length && done > 0 ? t.approval.answerCount(done, questions.length) : t.approval.answer}
+        </button>
+        <button type="button" className="btn" onClick={() => onAnswer(done === 0 ? [] : buildAnswers(questions, forms, defaultOwner))} title={t.approval.laterHint}>
+          {t.approval.later}
+        </button>
+      </div>
+      <p className="hint">{t.approval.laterHint}</p>
+      {queued > 0 && <p className="hint">{t.approval.queued(queued)}</p>}
+    </section>
+  );
+}
+
+/**
+ * The questions of a form, one fieldset each: choices with their detail and source, free text, yes/no, "other" and "adiar".
+ * Used by the chat's card and by the pipeline's gate card, which add a badge (the category) and a note (what blank means).
+ */
+export function QuestionFields({
+  questions,
+  forms,
+  set,
+  defaultOwner,
+  missingOwner,
+  badge,
+  note,
+}: {
+  questions: UserQuestion[];
+  forms: Forms;
+  set: (id: string, patch: Partial<QuestionForm>) => void;
+  defaultOwner: string;
+  /** Question ids whose deferral still needs an owner (shown as an error). */
+  missingOwner: string[];
+  badge?: (q: UserQuestion) => ReactNode;
+  note?: (q: UserQuestion) => ReactNode;
+}) {
+  const groupId = useId();
+  return (
+    <>
       {questions.map((q, n) => {
         const f = forms[q.id] ?? {};
         const name = `${groupId}-${q.id}`;
@@ -39,6 +78,7 @@ export function QuestionCard({ interaction, queued, defaultOwner, onAnswer }: { 
             <legend>
               {questions.length > 1 ? `${n + 1}. ` : ''}
               {q.prompt}
+              {badge?.(q)}
               {q.confidence && <span className={`chip small conf-${q.confidence}`}>{t.approval.confidence[q.confidence]}</span>}
             </legend>
 
@@ -81,21 +121,12 @@ export function QuestionCard({ interaction, queued, defaultOwner, onAnswer }: { 
               </div>
             )}
 
-            {q.allowDefer && <DeferRow q={q} form={f} defaultOwner={defaultOwner} onChange={(patch) => set(q.id, patch)} error={showErrors && missingOwner.includes(q.id)} />}
+            {q.allowDefer && <DeferRow q={q} form={f} defaultOwner={defaultOwner} onChange={(patch) => set(q.id, patch)} error={missingOwner.includes(q.id)} />}
+            {note?.(q)}
           </fieldset>
         );
       })}
-      <div className="actions">
-        <button type="button" className="btn primary" onClick={send} disabled={done === 0}>
-          {done < questions.length && done > 0 ? t.approval.answerCount(done, questions.length) : t.approval.answer}
-        </button>
-        <button type="button" className="btn" onClick={() => onAnswer(done === 0 ? [] : buildAnswers(questions, forms, defaultOwner))} title={t.approval.laterHint}>
-          {t.approval.later}
-        </button>
-      </div>
-      <p className="hint">{t.approval.laterHint}</p>
-      {queued > 0 && <p className="hint">{t.approval.queued(queued)}</p>}
-    </section>
+    </>
   );
 }
 

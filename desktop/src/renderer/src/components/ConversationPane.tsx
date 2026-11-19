@@ -10,7 +10,12 @@ import { stateOf, type SessionStates } from '../lib/sessionStates';
 import { applyPush, rowsFromMessages } from '../lib/timeline';
 import { Composer, type ComposerSubmit } from './Composer';
 import { ContextMeter, ModelChip } from './ConversationHeader';
+import { usePipelineView } from '../hooks/usePipelineView';
+import { gateCardFor } from '../lib/pipelineRun';
+import { GateCard } from './GateCard';
 import { InteractionCards } from './InteractionCards';
+import { PipelineHeader } from './PipelineHeader';
+import { QuestionCard } from './QuestionCard';
 import { SidePanel } from './SidePanel';
 import { Timeline } from './Timeline';
 
@@ -33,6 +38,8 @@ interface PaneProps {
   /** The panel beside the conversation (changes, files, terminal). */
   panelOpen: boolean;
   onTogglePanel: () => void;
+  /** This conversation runs a pipeline: it shows the stepper, the gate card and the pipeline tab. */
+  pipeline?: boolean;
 }
 
 /**
@@ -40,7 +47,7 @@ interface PaneProps {
  * from what is saved and then follows the engine's events live; give the pane a `key` of the conversation id so
  * switching conversations starts fresh.
  */
-export function ConversationPane({ conversation, states, loading, intro, configured, onOpenSettings, onStarted, interactions, onRespond, defaultOwner, panelOpen, onTogglePanel }: PaneProps) {
+export function ConversationPane({ conversation, states, loading, intro, configured, onOpenSettings, onStarted, interactions, onRespond, defaultOwner, panelOpen, onTogglePanel, pipeline = false }: PaneProps) {
   const { info, opened } = conversation;
   const state = stateOf(states, info.id);
   const [timeline, dispatch] = useReducer(applyPush, conversation.messages, (messages) => rowsFromMessages(messages, { running: state.running, annotations: conversation.annotations, interrupted: opened.interrupted }));
@@ -158,11 +165,42 @@ export function ConversationPane({ conversation, states, loading, intro, configu
   const finishedCalls = timeline.rows.filter((r) => r.kind === 'tool' && r.status !== 'running').length;
   const panelKey = `${finishedCalls}:${timeline.running ? 'run' : 'idle'}`;
 
+  // A pipeline conversation: its state, read again as the run goes on.
+  const { view, reload } = usePipelineView(info.workspace, pipeline, panelKey);
+  const [pipelineError, setPipelineError] = useState<string>();
+  const [resuming, setResuming] = useState(false);
+  const mine = forSession(interactions, info.id);
+  const card = pipeline && view && !running && mine.length === 0 ? gateCardFor(view) : null;
+  const resume = useCallback(async () => {
+    setResuming(true);
+    setPipelineError(undefined);
+    try {
+      await api('pipeline.resume', { sessionId: info.id });
+      onStarted();
+    } catch (err) {
+      setPipelineError(String((err as Error)?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, ''));
+    } finally {
+      setResuming(false);
+    }
+  }, [api, info.id, onStarted]);
+  const openFile = useCallback(
+    async (file: string) => {
+      setPipelineError(undefined);
+      try {
+        await api('projects.openFile', { projectPath: info.workspace, path: file });
+      } catch (err) {
+        setPipelineError(t.run.openFailed(String((err as Error)?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '')));
+      }
+    },
+    [api, info.workspace]
+  );
+
   return (
     <div className="pane">
     <div className="pane-main">
     <article className="conversation" ref={root} aria-labelledby={starting ? undefined : 'conv-title'} aria-busy={loading || running}>
       {starting && intro}
+      {pipeline && view?.status.exists && <PipelineHeader view={view} running={running} busy={resuming} error={pipelineError} onPause={stop} onResume={() => void resume()} onOpenState={() => void openFile('docs/pipeline/STATE.md')} />}
       <header className="conv-header">
         {!starting && (
           <>
@@ -191,13 +229,28 @@ export function ConversationPane({ conversation, states, loading, intro, configu
         )}
       </header>
       {timeline.rows.length === 0 && !timeline.modelBusy ? (starting ? null : <p className="hint">{t.conversation.empty}</p>) : <Timeline state={timeline} />}
-      <InteractionCards interactions={forSession(interactions, info.id)} defaultOwner={defaultOwner} onRespond={onRespond} />
+      <InteractionCards
+        interactions={mine}
+        defaultOwner={defaultOwner}
+        onRespond={onRespond}
+        renderQuestions={
+          pipeline
+            ? (interaction, answer, queued) => (
+                <>
+                  <p className="hint">{t.run.gate.model}</p>
+                  <QuestionCard key={interaction.id} interaction={interaction} queued={queued} defaultOwner={defaultOwner} onAnswer={answer} />
+                </>
+              )
+            : undefined
+        }
+      />
+      {card && <GateCard key={card.gate} card={card} sessionId={info.id} defaultOwner={defaultOwner} onChanged={reload} onResume={resume} />}
       <div className="composer-dock">
         <Composer sessionId={info.id} running={running} blockedReason={configured ? undefined : t.composer.notConfigured} onOpenSettings={onOpenSettings} onSubmit={submit} onStop={stop} />
       </div>
     </article>
     </div>
-    {panelOpen && <SidePanel sessionId={info.id} rows={timeline.rows} refreshKey={panelKey} onClose={onTogglePanel} />}
+    {panelOpen && <SidePanel sessionId={info.id} rows={timeline.rows} refreshKey={panelKey} onClose={onTogglePanel} pipeline={pipeline ? { view, onOpen: (file) => void openFile(file), error: pipelineError } : undefined} />}
     </div>
   );
 }

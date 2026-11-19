@@ -22,6 +22,8 @@ export interface SidebarProps {
   onQuery: (text: string) => void;
   onNewConversation: () => void;
   onNewPipeline: () => void;
+  /** A pipeline of the sidebar was clicked: show the conversation that runs it. */
+  onOpenPipeline: (project: string) => void;
   /** The pipeline intake is the screen being shown. */
   pipelineActive?: boolean;
   onOpenFolder: () => void;
@@ -163,7 +165,7 @@ export function Sidebar(p: SidebarProps) {
                   const chip = chipFor(brief)!;
                   return (
                     <li key={project} className="conv">
-                      <button type="button" className="conv-main" aria-label={t.sidebar.pipelineOf(projectName(project))} title={brief.summary} onClick={() => p.onSelectProject(project)}>
+                      <button type="button" className="conv-main" aria-label={t.sidebar.pipelineOf(projectName(project))} title={brief.summary} onClick={() => p.onOpenPipeline(project)}>
                         <span className="conv-title">{brief.project ?? projectName(project)}</span>
                         <span className={`chip ${chip.tone}`} data-testid="pipeline-chip">
                           {chip.label}

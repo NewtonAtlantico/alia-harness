@@ -9,6 +9,7 @@ import { Broker, ProjectRegistry } from '../src/main/broker';
 import { Logger, redact } from '../src/main/logger';
 import { sanitizePaths } from '../src/main/attachments';
 import { commandForInput } from '../src/main/shortcuts';
+import { decideOpen } from '../src/main/openFile';
 import { CONTENT_SECURITY_POLICY, isAllowedRequestUrl, isTrustedUrl, parseExternalUrl, resolveAppPath } from '../src/main/securityRules';
 
 let failures = 0;
@@ -139,6 +140,41 @@ console.log('\n=== main-handled requests never reach the engine ===');
   check('one main should answer but cannot is an error, never forwarded to the engine', noHandler.includes('not available') && calls.length === 0, noHandler);
   check('the link request is validated first: extra fields and an empty address are refused', await broker.handle('app.openExternal', { url: 'https://a.b', extra: 1 }).then(() => '', (e) => e.message).then((m) => m.includes('Unrecognized key')) && await broker.handle('app.openExternal', { url: '' }).then(() => '', (e) => e.message).then((m) => m.includes('url')));
   check('window requests take no fields', await broker.handle('window.minimize', { x: 1 }).then(() => '', (e) => e.message).then((m) => m.includes('Unrecognized key')));
+}
+
+console.log('\n=== opening a file of the project with the system ===');
+{
+  const project = path.join(tmp, 'open-project');
+  const outside = path.join(tmp, 'open-outside');
+  fs.mkdirSync(path.join(project, 'docs', 'pipeline'), { recursive: true });
+  fs.mkdirSync(path.join(project, 'docs', 'tasks'), { recursive: true });
+  fs.mkdirSync(outside);
+  const put = (rel: string, body = 'x') => fs.writeFileSync(path.join(project, rel), body);
+  put('docs/pipeline/STATE.md');
+  put('report.pdf');
+  put('run.bat');
+  put('tool.exe');
+  put('page.html');
+  put('link.lnk');
+  put('noext');
+  fs.writeFileSync(path.join(outside, 'secret.txt'), 'secret');
+  const d = (rel: string) => decideOpen(project, rel);
+  const how = (rel: string) => (d(rel) as any).how;
+
+  check('a document is opened', how('docs/pipeline/STATE.md') === 'open' && how('report.pdf') === 'open');
+  check('a folder is opened (shown)', how('docs/tasks') === 'open' && how('docs/tasks/') === 'open');
+  check('a script, an executable, a shortcut, an HTML page or a file without extension is only shown in its folder, never run', ['run.bat', 'tool.exe', 'link.lnk', 'page.html', 'noext'].every((f) => how(f) === 'reveal'));
+  check('the extension is judged case-insensitively', (() => { put('LOUD.EXE'); put('Notes.MD'); return how('LOUD.EXE') === 'reveal' && how('Notes.MD') === 'open'; })());
+  check('"..", an absolute path and a drive-qualified path leave the project and are refused', ['../open-outside/secret.txt', path.join(outside, 'secret.txt'), '..\open-outside\secret.txt', 'docs/../../open-outside/secret.txt', '/etc/passwd', 'C:\Windows\notepad.exe'].every((p) => { const r = d(p); return !r.ok && (r.reason === 'outside' || r.reason === 'missing'); }));
+  check('what does not exist is "missing", and the project itself may be shown', (d('nope.md') as any).reason === 'missing' && d('.').ok === true && (decideOpen(path.join(tmp, 'no-such-project'), 'a') as any).reason === 'missing');
+  let linked = false;
+  try {
+    fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(project, 'docs', 'sneaky.md'), 'file');
+    linked = true;
+  } catch {
+    /* symlinks may need privileges on Windows */
+  }
+  if (linked) check('a link that points out of the project is refused, whatever its name says', (d('docs/sneaky.md') as any).reason === 'outside');
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

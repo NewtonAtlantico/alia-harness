@@ -11,6 +11,7 @@ import { useInteractions } from './hooks/useInteractions';
 import { useWorkspace } from './hooks/useWorkspace';
 import { t } from './i18n/pt-BR';
 import type { IntakeRow } from './lib/intake';
+import { isPipelineSession, markPipelineSession, pipelineSessions } from './lib/pipelineSessions';
 
 type Screen = 'chat' | 'settings' | 'pipeline';
 
@@ -58,6 +59,7 @@ export function App() {
   const runInNewConversation = async (project: string, call: (sessionId: string) => Promise<IntakeProblem[] | string | undefined>): Promise<IntakeProblem[] | string | undefined> => {
     const sessionId = await ws.actions.freshDraft(project);
     if (!sessionId) throw new Error(t.pipeline.startFailed('a conversa não pôde ser aberta'));
+    markPipelineSession(sessionId); // this conversation shows the stepper and the gate card
     setScreen('chat');
     await nextFrames();
     try {
@@ -77,6 +79,19 @@ export function App() {
       setScreen('pipeline');
       setIntakeNotice({ problems: [], error: String((err as Error)?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '') });
       throw err;
+    }
+  };
+  /** A pipeline in the sidebar opens the conversation that runs it (the newest one of that project), or just the project. */
+  const openPipeline = async (project: string) => {
+    setScreen('chat');
+    await ws.actions.selectProject(project);
+    try {
+      const list = await window.alia.request('conversations.list', { projectPath: project });
+      const ids = pipelineSessions();
+      const hit = list.find((c) => ids.includes(c.id));
+      if (hit) await ws.actions.openConversation(hit);
+    } catch {
+      /* the project is open at least */
     }
   };
   const startPipeline = (project: string, inputs: PipelineInputRef[]) =>
@@ -120,6 +135,7 @@ export function App() {
             setScreen('chat');
             ws.actions.newConversation();
           }}
+          onOpenPipeline={openPipeline}
           onNewPipeline={() => {
             setIntakeNotice({ problems: [] });
             setScreen('pipeline');
@@ -178,6 +194,7 @@ export function App() {
               defaultOwner={settings?.displayName ?? ''}
               panelOpen={panelOpen}
               onTogglePanel={() => setPanelOpen((open) => !open)}
+              pipeline={isPipelineSession(ws.open.info.id)}
               intro={<Home name={settings?.displayName ?? ''} project={ws.currentProject} now={now} configured={settings?.configured ?? true} onSetup={() => setScreen('settings')} />}
             />
           ) : (

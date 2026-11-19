@@ -89,6 +89,7 @@ export class Broker {
 const MAIN_ONLY = {
   'attachments.pick': true,
   'projects.pick': true,
+  'projects.openFile': true,
   'projects.recent': true,
   'projects.inspect': true,
   'projects.setTrust': true,

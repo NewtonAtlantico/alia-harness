@@ -19,6 +19,8 @@ import {
   createSession,
   newSessionId,
   getPipelineStatus,
+  gateProgress,
+  PipelineStateStore,
   inspectInput,
   extractMentionPaths,
   listDirectory,
@@ -40,6 +42,7 @@ import type {
   OpenedSession,
   PipelineBrief,
   PipelineResumeResult,
+  PipelineView,
   PipelineStartResult,
   PingResult,
   RunStarted,
@@ -440,6 +443,52 @@ export class EngineRuntime {
       const count = started.inputs.length;
       this.launch(e, `Iniciar o pipeline com ${count} ${count === 1 ? 'entrada' : 'entradas'}: ${started.inputs.map((i) => i.name).join(', ')}`, started.prompt);
       return { started: true, resumed: started.resumed, inputs: started.inputs.map((i) => ({ name: i.name, kind: i.kind, handledBy: i.handledBy })) };
+    },
+
+    'pipeline.state': ({ projectPath }): PipelineView => {
+      const workspace = path.resolve(projectPath);
+      const status = getPipelineStatus(workspace);
+      let state;
+      try {
+        state = new PipelineStateStore(workspace).load();
+      } catch {
+        /* a damaged state: the status already says so */
+      }
+      const artifacts = (state?.stages ?? []).map((st) => {
+        const stat = fs.statSync(path.join(workspace, st.artifact), { throwIfNoEntry: false });
+        return { stage: st.stage, path: st.artifact, exists: !!stat, isDir: !!stat?.isDirectory() };
+      });
+      return { status, state, artifacts, markdownExists: fs.existsSync(path.join(workspace, 'docs', 'pipeline', 'STATE.md')) };
+    },
+
+    'pipeline.answer': ({ sessionId, gate, answers, by }) => {
+      const e = this.entry(sessionId);
+      if (e.busy) throw new Error('This conversation is running. Pause it before answering here.');
+      const store = new PipelineStateStore(e.workspace);
+      const ops = answers.map((a) => {
+        if (a.deferred) return { op: 'defer_question', id: a.id, owner: a.owner, by };
+        return { op: 'answer_question', id: a.id, answer: a.answer, by };
+      });
+      // Only the open questions of this gate: an answer cannot rewrite a question that was settled before, or one of another gate.
+      const current = store.load();
+      const mine = new Map((current?.gates.find((g) => g.id === gate)?.questions ?? []).map((q) => [q.id, q]));
+      for (const a of answers) {
+        const q = mine.get(a.id);
+        if (!q) throw new Error(`There is no question "${a.id}" at gate ${gate}.`);
+        if (q.status !== 'open') throw new Error(`Question "${a.id}" is already ${q.status === 'answered' ? 'answered' : 'deferred'}.`);
+      }
+      const result = store.apply(ops);
+      if (!result.ok) throw new Error(result.error);
+      const progress = gateProgress(result.state, gate);
+      return { progress, clean: progress.open === 0 };
+    },
+
+    'pipeline.approveGate': ({ sessionId, gate }) => {
+      const e = this.entry(sessionId);
+      if (e.busy) throw new Error('This conversation is running. Pause it before approving here.');
+      const result = new PipelineStateStore(e.workspace).apply([{ op: 'set_gate', gate, status: 'passed' }]);
+      if (!result.ok) throw new Error(result.error);
+      return { status: getPipelineStatus(e.workspace) };
     },
 
     'pipeline.resume': async ({ sessionId }): Promise<PipelineResumeResult> => {

@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { BrowserWindow, Menu, app, dialog, ipcMain, safeStorage } from 'electron';
+import { BrowserWindow, Menu, app, dialog, ipcMain, safeStorage, shell } from 'electron';
 import { CHANNELS, type AppCommand, type PushMessage } from '../shared/ipc';
 import { registerAppSchemePrivileges, serveApp } from './appProtocol';
 import { sanitizePaths } from './attachments';
@@ -8,6 +8,7 @@ import { Broker, ProjectRegistry } from './broker';
 import { EngineHost } from './engineHost';
 import { confirmAndOpenExternal, installSessionGuards, installWebContentsGuards, isTrustedSender } from './guards';
 import { Logger } from './logger';
+import { decideOpen } from './openFile';
 import { SecretStore } from './secrets';
 import { SettingsService } from './settingsService';
 import { SettingsStore, defaultSettings } from './settings';
@@ -52,6 +53,7 @@ function start(): void {
   const bundledSkills = app.isPackaged ? path.join(process.resourcesPath, 'skills') : path.join(repoRoot, 'skills');
   const projects = new ProjectRegistry();
   const openedLinks: string[] = [];
+  const openedFiles: Array<{ abs: string; how: string }> = [];
   const guardOptions = { devUrl, log, onExternalLink: testMode ? (url: string) => void openedLinks.push(url) : undefined };
 
   // Settings and the encrypted API key live in the user's data folder, never in the project and never in a plain file.
@@ -160,6 +162,16 @@ function start(): void {
         return { paths };
       },
       'projects.recent': () => store.recentProjects(),
+      'projects.openFile': async ({ projectPath, path: rel }) => {
+        const decision = decideOpen(projectPath, rel);
+        if (!decision.ok) throw new Error(decision.reason === 'outside' ? 'That path is outside the project folder.' : 'That file does not exist.');
+        if (testMode) openedFiles.push({ abs: decision.abs, how: decision.how });
+        else if (decision.how === 'open') {
+          const failure = await shell.openPath(decision.abs);
+          if (failure) throw new Error(failure);
+        } else shell.showItemInFolder(decision.abs);
+        return { how: decision.how };
+      },
       'projects.inspect': ({ projectPath }) => inspectProject(trust, projectPath),
       'projects.setTrust': ({ projectPath, trusted }) => {
         trust.set(projectPath, trusted);
@@ -290,7 +302,7 @@ function start(): void {
       if (!isTrustedSender(event, devUrl)) throw new Error('Request refused: it did not come from the app.');
       return engine.request('ping', {});
     });
-    if (testMode) (globalThis as { __aliaTest?: unknown }).__aliaTest = { engine, projects, openedLinks, log, handleDropped };
+    if (testMode) (globalThis as { __aliaTest?: unknown }).__aliaTest = { engine, projects, openedLinks, openedFiles, log, handleDropped };
 
     const win = createWindow();
     if (smokeDir) void runSmoke(win, smokeDir);

@@ -29,10 +29,17 @@ import type {
   IntakeItem,
   IntakeProblem,
   PipelineStatus,
+  PipelineState,
+  GateId,
+  GateProgress,
+  GateQuestion,
+  PipelineStage,
+  Assumption,
+  PipelineInput,
 } from 'alia-harness/core';
 
 export type { PermissionMode };
-export type { ToolAnnotation, DirectoryEntry, IntakeItem, IntakeProblem, PipelineStatus };
+export type { ToolAnnotation, DirectoryEntry, IntakeItem, IntakeProblem, PipelineStatus, PipelineState, GateId, GateProgress, GateQuestion, PipelineStage, Assumption, PipelineInput };
 export type { AgentEvent, AliaModelConfig, ChatMessage, CommandInfo, CompactResult, ContextUsage, PermissionDecision, PermissionRule, RevertResult, SearchHit, SessionInfo, SwitchModelResult, UserAnswer, UserQuestion, WorkspaceEntry };
 
 // ------------------------------------------------------------------------------------ results
@@ -108,6 +115,15 @@ export interface PipelineInputRef {
 export type PipelineStartResult =
   | { started: true; resumed: boolean; inputs: Array<{ name: string; kind: string; handledBy?: string }> }
   | { started: false; problems: IntakeProblem[] };
+
+/** A pipeline as the run view shows it: where it stands, its state (absent when there is none or it is damaged) and the files its stages produce. */
+export interface PipelineView {
+  status: PipelineStatus;
+  state?: PipelineState;
+  /** What each stage's artifact is, and whether it exists yet (a folder for stage 4). */
+  artifacts: Array<{ stage: number; path: string; exists: boolean; isDir: boolean }>;
+  markdownExists: boolean;
+}
 
 export type PipelineResumeResult = { started: true } | { started: false; reason: 'no_pipeline' };
 
@@ -308,8 +324,16 @@ export interface RendererRequests {
   'pipeline.inspect': { request: { projectPath: string; paths: string[] }; result: { items: IntakeItem[] } };
   /** Writes the input inventory to state.json, then starts the pipeline in this conversation. Refuses (and writes nothing) if a file cannot be used. */
   'pipeline.start': { request: { sessionId: string; inputs: PipelineInputRef[] }; result: PipelineStartResult };
+  /** The pipeline's state, status and artifacts for the run view. Reads only. */
+  'pipeline.state': { request: { projectPath: string }; result: PipelineView };
+  /** Records the user's answers (or deferrals) to a gate's open questions in state.json, as the person who gave them. Not while the conversation is running. */
+  'pipeline.answer': { request: { sessionId: string; gate: GateId; answers: UserAnswer[]; by: string }; result: { progress: GateProgress; clean: boolean } };
+  /** The user's approval of a gate (a human decision, never the model's): passes it if nothing is open. */
+  'pipeline.approveGate': { request: { sessionId: string; gate: GateId }; result: { status: PipelineStatus } };
   /** Resumes the pipeline from where `state.json` says it stopped. */
   'pipeline.resume': { request: { sessionId: string }; result: PipelineResumeResult };
+  /** Opens a file or folder of the project with the system. Documents are opened, a folder is shown, anything else is only shown in its folder. */
+  'projects.openFile': { request: { projectPath: string; path: string }; result: { how: 'open' | 'reveal' } };
   /** Lets the user choose files to attach (native dialog). Returns their paths, which the engine may then read. */
   'attachments.pick': { request: Record<string, never>; result: { paths: string[] } };
   'settings.get': { request: Record<string, never>; result: SettingsView };
@@ -332,7 +356,7 @@ export interface RendererRequests {
 }
 
 /** Requests answered by main itself; they never reach the engine. */
-export type MainRequestName = 'attachments.pick' | 'projects.pick' | 'projects.recent' | 'projects.inspect' | 'projects.setTrust' | 'settings.get' | 'settings.update' | 'settings.setApiKey' | 'settings.clearApiKey' | 'settings.testConnection' | 'settings.legacyCandidate' | 'settings.importLegacy' | 'window.minimize' | 'window.toggleMaximize' | 'window.close' | 'window.state' | 'app.info' | 'app.openExternal';
+export type MainRequestName = 'attachments.pick' | 'projects.openFile' | 'projects.pick' | 'projects.recent' | 'projects.inspect' | 'projects.setTrust' | 'settings.get' | 'settings.update' | 'settings.setApiKey' | 'settings.clearApiKey' | 'settings.testConnection' | 'settings.legacyCandidate' | 'settings.importLegacy' | 'window.minimize' | 'window.toggleMaximize' | 'window.close' | 'window.state' | 'app.info' | 'app.openExternal';
 
 export interface AppInfo {
   name: string;

@@ -96,6 +96,9 @@ export const rendererSchemas = {
   'pipeline.inspect': strict({ projectPath, paths: z.array(relPath).min(1).max(100) }),
   'pipeline.start': strict({ sessionId, inputs: z.array(strict({ path: relPath, transcriptPath: relPath.optional() })).min(1).max(100) }),
   'pipeline.resume': strict({ sessionId }),
+  'pipeline.state': strict({ projectPath }),
+  'pipeline.answer': strict({ sessionId, gate: z.enum(['G1', 'G2', 'G3']), answers: z.array(userAnswer).min(1).max(50), by: z.string().trim().min(1).max(200) }),
+  'pipeline.approveGate': strict({ sessionId, gate: z.enum(['G1', 'G2', 'G3']) }),
   'settings.get': none,
   'settings.update': strict({
     displayName: z.string().trim().max(100).optional(),
@@ -114,6 +117,7 @@ export const rendererSchemas = {
   'window.close': none,
   'window.state': none,
   'app.info': none,
+  'projects.openFile': strict({ projectPath, path: relPath }),
   'app.openExternal': strict({ url: z.string().min(1).max(2048) }),
 } satisfies { [K in RendererRequestName]: z.ZodType<RendererRequests[K]['request']> };
 
