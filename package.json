@@ -64,7 +64,10 @@
     "desktop:test:run-logic": "npm --prefix desktop run test:run-logic",
     "desktop:test:run-app": "npm --prefix desktop run test:run-app",
     "desktop:test:gates-app": "npm --prefix desktop run test:gates-app",
-    "desktop:test:report-app": "npm --prefix desktop run test:report-app"
+    "desktop:test:report-app": "npm --prefix desktop run test:report-app",
+    "desktop:test:journey-app": "npm --prefix desktop run test:journey-app",
+    "desktop:test:all": "npm --prefix desktop run test:all",
+    "desktop:screenshots": "npm --prefix desktop run screenshots"
   },
   "keywords": [
     "ai",
