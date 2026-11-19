@@ -377,7 +377,7 @@ A18                           Last, across everything.
   the chip, project names (both path separators).
 - **Found on the way:** the broker applied the "folder was opened by the user" rule only to requests it forwarded to the engine, not to the ones main answers itself; with the new `projects.inspect`/`projects.setTrust`
   that would have let the page inspect or grant trust for any path. The rule now runs first, for everything (mutation-checked).
-- **Tests:** `desktop:test:projects` (trust store, project skills, and the broker's rules; 18 checks), `desktop:test:ui-logic` (pure logic; 29 checks), engine tests for project skills, active sessions and the pipeline brief,
+- **Tests:** `desktop:test:projects` (trust store, project skills, and the broker's rules; 22 checks), `desktop:test:ui-logic` (pure logic; 27 checks), engine tests for project skills, active sessions and the pipeline brief,
   and `desktop:test:sidebar-app`, the real app driven like a person: the greeting, opening folders, the list, search, opening, rename, delete, keyboard, the trust question and its three outcomes, running and waiting marks across
   projects, the pipeline chip, Ctrl N, and a restart.
 - **Not done in A5:** the open conversation is a plain reading view (what was said and answered; the timeline is A6, the composer A7, the approval card A8); there is no keyboard shortcut for rename or delete (the buttons are
