@@ -87,6 +87,7 @@ export class Broker {
 
 /** Requests that are never forwarded to the engine. The type makes this list complete: a new main request that is missing here does not compile. */
 const MAIN_ONLY = {
+  'attachments.pick': true,
   'projects.pick': true,
   'projects.recent': true,
   'projects.inspect': true,

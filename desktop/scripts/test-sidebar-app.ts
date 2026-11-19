@@ -225,6 +225,8 @@ try {
   check('when it finishes the spinner goes away', (await page.getByRole('img', { name: 'Em execução' }).count()) === 0);
 
   await page.getByRole('list', { name: 'Projetos' }).getByRole('button', { name: /portal-cliente/ }).click();
+  await page.getByRole('combobox', { name: 'Mensagem' }).waitFor(); // the new project's start screen (with its message box) has settled
+  await sleep(300);
   const mainBefore = await page.locator('main.content').innerText();
   await page.evaluate(() => { (window as any).__focusBefore = document.activeElement; }); // the element itself, not its markup (a mark may appear inside it)
   const needs = await ok(page, 'session.open', { projectPath: projB });
@@ -260,7 +262,7 @@ try {
   await page.locator('.conversation').waitFor();
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.sendInputEvent({ type: 'keyDown', keyCode: 'N', modifiers: ['control'] }));
   await page.locator('.home').waitFor({ timeout: 5000 });
-  check('Ctrl N leaves the open conversation for a new one (the start screen)', (await page.locator('.conversation').count()) === 0 && (await page.locator('.home').count()) === 1);
+  check('Ctrl N leaves the open conversation for a new one (the start screen, no timeline)', (await page.locator('.timeline').count()) === 0 && (await page.locator('.home').count()) === 1);
 
   console.log('\n=== restarting ===');
   await app.close();

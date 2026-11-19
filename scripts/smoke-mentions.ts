@@ -1,5 +1,6 @@
+import path from 'node:path';
 import { FileIndex } from '../src/core/context/fileIndex.js';
-import { resolveFileMentions, hasFileMentions } from '../src/core/context/fileMentions.js';
+import { resolveFileMentions, hasFileMentions, extractMentionPaths } from '../src/core/context/fileMentions.js';
 import { DynamicPrompt } from '../src/cli/ui/prompt.js';
 import pc from 'picocolors';
 
@@ -81,6 +82,18 @@ check('no mentions -> prompt unchanged', res6.prompt === 'no mentions here' && r
 
 check('hasFileMentions true', hasFileMentions('see @src/index.ts') === true);
 check('hasFileMentions false for email', hasFileMentions('a@b.com') === false);
+
+console.log('\n=== extractMentionPaths ===');
+{
+  const base = path.resolve('/work/project');
+  check('relative mentions resolve against the folder, in order', extractMentionPaths('see @src/a.ts and @b.md', base).join('|') === [path.resolve(base, 'src/a.ts'), path.resolve(base, 'b.md')].join('|'));
+  check('quoted mentions may hold spaces', extractMentionPaths('read @"Proposta Técnica 2026.pdf" now', base)[0] === path.resolve(base, 'Proposta Técnica 2026.pdf'));
+  check('trailing punctuation is stripped, ./ is dropped', extractMentionPaths('open @./x.ts, then @y.ts.', base).join('|') === [path.resolve(base, 'x.ts'), path.resolve(base, 'y.ts')].join('|'));
+  check('an absolute path stays absolute (and ".." is normalized, so it cannot hide)', extractMentionPaths('@' + path.resolve('/etc/hosts') + ' @../outside.txt', base).join('|') === [path.resolve('/etc/hosts'), path.resolve(base, '../outside.txt')].join('|'));
+  check('an email is not a mention', extractMentionPaths('write to ana@example.com', base).length === 0);
+  check('no mentions, no paths', extractMentionPaths('plain text', base).length === 0 && extractMentionPaths('', base).length === 0);
+  check('repeated calls give the same answer (the shared regex is reset)', extractMentionPaths('@a', base).length === 1 && extractMentionPaths('@a', base).length === 1);
+}
 
 console.log('\n=== preview box geometry ===');
 const dp = new DynamicPrompt(undefined as any, idx);

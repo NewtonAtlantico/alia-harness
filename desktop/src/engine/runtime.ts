@@ -19,6 +19,7 @@ import {
   createSession,
   newSessionId,
   getPipelineStatus,
+  extractMentionPaths,
   readDocument,
 } from 'alia-harness/core';
 import type {
@@ -76,6 +77,8 @@ export class EngineRuntime {
   private store = new SessionStore();
   private permissionsDir?: string;
   private permissionMode: PermissionMode = 'ask-commands';
+  /** Files outside any project that the user chose (dropped or picked): the only outside paths a mention may read. */
+  private allowedOutside: string[] = [];
   private readonly sessions = new Map<string, Entry>();
   private readonly pending = new Map<string, PendingInteraction>();
   private readonly cap: number;
@@ -173,6 +176,14 @@ export class EngineRuntime {
 
     selfTest: ({ dir }) => this.selfTest(dir),
 
+    'attachments.allow': ({ paths }) => {
+      for (const p of paths) {
+        const abs = path.resolve(p);
+        if (!this.allowedOutside.some((x) => sameFile(x, abs))) this.allowedOutside.push(abs);
+      }
+      return { ok: true };
+    },
+
     'engine.configure': ({ config, skillRoots, dataDirs, permissionMode }) => {
       this.config = config;
       this.permissionMode = permissionMode ?? 'ask-commands';
@@ -240,6 +251,8 @@ export class EngineRuntime {
     'session.run': async ({ sessionId, text }): Promise<RunStarted> => {
       const e = this.entry(sessionId);
       if (e.busy) throw new Error('This conversation is already running. Stop it first, or wait for it to finish.');
+
+      this.checkMentions(e.workspace, text);
 
       let kind: RunStarted['kind'] = 'prompt';
       let prompt: string;
@@ -384,6 +397,18 @@ export class EngineRuntime {
     'interaction.pending': () => [...this.pending.values()].map((p) => p.interaction),
   };
 
+  /**
+   * A mention may read a file inside the project, or one the user chose with the file dialog or by dropping it. Anything
+   * else is refused before it is read: the page could otherwise ask for any file on the computer by typing its path.
+   */
+  private checkMentions(workspace: string, text: string): void {
+    for (const abs of extractMentionPaths(text, workspace)) {
+      if (isInside(workspace, abs)) continue;
+      if (this.allowedOutside.some((allowed) => sameFile(allowed, abs) || isInside(allowed, abs))) continue;
+      throw new Error(`"${abs}" is outside the project folder. Attach it with the paperclip button or by dragging it into the window.`);
+    }
+  }
+
   /** The project's allowlist, read straight from its file (an open conversation reads the same file). */
   private permissionsFor(projectPath: string): PermissionStore {
     return new PermissionStore(path.resolve(projectPath), { dir: this.permissionsDir });
@@ -478,4 +503,12 @@ export function pipelineBrief(workspace: string): PipelineBrief {
     default:
       return { ...base, state: 'not_started' };
   }
+}
+
+const fsKey = (p: string) => (process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p));
+const sameFile = (a: string, b: string) => fsKey(a) === fsKey(b);
+/** True when `child` is `parent` itself or inside it. */
+function isInside(parent: string, child: string): boolean {
+  const rel = path.relative(fsKey(parent), fsKey(child));
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }

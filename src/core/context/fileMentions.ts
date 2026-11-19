@@ -246,6 +246,21 @@ export async function resolveFileMentionsAsync(input: string, cwd: string): Prom
   return resolveFileMentions(input, cwd, documents);
 }
 
+/**
+ * The absolute path each `@mention` in the text refers to (relative ones resolved against `cwd`), in order. The same
+ * rules as the resolver, so a host can check what a prompt is about to read before it reads it.
+ */
+export function extractMentionPaths(input: string, cwd: string): string[] {
+  MENTION_REGEX.lastIndex = 0;
+  const out: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = MENTION_REGEX.exec(input)) !== null) {
+    const cleaned = mentionPath(match);
+    if (cleaned) out.push(path.isAbsolute(cleaned) ? path.normalize(cleaned) : path.resolve(cwd, cleaned));
+  }
+  return out;
+}
+
 /** Strips surrounding quotes/brackets and trailing punctuation from a mention. */
 function cleanMention(raw: string): string {
   let m = raw.replace(/^[`'"(<]+/, '').replace(/[`'")>,.;:!?]+$/, '');

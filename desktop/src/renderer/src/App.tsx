@@ -80,9 +80,18 @@ export function App() {
             </p>
           )}
           {screen === 'settings' ? (
-            <SettingsScreen onClose={() => setScreen('chat')} onSaved={setSettings} onProjectsChanged={ws.actions.refreshProjects} />
+            <SettingsScreen onClose={() => setScreen('chat')} onSaved={(s) => { setSettings(s); ws.actions.ensureDraft(); }} onProjectsChanged={ws.actions.refreshProjects} />
           ) : ws.open ? (
-            <ConversationPane key={ws.open.info.id} conversation={ws.open} states={ws.states} loading={ws.opening} />
+            <ConversationPane
+              key={ws.open.info.id}
+              conversation={ws.open}
+              states={ws.states}
+              loading={ws.opening}
+              configured={settings?.configured ?? true}
+              onOpenSettings={() => setScreen('settings')}
+              onStarted={ws.actions.markStarted}
+              intro={<Home name={settings?.displayName ?? ''} project={ws.currentProject} now={now} configured={settings?.configured ?? true} onSetup={() => setScreen('settings')} />}
+            />
           ) : (
             <Home name={settings?.displayName ?? ''} project={ws.currentProject} now={now} configured={settings?.configured ?? true} onSetup={() => setScreen('settings')} />
           )}

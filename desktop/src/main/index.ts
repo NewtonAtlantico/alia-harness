@@ -3,6 +3,7 @@ import path from 'node:path';
 import { BrowserWindow, Menu, app, dialog, ipcMain, safeStorage } from 'electron';
 import { CHANNELS, type AppCommand, type PushMessage } from '../shared/ipc';
 import { registerAppSchemePrivileges, serveApp } from './appProtocol';
+import { sanitizePaths } from './attachments';
 import { Broker, ProjectRegistry } from './broker';
 import { EngineHost } from './engineHost';
 import { confirmAndOpenExternal, installSessionGuards, installWebContentsGuards, isTrustedSender } from './guards';
@@ -107,6 +108,22 @@ function start(): void {
   // Folders the user opened before stay openable after a restart.
   for (const folder of store.recentProjects()) projects.allow(folder);
 
+  const pickAttachments = async (parent?: BrowserWindow): Promise<string[]> => {
+    if (testMode && process.env.ALIA_TEST_PICK_FILES) return process.env.ALIA_TEST_PICK_FILES.split(path.delimiter).filter(Boolean);
+    const options = { title: mainStrings.dialogs.pickAttachments, properties: ['openFile' as const, 'multiSelections' as const] };
+    const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
+    return result.canceled ? [] : result.filePaths;
+  };
+
+  /** Files dropped on the window (reported by the preload for a genuine drop): the engine may read them, and the page is told. */
+  const handleDropped = async (sender: Electron.WebContents, raw: unknown): Promise<string[]> => {
+    const paths = sanitizePaths(raw);
+    if (paths.length === 0) return [];
+    await engine.request('attachments.allow', { paths });
+    if (!sender.isDestroyed()) sender.send(CHANNELS.push, { kind: 'files_dropped', paths } satisfies PushMessage);
+    return paths;
+  };
+
   const windowOf = (context: unknown): BrowserWindow | undefined => {
     const sender = (context as { sender?: Electron.WebContents } | undefined)?.sender;
     return sender ? (BrowserWindow.fromWebContents(sender) ?? undefined) : undefined;
@@ -136,6 +153,12 @@ function start(): void {
       },
       'window.close': (_req, ctx) => (windowOf(ctx)?.close(), { ok: true as const }),
       'window.state': (_req, ctx) => ({ maximized: windowOf(ctx)?.isMaximized() ?? false }),
+      'attachments.pick': async (_req, ctx) => {
+        const picked = await pickAttachments(windowOf(ctx));
+        const paths = sanitizePaths(picked);
+        if (paths.length > 0) await engine.request('attachments.allow', { paths });
+        return { paths };
+      },
       'projects.recent': () => store.recentProjects(),
       'projects.inspect': ({ projectPath }) => inspectProject(trust, projectPath),
       'projects.setTrust': ({ projectPath, trusted }) => {
@@ -259,11 +282,15 @@ function start(): void {
       }
       return broker.handle(name, payload, event);
     });
+    ipcMain.on(CHANNELS.dropped, (event, paths: unknown) => {
+      if (!isTrustedSender(event, devUrl)) return log.warn('ignored a drop report from an untrusted sender');
+      void handleDropped(event.sender, paths).catch((err) => log.warn(`could not register dropped files: ${err?.message ?? err}`));
+    });
     ipcMain.handle(CHANNELS.ping, (event) => {
       if (!isTrustedSender(event, devUrl)) throw new Error('Request refused: it did not come from the app.');
       return engine.request('ping', {});
     });
-    if (testMode) (globalThis as { __aliaTest?: unknown }).__aliaTest = { engine, projects, openedLinks, log };
+    if (testMode) (globalThis as { __aliaTest?: unknown }).__aliaTest = { engine, projects, openedLinks, log, handleDropped };
 
     const win = createWindow();
     if (smokeDir) void runSmoke(win, smokeDir);

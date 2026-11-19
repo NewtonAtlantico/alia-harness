@@ -263,6 +263,8 @@ export interface RendererRequests {
   /** Conversations currently open in the engine, with whether each is running or waiting for an answer. */
   'sessions.active': { request: Record<string, never>; result: ActiveSession[] };
   'pipeline.brief': { request: { projectPath: string }; result: PipelineBrief };
+  /** Lets the user choose files to attach (native dialog). Returns their paths, which the engine may then read. */
+  'attachments.pick': { request: Record<string, never>; result: { paths: string[] } };
   'settings.get': { request: Record<string, never>; result: SettingsView };
   'settings.update': { request: SettingsUpdate; result: SettingsView };
   /** Stores the API key, encrypted with the OS. Write-only: nothing ever returns it. */
@@ -283,7 +285,7 @@ export interface RendererRequests {
 }
 
 /** Requests answered by main itself; they never reach the engine. */
-export type MainRequestName = 'projects.pick' | 'projects.recent' | 'projects.inspect' | 'projects.setTrust' | 'settings.get' | 'settings.update' | 'settings.setApiKey' | 'settings.clearApiKey' | 'settings.testConnection' | 'settings.legacyCandidate' | 'settings.importLegacy' | 'window.minimize' | 'window.toggleMaximize' | 'window.close' | 'window.state' | 'app.info' | 'app.openExternal';
+export type MainRequestName = 'attachments.pick' | 'projects.pick' | 'projects.recent' | 'projects.inspect' | 'projects.setTrust' | 'settings.get' | 'settings.update' | 'settings.setApiKey' | 'settings.clearApiKey' | 'settings.testConnection' | 'settings.legacyCandidate' | 'settings.importLegacy' | 'window.minimize' | 'window.toggleMaximize' | 'window.close' | 'window.state' | 'app.info' | 'app.openExternal';
 
 export interface AppInfo {
   name: string;
@@ -308,6 +310,8 @@ export interface InternalRequests {
     request: { config: AliaConfig; skillRoots: Array<{ label: string; dir: string }>; permissionMode?: PermissionMode; dataDirs?: { sessions?: string; permissions?: string } };
     result: { ok: true; models: number };
   };
+  /** Tells the engine which files outside a project the user chose (dropped or picked), so `@` mentions of them may be read. */
+  'attachments.allow': { request: { paths: string[] }; result: { ok: true } };
   /** Lists the models at an endpoint, to test an address and key. Runs in the engine (it has the HTTP client). */
   'connection.test': { request: { url: string; apiKey: string }; result: ConnectionTestResult };
 }
@@ -347,6 +351,8 @@ export type PushMessage =
   | { kind: 'interaction_closed'; id: string; sessionId: string }
   /** The engine process died and was started again: its sessions are gone, so reopen them with `resumeId`. */
   | { kind: 'engine_status'; status: 'restarted' | 'down' }
+  /** Files the user dropped on the window. Only a genuine drop produces this (the preload checks it). */
+  | { kind: 'files_dropped'; paths: string[] }
   | { kind: 'window_state'; maximized: boolean }
   | { kind: 'command'; command: AppCommand };
 
@@ -366,6 +372,7 @@ export interface AliaApi {
 /** IPC channel names used between renderer and main. */
 export const CHANNELS = {
   request: 'alia:request',
+  dropped: 'alia:dropped',
   push: 'alia:push',
   ping: 'alia:ping',
 } as const;

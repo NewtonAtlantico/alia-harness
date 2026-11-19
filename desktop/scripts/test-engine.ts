@@ -508,6 +508,43 @@ console.log('\n=== the pipeline in the sidebar ===');
   check('a damaged state is reported, never thrown', damaged.exists === true && damaged.state === 'damaged');
 }
 
+console.log('\n=== @ mentions can only read the project, or what the user attached ===');
+{
+  const r = await rig(new FakeModel([{ content: 'ok1' }, { content: 'ok2' }, { content: 'ok3' }, { content: 'ok4' }, { content: 'ok5' }], 'repeat-last'));
+  const outside = mk('outside');
+  fs.writeFileSync(path.join(outside, 'secret.txt'), 'TOP-SECRET-CONTENT');
+  fs.writeFileSync(path.join(outside, 'other.txt'), 'OTHER-CONTENT');
+  fs.mkdirSync(path.join(outside, 'folder'));
+  fs.writeFileSync(path.join(outside, 'folder', 'inner.txt'), 'INNER-CONTENT');
+  fs.writeFileSync(path.join(r.ws, 'inside.txt'), 'INSIDE-CONTENT');
+  const { sessionId } = await r.open();
+  const refused = (text: string) => r.call('session.run', { sessionId, text }).then(() => '', (e) => e.message as string);
+
+  check('a file inside the project is read', (await r.call('session.run', { sessionId, text: 'veja @inside.txt' })).attached.includes('inside.txt'));
+  await r.finished(sessionId, 0);
+  check('a file outside the project, by absolute path, is refused with a way forward, and was never read', (await refused(`veja @"${path.join(outside, 'secret.txt')}"`)).includes('outside the project folder') && !JSON.stringify(r.model.requests).includes('TOP-SECRET'));
+  check('so is one reached with ".."', (await refused('veja @../outside/secret.txt')).includes('outside the project folder'));
+  check('so is one named inside a skill command or among other text', (await refused(`faça isso e @inside.txt também @"${path.join(outside, 'secret.txt')}"`)).includes('outside the project folder'));
+  check('the refusal starts nothing (the conversation is free to run)', (await r.call('sessions.active')).every((s: any) => !s.running));
+
+  await r.call('attachments.allow', { paths: [path.join(outside, 'secret.txt')] });
+  const allowed = await r.call('session.run', { sessionId, text: `veja @"${path.join(outside, 'secret.txt')}"` });
+  await r.finished(sessionId, 1);
+  check('once the user attached that file (dialog or drop), it is read', allowed.attached.length === 1 && JSON.stringify(r.model.requests.at(-1)).includes('TOP-SECRET-CONTENT'));
+  check('...but only that file, not its neighbour', (await refused(`veja @"${path.join(outside, 'other.txt')}"`)).includes('outside the project folder'));
+
+  await r.call('attachments.allow', { paths: [outside] });
+  const dir = await r.call('session.run', { sessionId, text: `veja @"${path.join(outside, 'folder', 'inner.txt')}"` });
+  await r.finished(sessionId, 2);
+  check('a folder the user attached makes what is inside it readable', dir.attached.length === 1 && JSON.stringify(r.model.requests.at(-1)).includes('INNER-CONTENT'));
+  check('an email address is not a mention', (await r.call('session.run', { sessionId, text: 'escreva para ana@example.com' })).started === true);
+  await r.finished(sessionId, 3);
+  const sibling = `${outside}-neighbour`; // its name starts with the allowed folder's whole path
+  fs.mkdirSync(sibling, { recursive: true });
+  fs.writeFileSync(path.join(sibling, 'x.txt'), 'NEIGHBOUR');
+  check('a folder whose name merely starts the same is not covered', (await refused(`@"${path.join(sibling, 'x.txt')}"`)).includes('outside the project folder'));
+}
+
 // ===================================================================================== broker
 
 console.log('\n=== the broker: strict validation ===');

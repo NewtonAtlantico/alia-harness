@@ -50,7 +50,9 @@
     "desktop:test:ui-logic": "npm --prefix desktop run test:ui-logic",
     "desktop:test:sidebar-app": "npm --prefix desktop run test:sidebar-app",
     "desktop:test:timeline": "npm --prefix desktop run test:timeline",
-    "desktop:test:timeline-app": "npm --prefix desktop run test:timeline-app"
+    "desktop:test:timeline-app": "npm --prefix desktop run test:timeline-app",
+    "desktop:test:composer-logic": "npm --prefix desktop run test:composer-logic",
+    "desktop:test:composer-app": "npm --prefix desktop run test:composer-app"
   },
   "keywords": [
     "ai",

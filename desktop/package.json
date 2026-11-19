@@ -22,7 +22,9 @@
     "test:ui-logic": "tsx --tsconfig tsconfig.node.json scripts/test-ui-logic.ts",
     "test:sidebar-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-sidebar-app.ts",
     "test:timeline": "tsx --tsconfig tsconfig.node.json scripts/test-timeline.ts",
-    "test:timeline-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-timeline-app.ts"
+    "test:timeline-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-timeline-app.ts",
+    "test:composer-logic": "tsx --tsconfig tsconfig.node.json scripts/test-composer-logic.ts",
+    "test:composer-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-composer-app.ts"
   },
   "devDependencies": {
     "@electron/fuses": "^2.1.3",

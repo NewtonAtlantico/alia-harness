@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Broker, ProjectRegistry } from '../src/main/broker';
 import { Logger, redact } from '../src/main/logger';
-import { commandForInput } from '../src/main/shortcuts';
+import { sanitizePaths } from '../src/main/attachments';
 import { commandForInput } from '../src/main/shortcuts';
 import { CONTENT_SECURITY_POLICY, isAllowedRequestUrl, isTrustedUrl, parseExternalUrl, resolveAppPath } from '../src/main/securityRules';
 
@@ -97,6 +97,20 @@ console.log('\n=== secrets in logs ===');
   check('each line has a time and a level, and a multi-line message stays together', /2026-11-18T12:00:00.000Z INFO engine configured/.test(written) && /ERROR request failed[\s\S]*\n {2}second line/.test(written));
   check('files older than two weeks are deleted, other files are left', !fs.existsSync(old) && fs.existsSync(path.join(dir, 'notes.txt')));
   check('a log folder that cannot be created does not stop the app', (() => { try { new Logger(path.join(dir, 'notes.txt', 'sub')).info('x'); return true; } catch { return false; } })());
+}
+
+console.log('\n=== files reported as dropped ===');
+{
+  const dir = fs.mkdtempSync(path.join(tmp, 'drop-'));
+  const file = path.join(dir, 'brd.pdf');
+  fs.writeFileSync(file, 'x');
+  check('existing absolute paths, files and folders, pass', sanitizePaths([file, dir]).join('|') === [file, dir].join('|'));
+  check('anything that is not a list gives nothing', sanitizePaths(undefined).length === 0 && sanitizePaths('C:/x').length === 0 && sanitizePaths({ 0: file }).length === 0 && sanitizePaths(null).length === 0);
+  check('relative paths, paths that do not exist, empty, NUL and over-long ones are dropped', sanitizePaths(['brd.pdf', path.join(dir, 'missing.pdf'), '', file + '\0.txt', path.join(dir, 'x'.repeat(2000))]).length === 0);
+  check('things that are not strings are dropped', sanitizePaths([42, null, {}, [file], file]).join() === file);
+  check('a path given twice (or in another spelling) is one', sanitizePaths([file, path.join(dir, '.', 'brd.pdf'), path.join(dir, 'sub', '..', 'brd.pdf')]).length === 1);
+  const many = Array.from({ length: 150 }, () => file);
+  check('at most 100 entries are even looked at', sanitizePaths(many).length === 1 && sanitizePaths([...Array.from({ length: 100 }, (_, i) => path.join(dir, `none-${i}`)), file]).length === 0);
 }
 
 console.log('\n=== shortcuts ===');

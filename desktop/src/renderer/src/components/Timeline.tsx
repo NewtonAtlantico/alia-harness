@@ -8,6 +8,7 @@ import {
   summarizeTool,
   type AssistantRow,
   type DisplayItem,
+  type LocalRow,
   type NoticeRow,
   type ReadGroup,
   type Row,
@@ -224,6 +225,15 @@ function NoticeBlock({ row }: { row: NoticeRow }) {
   );
 }
 
+function LocalBlock({ row }: { row: LocalRow }) {
+  return (
+    <li className="local-row" data-local={row.command}>
+      <strong className="who">/{row.command}</strong>
+      <pre>{row.text}</pre>
+    </li>
+  );
+}
+
 function renderItem(item: DisplayItem) {
   switch (item.kind) {
     case 'user':
@@ -234,6 +244,8 @@ function renderItem(item: DisplayItem) {
       return <ThinkingBlock key={item.id} row={item} />;
     case 'notice':
       return <NoticeBlock key={item.id} row={item} />;
+    case 'local':
+      return <LocalBlock key={item.id} row={item} />;
     case 'reads':
       return <ReadsBlock key={item.id} group={item} />;
     default:

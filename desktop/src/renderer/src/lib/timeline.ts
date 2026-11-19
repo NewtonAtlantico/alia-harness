@@ -60,7 +60,17 @@ export interface ToolRow {
   /** What a subagent did (its tool calls), nested under the row that started it. */
   children: ToolRow[];
 }
-export type Row = UserRow | AssistantRow | ThinkingRow | NoticeRow | ToolRow;
+/** What a slash command that only the app handles printed (/help, /models, /tokens...). Not part of the saved conversation. */
+export interface LocalRow {
+  kind: 'local';
+  id: string;
+  command: string;
+  text: string;
+}
+export type Row = UserRow | AssistantRow | ThinkingRow | NoticeRow | LocalRow | ToolRow;
+
+/** Something the page itself adds to the timeline, besides what the engine pushes. */
+export type TimelineAction = PushMessage | { kind: 'local'; command: string; text: string } | { kind: 'cleared' };
 
 export interface TimelineState {
   rows: Row[];
@@ -224,7 +234,9 @@ function applyEvent(state: TimelineState, event: AgentEvent): TimelineState {
 }
 
 /** Folds one pushed message of THIS conversation into the timeline. Messages for other conversations are the caller's to filter. */
-export function applyPush(state: TimelineState, message: PushMessage): TimelineState {
+export function applyPush(state: TimelineState, message: TimelineAction): TimelineState {
+  if (message.kind === 'cleared') return { ...emptyTimeline, seq: state.seq };
+  if (message.kind === 'local') return withSeq(state, (id) => ({ kind: 'local', id, command: message.command, text: message.text }));
   if (message.kind === 'user_message') return withSeq(state, (id) => ({ kind: 'user', id, text: message.text }));
   if (message.kind === 'event') return applyEvent(state, message.event);
   return state;

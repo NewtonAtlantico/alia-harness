@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ActiveSession, ChatMessage, OpenedSession, PipelineBrief, SearchHit, SessionInfo } from '../../../shared/ipc';
+import { t } from '../i18n/pt-BR';
 import { fromActive, projectMarks, reduceSessionStates, type SessionState, type SessionStates } from '../lib/sessionStates';
 
 const STORAGE_KEY = 'alia.currentProject';
@@ -22,6 +23,8 @@ function remember(projectPath: string): void {
 }
 
 export interface OpenConversation {
+  /** A conversation that has not been started yet: its session is open (for the menus and the first message) but nothing is saved. */
+  draft?: boolean;
   info: SessionInfo;
   opened: OpenedSession;
   messages: ChatMessage[];
@@ -104,6 +107,7 @@ export function useWorkspace(onNewConversation?: () => void) {
         setCurrentProject(first);
         current.current = first;
         await refreshConversations(first);
+        void startDraft(first);
       }
       await refreshActive();
     })().catch(fail);
@@ -112,6 +116,29 @@ export function useWorkspace(onNewConversation?: () => void) {
   const loadOpen = useCallback(async (info: SessionInfo, opened: OpenedSession) => {
     const content = await api('conversations.load', { id: info.id });
     setOpen({ info: content?.info ?? info, opened, messages: content?.messages ?? [] });
+  }, []);
+
+  const draftToken = useRef(0);
+
+  /**
+   * Opens a session for a new conversation in a project (replacing an unused draft). Nothing is saved until the first
+   * message, so this leaves no trace if the user never writes. Without a configured endpoint it quietly does nothing.
+   */
+  const startDraft = useCallback(async (project: string) => {
+    const token = ++draftToken.current;
+    const previous = openRef.current;
+    if (previous?.draft) void api('session.close', { sessionId: previous.opened.sessionId }).catch(() => {});
+    try {
+      const opened = await api('session.open', { projectPath: project });
+      if (token !== draftToken.current) return void api('session.close', { sessionId: opened.sessionId }).catch(() => {});
+      const now = new Date().toISOString();
+      const info: SessionInfo = { id: opened.sessionId, title: t.sidebar.newConversation, titleSource: 'auto', workspace: opened.workspace, model: opened.model, createdAt: now, updatedAt: now };
+      setOpen({ draft: true, info, opened, messages: [] });
+    } catch (err) {
+      if (token !== draftToken.current) return;
+      setOpen(undefined);
+      if (!/not configured/i.test(errorText(err))) fail(err);
+    }
   }, []);
 
   // What the engine pushes: running and waiting marks, and a reason to refresh lists when a run starts or ends.
@@ -128,7 +155,8 @@ export function useWorkspace(onNewConversation?: () => void) {
         // Conversations that were open in the engine are gone from memory; the open one is reopened from disk.
         const was = openRef.current;
         void refreshActive();
-        if (was) void api('session.open', { projectPath: was.info.workspace, resumeId: was.info.id }).then((o) => loadOpen(was.info, o)).catch(fail);
+        if (was?.draft) void startDraft(was.info.workspace);
+        else if (was) void api('session.open', { projectPath: was.info.workspace, resumeId: was.info.id }).then((o) => loadOpen(was.info, o)).catch(fail);
         return;
       }
       const isRunEdge = m.kind === 'event' && !m.event.subagentId && (m.event.type === 'run_started' || m.event.type === 'run_finished');
@@ -162,16 +190,21 @@ export function useWorkspace(onNewConversation?: () => void) {
       setCurrentProject(projectPath);
       current.current = projectPath;
       remember(projectPath);
-      if (openRef.current && !same(openRef.current.info.workspace, projectPath)) setOpen(undefined);
       await refreshConversations(projectPath);
+      // A conversation of this very project stays; otherwise a fresh draft for the project.
+      const here = openRef.current;
+      if (!here || here.draft || !same(here.info.workspace, projectPath)) await startDraft(projectPath);
     },
-    [refreshConversations]
+    [refreshConversations, startDraft]
   );
 
   const openConversation = useCallback(
     async (info: SessionInfo) => {
       setError(undefined);
       setOpening(true);
+      draftToken.current++; // a draft that is still being opened is no longer wanted
+      const unused = openRef.current;
+      if (unused?.draft) void api('session.close', { sessionId: unused.opened.sessionId }).catch(() => {});
       try {
         let opened = await api('session.open', { projectPath: info.workspace, resumeId: info.id });
         // The folder was trusted after this conversation was opened: reopen it so the project's skills load.
@@ -243,11 +276,20 @@ export function useWorkspace(onNewConversation?: () => void) {
   }, [refreshProjects, selectProject]);
 
   const newConversation = useCallback(() => {
-    setOpen(undefined);
     setQueryState('');
     setResults(null);
+    if (current.current) void startDraft(current.current);
+    else setOpen(undefined);
     onNewConversation?.();
-  }, [onNewConversation]);
+  }, [onNewConversation, startDraft]);
+
+  /** The first message of a draft was sent: from now on it is a conversation like any other. */
+  const markStarted = useCallback(() => setOpen((o) => (o && o.draft ? { ...o, draft: false } : o)), []);
+
+  /** Starts a draft if there is none (after the endpoint was configured, for example). */
+  const ensureDraft = useCallback(() => {
+    if (!openRef.current && current.current) void startDraft(current.current);
+  }, [startDraft]);
 
   const rename = useCallback(
     async (info: SessionInfo, title: string) => {
@@ -266,14 +308,17 @@ export function useWorkspace(onNewConversation?: () => void) {
     async (info: SessionInfo) => {
       try {
         await api('conversations.delete', { id: info.id });
-        if (openRef.current?.info.id === info.id) setOpen(undefined);
+        if (openRef.current?.info.id === info.id) {
+          setOpen(undefined);
+          if (current.current) void startDraft(current.current);
+        }
         await refreshConversations();
         void refreshActive();
       } catch (err) {
         fail(err);
       }
     },
-    [refreshConversations, refreshActive]
+    [refreshConversations, refreshActive, startDraft]
   );
 
   // Search across every project, once the user pauses typing.
@@ -313,6 +358,6 @@ export function useWorkspace(onNewConversation?: () => void) {
     searching,
     trustPrompt,
     error,
-    actions: { openFolder, selectProject, newConversation, openConversation, rename, remove, setQuery, answerTrust, refreshProjects, dismissError: () => setError(undefined) },
+    actions: { openFolder, selectProject, newConversation, markStarted, ensureDraft, openConversation, rename, remove, setQuery, answerTrust, refreshProjects, dismissError: () => setError(undefined) },
   };
 }

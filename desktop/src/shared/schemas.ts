@@ -84,6 +84,7 @@ export const rendererSchemas = {
   'permissions.listForProject': strict({ projectPath }),
   'permissions.removeForProject': strict({ projectPath, command: z.string().min(1).max(4000), match: z.enum(['exact', 'prefix']).optional() }),
   'projects.pick': none,
+  'attachments.pick': none,
   'projects.recent': none,
   'projects.inspect': strict({ projectPath }),
   'projects.setTrust': strict({ projectPath, trusted: z.boolean() }),
