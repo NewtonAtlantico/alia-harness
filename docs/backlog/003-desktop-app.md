@@ -344,7 +344,7 @@ A18                           Last, across everything.
   explains each problem next to its field (announced with `role=alert`); every control has an accessible name. The display name defaults from the Windows account (open item 6: editable, recommended default taken).
   A `<select>` must not be wrapped in its `<label>` (its options would become part of the name): found by the test and fixed.
 - **Removed:** the temporary `bootConfig` from A2.
-- **Tests:** `desktop:test:settings` (unit, about 90 checks: the settings file and its damage handling, recents, the encrypted store with a fake encryptor including "no OS encryption means nothing is stored", the legacy config
+- **Tests:** `desktop:test:settings` (unit, 60 checks: the settings file and its damage handling, recents, the encrypted store with a fake encryptor including "no OS encryption means nothing is stored", the legacy config
   reader and its key precedence, the service end to end with a fake engine, and the broker's validation of every settings request; two rules were mutation-checked), engine tests for the connection test (right key, wrong key,
   not found, unreachable), the project allowlist and the three approval modes, and `desktop:test:settings-app` (the real app, driven like a person: first run, a wrong key and a right one, validation, saving, that the key is in no
   HTML, field, pushed message, log or plain file, that conversations use the saved settings, the allowlist screen, a restart, the approval mode, removing the key, importing).
