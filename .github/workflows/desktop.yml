@@ -1,0 +1,49 @@
+# The desktop app: everything it is held to, then the installer and the portable zip as downloadable artifacts.
+# Electron needs a desktop session for the end-to-end suites, which the Windows runners provide.
+# Code signing is optional: with the secrets below the installer is signed, without them it is not (SmartScreen warns).
+name: desktop
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install (CLI and core)
+        run: npm ci
+      - name: Install (desktop)
+        run: npm --prefix desktop ci
+      - name: Core and CLI
+        run: |
+          npm run typecheck
+          npm run build
+      - name: Desktop: every suite, and the packaged app
+        run: npm run desktop:test:all -- --core --package
+      - name: Desktop: installer and portable zip
+        run: npm run desktop:dist
+        env:
+          # Optional. A certificate (a base64 .pfx, or a path) and its password; without them the build is unsigned.
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alia-harness-desktop
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots-on-failure
+          path: ${{ runner.temp }}/**/failure.png
+          if-no-files-found: ignore

@@ -47,6 +47,11 @@ if (fs.existsSync(exe)) {
   const smoke = run(['tsx', '--tsconfig', 'tsconfig.node.json', 'scripts/smoke-app.ts'], { ALIA_SMOKE_EXE: exe });
   check('the smoke test passes against the executable (renderer, engine, PDF, Word, deck)', smoke.status === 0, (smoke.stdout + smoke.stderr).slice(-1500));
   const asar = path.join(desktop, 'dist', 'win-unpacked', 'resources', 'app.asar');
+  const skillsDir = path.join(desktop, 'dist', 'win-unpacked', 'resources', 'skills');
+  check('the skills ship beside the program, all of them (the pipeline skill included)', fs.existsSync(path.join(skillsDir, 'e2e-pipeline', 'SKILL.md')) && fs.readdirSync(skillsDir, { withFileTypes: true }).filter((e) => e.isDirectory() && fs.existsSync(path.join(skillsDir, e.name, 'SKILL.md'))).length === fs.readdirSync(path.join(desktop, '..', 'skills'), { withFileTypes: true }).filter((e) => e.isDirectory() && fs.existsSync(path.join(desktop, '..', 'skills', e.name, 'SKILL.md'))).length);
+  const pkgVersion = JSON.parse(fs.readFileSync(path.join(desktop, 'package.json'), 'utf8')).version as string;
+  const productVersion = spawnSync('powershell', ['-NoProfile', '-Command', `(Get-Item '${exe}').VersionInfo.ProductVersion`], { encoding: 'utf8' }).stdout.trim();
+  check('the executable carries the version of package.json', productVersion.startsWith(pkgVersion), productVersion);
   check('the code ships inside app.asar, with no node_modules beside it', fs.existsSync(asar) && !fs.existsSync(path.join(desktop, 'dist', 'win-unpacked', 'resources', 'app', 'node_modules')));
 }
 

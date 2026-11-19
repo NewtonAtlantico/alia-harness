@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ConnectionTestResult, LegacyCandidate, ModelSetting, PermissionMode, PermissionRule, ProjectInspection, SettingsView } from '../../../shared/ipc';
 import { projectName } from '../lib/projectName';
 import { t } from '../i18n/pt-BR';
+import { Diagnostics } from './Diagnostics';
 
 const MODES: PermissionMode[] = ['ask-commands', 'ask-dangerous', 'auto'];
 
@@ -362,6 +363,8 @@ export function SettingsScreen({ onClose, onSaved, onProjectsChanged }: { onClos
         )}
         <p className="hint">{t.settings.trust.applies}</p>
       </div>
+
+      <Diagnostics />
 
       <footer className="settings-footer">
         <button type="button" className="btn" onClick={() => { setDraft(toDraft(view)); setNewKey(''); setEditingKey(!view.hasApiKey); setShowErrors(false); setStatus(undefined); }} disabled={!dirty || saving}>{t.settings.discard}</button>

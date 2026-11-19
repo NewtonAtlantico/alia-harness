@@ -6,18 +6,35 @@ directories:
 files:
   - out/**
   - package.json
+# The skills the app ships with. main reads them from <install>/resources/skills when packaged (and from the repository's
+# skills/ folder while developing), so a missing folder here is an app with no skills: the diagnostics screen says so.
+extraResources:
+  - from: ../skills
+    to: skills
+    filter:
+      - "**/*"
+      - "!**/node_modules/**"
 asar: true
 win:
+  # A stand-in icon (build/icon.png, made by scripts/make-icon.cjs) until the design owner supplies the real one.
+  icon: build/icon.png
   target:
     - target: nsis
       arch: [x64]
     - target: zip
       arch: [x64]
+# Per user: no administrator rights, installed under the user's own profile. The user's data (settings, conversations)
+# lives in %APPDATA% and is kept when the app is uninstalled.
 nsis:
   oneClick: true
   perMachine: false
   allowElevation: false
+  deleteAppDataOnUninstall: false
 npmRebuild: false
+# Code signing is wired but optional. electron-builder signs on its own when it is given a certificate through the
+# environment (CSC_LINK and CSC_KEY_PASSWORD; or CSC_NAME for one in the Windows store). Without one the build is unsigned
+# and Windows SmartScreen warns on first run (section 9 of the backlog). Nothing here fails for lack of a certificate.
+forceCodeSigning: false
 # Electron fuses: switches baked into the executable, so a user (or malware running as the user) cannot turn the
 # app into a general-purpose Node interpreter or attach a debugger through environment variables or flags.
 electronFuses:

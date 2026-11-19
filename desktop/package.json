@@ -37,7 +37,12 @@
     "test:report-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-report-app.ts",
     "test:journey-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-journey-app.ts",
     "test:all": "tsx --tsconfig tsconfig.node.json scripts/run-all.ts",
-    "screenshots": "tsx --tsconfig tsconfig.node.json scripts/screenshots.ts"
+    "screenshots": "tsx --tsconfig tsconfig.node.json scripts/screenshots.ts",
+    "test:diagnostics": "tsx --tsconfig tsconfig.node.json scripts/test-diagnostics.ts",
+    "test:diagnostics-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-diagnostics-app.ts",
+    "pack": "npm run build && electron-builder --win --dir --publish never",
+    "dist": "npm run build && electron-builder --win --publish never",
+    "test:installer": "tsx --tsconfig tsconfig.node.json scripts/test-installer.ts"
   },
   "devDependencies": {
     "@electron/fuses": "^2.1.3",

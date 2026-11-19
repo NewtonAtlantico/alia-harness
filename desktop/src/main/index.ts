@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
-import { BrowserWindow, Menu, app, dialog, ipcMain, safeStorage, shell } from 'electron';
-import { CHANNELS, type AppCommand, type PushMessage } from '../shared/ipc';
+import { BrowserWindow, Menu, app, clipboard, dialog, ipcMain, safeStorage, shell } from 'electron';
+import { CHANNELS, type AppCommand, type DiagnosticsResult, type PushMessage } from '../shared/ipc';
 import { registerAppSchemePrivileges, serveApp } from './appProtocol';
 import { sanitizePaths } from './attachments';
 import { Broker, ProjectRegistry } from './broker';
@@ -9,6 +9,7 @@ import { EngineHost } from './engineHost';
 import { confirmAndOpenExternal, installSessionGuards, installWebContentsGuards, isTrustedSender } from './guards';
 import { Logger } from './logger';
 import { decideOpen } from './openFile';
+import { countSkills, execRun, formatReport, runDiagnostics, type DiagnosticsDeps } from './diagnostics';
 import { SecretStore } from './secrets';
 import { SettingsService } from './settingsService';
 import { SettingsStore, defaultSettings } from './settings';
@@ -76,6 +77,40 @@ function start(): void {
 
   // eslint-disable-next-line prefer-const
   let settings: SettingsService;
+
+  /** What the app needs from this machine. Under test, ALIA_TEST_DIAG says what the machine has (JSON), so the answer does not depend on it. */
+  const diagnose = async (): Promise<DiagnosticsResult> => {
+    const forced = testMode && process.env.ALIA_TEST_DIAG ? (JSON.parse(process.env.ALIA_TEST_DIAG) as Record<string, string | boolean | null>) : undefined;
+    const real: DiagnosticsDeps = {
+      platform: process.platform,
+      run: execRun,
+      shell: () => engine.request('diagnostics.shell', {}),
+      bundledSkillsDir: bundledSkills,
+      endpoint: async () => {
+        const view = settings.view();
+        if (!view.configured) return { configured: false };
+        const r = await settings.testConnection({});
+        return { configured: true, ok: r.ok, message: r.message, models: r.models?.length };
+      },
+    };
+    const deps: DiagnosticsDeps = forced
+      ? {
+          ...real,
+          shell: async () => (forced.bash ? { shell: String(forced.bash), posix: true } : undefined),
+          run: async (command, args) => {
+            const python = command === 'py' || command === 'python' || command === 'python3';
+            if (command === 'git') return forced.git ? { ok: true, stdout: String(forced.git) } : { ok: false, stdout: '' };
+            if (python && args.includes('-c')) return { ok: forced.docx === true, stdout: '' };
+            if (python) return forced.python && command === 'py' ? { ok: true, stdout: String(forced.python) } : { ok: false, stdout: '' };
+            return { ok: false, stdout: '' };
+          },
+        }
+      : real;
+    return {
+      items: await runDiagnostics(deps),
+      app: { name: mainStrings.appName, version: app.getVersion(), electron: process.versions.electron, node: process.versions.node, platform: process.platform, arch: process.arch },
+    };
+  };
 
   const broadcast = (message: PushMessage): void => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -160,6 +195,13 @@ function start(): void {
         const paths = sanitizePaths(picked);
         if (paths.length > 0) await engine.request('attachments.allow', { paths });
         return { paths };
+      },
+      'diagnostics.run': () => diagnose(),
+      'diagnostics.copy': async () => {
+        const result = await diagnose();
+        const text = formatReport(result.items, result.app);
+        clipboard.writeText(text);
+        return { copied: true as const, lines: text.split('\n').length };
       },
       'projects.recent': () => store.recentProjects(),
       'projects.openFile': async ({ projectPath, path: rel }) => {
@@ -256,9 +298,11 @@ function start(): void {
       await new Promise<void>((resolve) => win.webContents.once('did-finish-load', () => resolve()));
       const viaRenderer = await win.webContents.executeJavaScript('window.alia.ping()');
       const selfTest = await engine.request('selfTest', { dir });
+      // The skills are files beside the program: a build that forgot to ship them is an app with no skills.
+      const skills = countSkills(bundledSkills);
       clearTimeout(timer);
-      const ok = viaRenderer?.pong === true && viaRenderer.pid !== process.pid && viaRenderer.coreStages === 4 && selfTest.ok;
-      console.log(`SMOKE_RESULT ${JSON.stringify({ ok, mainPid: process.pid, viaRenderer, selfTest })}`);
+      const ok = viaRenderer?.pong === true && viaRenderer.pid !== process.pid && viaRenderer.coreStages === 4 && selfTest.ok && skills > 0;
+      console.log(`SMOKE_RESULT ${JSON.stringify({ ok, mainPid: process.pid, viaRenderer, selfTest, skills })}`);
       app.exit(ok ? 0 : 1);
     } catch (err: any) {
       fail(String(err?.stack ?? err));

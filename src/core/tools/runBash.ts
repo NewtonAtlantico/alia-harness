@@ -114,6 +114,12 @@ function resolveShell(): ShellInfo {
   return cachedShell;
 }
 
+/** The shell commands run in, and whether it is a real POSIX one (Git Bash on Windows) rather than the PowerShell fallback. For diagnostics. */
+export function describeShell(): { shell: string; label: string; posix: boolean } {
+  const info = resolveShell();
+  return { shell: info.shell, label: info.label, posix: !/powershell/i.test(info.shell) };
+}
+
 export const runBashTool: ToolDefinition<RunBashArgs> = {
   name: 'run_bash',
   description:

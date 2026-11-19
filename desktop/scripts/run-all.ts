@@ -23,8 +23,8 @@ interface Suite {
 }
 
 const tsx = (script: string): string[] => ['npx', 'tsx', '--tsconfig', 'tsconfig.node.json', `scripts/${script}.ts`];
-const unit = ['engine', 'security', 'settings', 'projects', 'ui-logic', 'timeline', 'composer-logic', 'interactions-logic', 'panel-logic', 'intake-logic', 'run-logic'];
-const e2e = ['app', 'hardening', 'settings-app', 'sidebar-app', 'timeline-app', 'composer-app', 'interactions-app', 'panel-app', 'intake-app', 'run-app', 'gates-app', 'report-app', 'journey-app'];
+const unit = ['engine', 'security', 'settings', 'projects', 'ui-logic', 'timeline', 'composer-logic', 'interactions-logic', 'panel-logic', 'intake-logic', 'run-logic', 'diagnostics'];
+const e2e = ['app', 'hardening', 'settings-app', 'sidebar-app', 'timeline-app', 'composer-app', 'interactions-app', 'panel-app', 'intake-app', 'run-app', 'gates-app', 'report-app', 'diagnostics-app', 'journey-app'];
 const coreSuites = ['mentions', 'skills', 'agent', 'subagents', 'session', 'events', 'cancel', 'permissions', 'store', 'commands', 'changes', 'documents', 'office', 'askuser', 'pipeline', 'resume', 'intake', 'report', 'issues'];
 
 const suites: Suite[] = [
@@ -33,7 +33,7 @@ const suites: Suite[] = [
   { name: 'build', command: ['npm', 'run', 'build'], cwd: desktop, group: 'build' },
   ...e2e.map((n): Suite => ({ name: `test-${n}`, command: tsx(`test-${n}`), cwd: desktop, group: 'e2e' })),
   { name: 'smoke-app', command: ['npx', 'tsx', 'scripts/smoke-app.ts'], cwd: desktop, group: 'smoke' },
-  ...(withPackage ? [{ name: 'test-package', command: tsx('test-package'), cwd: desktop, group: 'package' } as Suite] : []),
+  ...(withPackage ? [{ name: 'test-package', command: tsx('test-package'), cwd: desktop, group: 'package' } as Suite, { name: 'test-installer', command: tsx('test-installer'), cwd: desktop, group: 'package' } as Suite] : []),
   ...(withCore ? [{ name: 'core typecheck', command: ['npx', 'tsc', '--noEmit'], cwd: root, group: 'core' } as Suite, ...coreSuites.map((n): Suite => ({ name: `core test:${n}`, command: ['npm', 'run', `test:${n}`], cwd: root, group: 'core' }))] : []),
 ];
 

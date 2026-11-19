@@ -119,6 +119,8 @@ export const rendererSchemas = {
   'window.toggleMaximize': none,
   'window.close': none,
   'window.state': none,
+  'diagnostics.run': none,
+  'diagnostics.copy': none,
   'app.info': none,
   'projects.openFile': strict({ projectPath, path: relPath }),
   'app.openExternal': strict({ url: z.string().min(1).max(2048) }),

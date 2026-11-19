@@ -19,6 +19,7 @@ import {
   createSession,
   newSessionId,
   getPipelineStatus,
+  describeShell,
   buildReport,
   type CommandProbe,
   gateProgress,
@@ -232,6 +233,8 @@ export class EngineRuntime {
     ping: (): PingResult => ({ pong: true, pid: process.pid, node: process.versions.node, coreStages: STAGES.length }),
 
     selfTest: ({ dir }) => this.selfTest(dir),
+
+    'diagnostics.shell': () => describeShell(),
 
     'attachments.allow': ({ paths }) => {
       for (const p of paths) {

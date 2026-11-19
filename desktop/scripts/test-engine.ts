@@ -795,6 +795,13 @@ console.log('\n=== pipeline end: the report and publishing the issues ===');
   void fails;
 }
 
+console.log('\n=== diagnostics: the shell the agent would use ===');
+{
+  const r = await rig(say('x'));
+  const shell = await r.call('diagnostics.shell');
+  check('the engine says which shell commands run in, and whether it is a POSIX one', typeof shell.shell === 'string' && shell.shell.length > 0 && typeof shell.label === 'string' && typeof shell.posix === 'boolean' && (shell.posix === !/powershell/i.test(shell.shell)));
+}
+
 // ===================================================================================== broker
 
 console.log('\n=== the broker: strict validation ===');

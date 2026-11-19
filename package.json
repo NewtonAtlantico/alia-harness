@@ -66,6 +66,11 @@
     "desktop:test:gates-app": "npm --prefix desktop run test:gates-app",
     "desktop:test:report-app": "npm --prefix desktop run test:report-app",
     "desktop:test:journey-app": "npm --prefix desktop run test:journey-app",
+    "desktop:test:diagnostics": "npm --prefix desktop run test:diagnostics",
+    "desktop:test:diagnostics-app": "npm --prefix desktop run test:diagnostics-app",
+    "desktop:test:installer": "npm --prefix desktop run test:installer",
+    "desktop:pack": "npm --prefix desktop run pack",
+    "desktop:dist": "npm --prefix desktop run dist",
     "desktop:test:all": "npm --prefix desktop run test:all",
     "desktop:screenshots": "npm --prefix desktop run screenshots"
   },

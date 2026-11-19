@@ -55,6 +55,7 @@ const show = (ok: boolean, name: string, detail?: string) => console.log(`  ${ok
 show(result.viaRenderer?.pong === true, 'renderer -> preload -> main -> engine round trip');
 show(result.viaRenderer?.pid !== undefined && result.viaRenderer.pid !== result.mainPid, 'the engine is a separate process from main', `engine ${result.viaRenderer?.pid}, main ${result.mainPid}`);
 show(result.viaRenderer?.coreStages === 4, 'core is bundled into the engine');
+show((result.skills ?? 0) > 0, 'the skills that ship with the app are found', `${result.skills ?? 0} found`);
 for (const c of result.selfTest?.checks ?? []) show(c.ok, c.name, c.detail);
 if (!result.ok && result.why) console.log(`  ✘ ${result.why}`);
 

@@ -594,3 +594,9 @@ table.models td input { width: 100%; box-sizing: border-box; }
 .check.fail .mark { background: var(--danger); }
 .check p { margin: 2px 0; }
 .check .items { margin: var(--space-1) 0 0; padding-left: var(--space-4); list-style: disc; font-size: var(--text-sm); }
+
+/* ---- diagnostics (A17) ---- */
+.diag .block { display: block; }
+.diag .fix { color: var(--text); }
+.pill.warn { background: var(--warning-bg); color: var(--warning); }
+.pill.bad { background: var(--diff-remove); color: var(--danger); }

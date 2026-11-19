@@ -354,6 +354,10 @@ export interface RendererRequests {
   'pipeline.resume': { request: { sessionId: string }; result: PipelineResumeResult };
   /** Opens a file or folder of the project with the system. Documents are opened, a folder is shown, anything else is only shown in its folder. */
   'projects.openFile': { request: { projectPath: string; path: string }; result: { how: 'open' | 'reveal' } };
+  /** What the app needs from this machine (Git Bash, Git, Python, the skills, the endpoint) and whether it is there. */
+  'diagnostics.run': { request: Record<string, never>; result: DiagnosticsResult };
+  /** Copies a report (the same checks, the app and the machine; no secrets) to the clipboard, to paste in a message to support. */
+  'diagnostics.copy': { request: Record<string, never>; result: { copied: true; lines: number } };
   /** Lets the user choose files to attach (native dialog). Returns their paths, which the engine may then read. */
   'attachments.pick': { request: Record<string, never>; result: { paths: string[] } };
   'settings.get': { request: Record<string, never>; result: SettingsView };
@@ -376,7 +380,12 @@ export interface RendererRequests {
 }
 
 /** Requests answered by main itself; they never reach the engine. */
-export type MainRequestName = 'attachments.pick' | 'projects.openFile' | 'projects.pick' | 'projects.recent' | 'projects.inspect' | 'projects.setTrust' | 'settings.get' | 'settings.update' | 'settings.setApiKey' | 'settings.clearApiKey' | 'settings.testConnection' | 'settings.legacyCandidate' | 'settings.importLegacy' | 'window.minimize' | 'window.toggleMaximize' | 'window.close' | 'window.state' | 'app.info' | 'app.openExternal';
+export type MainRequestName = 'attachments.pick' | 'diagnostics.run' | 'diagnostics.copy' | 'projects.openFile' | 'projects.pick' | 'projects.recent' | 'projects.inspect' | 'projects.setTrust' | 'settings.get' | 'settings.update' | 'settings.setApiKey' | 'settings.clearApiKey' | 'settings.testConnection' | 'settings.legacyCandidate' | 'settings.importLegacy' | 'window.minimize' | 'window.toggleMaximize' | 'window.close' | 'window.state' | 'app.info' | 'app.openExternal';
+
+export interface DiagnosticsResult {
+  items: Array<{ id: 'bash' | 'git' | 'python' | 'python-docx' | 'skills' | 'endpoint'; status: 'ok' | 'warn' | 'missing'; value?: string; optional: boolean }>;
+  app: { name: string; version: string; electron: string; node: string; platform: string; arch: string };
+}
 
 export interface AppInfo {
   name: string;
@@ -403,6 +412,8 @@ export interface InternalRequests {
   };
   /** Tells the engine which files outside a project the user chose (dropped or picked), so `@` mentions of them may be read. */
   'attachments.allow': { request: { paths: string[] }; result: { ok: true } };
+  /** The shell commands run in (for diagnostics). */
+  'diagnostics.shell': { request: Record<string, never>; result: { shell: string; label: string; posix: boolean } };
   /** Lists the models at an endpoint, to test an address and key. Runs in the engine (it has the HTTP client). */
   'connection.test': { request: { url: string; apiKey: string }; result: ConnectionTestResult };
 }
