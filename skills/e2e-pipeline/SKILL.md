@@ -69,9 +69,53 @@ If the project already uses different locations, follow them and record the path
    later change to the file is noticed) and `set_project`. If it is unclear which version of a document is authoritative, ask —
    do not pick silently.
 
+## Running each stage in a subagent (when `run_subagent` is available)
+
+If `run_subagent` is among your tools, **do not run the stage skills in this conversation.** Four stages
+of source documents, skill bodies and tool output in one history exhaust the context window and the
+step budget before the pipeline ends. Run each stage in a fresh, isolated agent and keep this
+conversation for orchestration: gates, questions to the user, and state. If `run_subagent` is not
+available, skip this section and follow "Calling a skill" and the stages below inline.
+
+**Who owns what.** The subagent does the stage's work: it writes the artifact and records the *content*
+in `pipeline_state` (`add_question` for every open question, `set_architecture`, `add_adr`,
+`set_adr_alignment`, `set_spec`, `set_check`). **You** own the flow: `set_stage`, `set_gate`,
+`answer_question`, `defer_question`, `set_spec_review` and every conversation with the user. A subagent
+cannot ask the user, and must not move a stage or a gate.
+
+**For each stage:**
+
+1. `pipeline_state` → `set_stage` (`running`) for the stage.
+2. Call `run_subagent` with:
+   - `skill`: the stage's skill (stage 1: the one chosen in Step 0 for each input kind; 2:
+     `architecture-from-requirements`; 3: `constitution-to-specs`; 4: `spec-to-tasks`).
+   - `inputs`: the files it needs, and nothing else: stage 1, the input files from the manifest; stage 2,
+     `docs/requirements/requirements.md` (plus existing architecture docs and `adr/` for brownfield);
+     stage 3, `architecture.md` and `requirements.md`; stage 4, one spec and `docs/specs/constraints.md`.
+   - `max_steps`: `80` (`60` for one spec in stage 4).
+   - `task`: which stage this is, where to write the artifact, the rules above on what it may record
+     in `pipeline_state`, and, for a revision, the answers that changed things. Say that the work
+     resumes from the files on disk, not from anything remembered.
+3. Read the `STATUS` block it returns, then act on it:
+   - `completed`: check that the artifact exists (`list_files`), then run the stage's gate yourself:
+     `pipeline_state` → `get`, ask the user the open questions (`ask_user`), record each answer, and
+     only then `set_stage` (`done`) and `set_gate` (`passed`). If an answer changes the artifact, start
+     a new subagent for the same stage with the answers in `task` and the existing artifact in `inputs`.
+   - `blocked`: its `QUESTIONS` are the user's to answer. Ask them, record the answers, and start a
+     **new** subagent for the same stage: it resumes from the artifact and `STATE.md`.
+   - `max_steps`: read what it wrote and start one new subagent that continues from that file
+     (`task`: "continue, do not start over"). If that one also runs out, `set_stage` (`blocked`) with the
+     reason and report it to the user.
+   - `failed`: report the reason to the user; do not retry blindly.
+4. Do not read the artifacts back into this conversation to summarize them. The files are the hand-off,
+   and the subagent's short report is all you carry forward.
+
+**Stage 4** runs one subagent per spec, in the backlog's dependency order, one after the other. The
+cross-spec check (see Stage 4) is its own subagent: it records the result with `set_check`.
+
 ## Calling a skill
 
-For each stage, invoke the skill with the `Skill` tool, passing the artifact path(s) as input.
+(Inline mode: when you run the stages yourself.) For each stage, invoke the skill with the `Skill` tool, passing the artifact path(s) as input.
 If the `Skill` tool does not list it, locate the file (`Glob **/skills/<name>/SKILL.md` in the
 working directory and `~/.claude/skills`), `Read` it, and follow its instructions exactly as if
 it had loaded. If it cannot be found anywhere, stop and ask the user where the skills hub lives.

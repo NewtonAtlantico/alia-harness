@@ -11,6 +11,7 @@ interface CliArgs {
   model?: string;
   config?: string;
   autoApprove?: boolean;
+  maxSteps?: number;
 }
 
 function parseArgs(args: string[]): CliArgs {
@@ -23,6 +24,13 @@ function parseArgs(args: string[]): CliArgs {
       result.model = args[++i];
     } else if (arg === '-c' || arg === '--config') {
       result.config = args[++i];
+    } else if (arg === '--max-steps') {
+      const n = Number(args[++i]);
+      if (!Number.isInteger(n) || n < 1) {
+        console.error('--max-steps needs a positive whole number.');
+        process.exit(1);
+      }
+      result.maxSteps = n;
     } else if (arg === '--auto-approve') {
       result.autoApprove = true;
     } else if (arg === '-h' || arg === '--help') {
@@ -45,6 +53,7 @@ ${pc.bold('OPTIONS:')}
   -p, --prompt <string>    Execute a single prompt and exit (non-interactive mode)
   -m, --model <name>       Choose model id (default: from alia-config.json)
   -c, --config <path>      Path to custom configuration file
+  --max-steps <n>          Step cap of one run (default 100, or ALIA_MAX_STEPS)
   --auto-approve           Auto-approve potentially destructive commands (skip safety prompt)
   -h, --help               Display this help message
 
@@ -88,6 +97,7 @@ async function main() {
       workspace,
       config,
       modelId: cliArgs.model,
+      maxSteps: cliArgs.maxSteps,
       ui: TerminalUI,
       autoApprove: cliArgs.autoApprove ?? false,
       onConfirm: cliConfirmDangerousCommand,

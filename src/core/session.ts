@@ -41,7 +41,7 @@ import {
 export interface SessionOptions {
   /** Workspace root the agent works in. Resolved to an absolute path. */
   workspace: string;
-  /** Stream the model's answers (`assistant_delta` and `thinking_delta` events). Off by default; falls back to plain requests by itself when the endpoint cannot stream. Subagents never stream. */
+  /** Stream the model's answers (`assistant_delta` and `thinking_delta` events). Off by default; falls back to plain requests by itself when the endpoint cannot stream. Without it (and in subagents) requests still stream, silently, so a long generation is not cut off by the headers timeout. */
   streaming?: boolean;
   /** Config object. Build it with `loadConfig(...)` or in memory (e.g. API key from a secret store). */
   config: AliaConfig;
@@ -93,7 +93,7 @@ export interface SessionOptions {
   skillRoots?: SkillRoot[];
   /** Show a subagent's full transcript instead of one line per tool call. */
   subagentVerbose?: boolean;
-  /** Step cap of the main agent (default 30). */
+  /** Step cap of one run of the main agent (default: ALIA_MAX_STEPS, else 100). Subagents have their own budget. */
   maxSteps?: number;
   /** Use this client instead of building one from the config. Mainly a test seam (see scripts/lib/fakeModel.ts). */
   client?: OpenAI;
@@ -144,6 +144,16 @@ export interface PreparedInput {
  * One isolated conversation: its own workspace, tools, skills, history, safety checker and
  * observer. Nothing here is process-wide, so a host (CLI, desktop app) can run several at once.
  */
+/** Step cap of one main-agent run when the host gives none. A chat turn needs a handful; a pipeline needs many. */
+export const DEFAULT_MAX_STEPS = 100;
+
+/** An explicit option wins, then the ALIA_MAX_STEPS environment variable, then {@link DEFAULT_MAX_STEPS}. */
+export function resolveMaxSteps(option?: number): number {
+  if (typeof option === 'number' && Number.isInteger(option) && option > 0) return option;
+  const env = Number(process.env.ALIA_MAX_STEPS);
+  return Number.isInteger(env) && env > 0 ? env : DEFAULT_MAX_STEPS;
+}
+
 export class AliaSession {
   readonly workspace: string;
   readonly config: AliaConfig;
@@ -267,7 +277,7 @@ export class AliaSession {
       contextManager: this.contextManager,
       workingDirectory: this.workspace,
       systemPrompt: this.systemPrompt,
-      maxSteps: options.maxSteps,
+      maxSteps: resolveMaxSteps(options.maxSteps),
       onEvent: emit,
       onHistory: (messages) => this.recorder?.sync(messages),
       changeTracker: this.changes,

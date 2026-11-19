@@ -132,6 +132,8 @@ console.log('\n=== S4: isolation + happy path ===');
   check('result reports steps vs cap', r.text.includes('STEPS: 2/10'), r.text);
   check('child really wrote the artifact', fs.readFileSync(path.join(tmp, 'docs', 'out.md'), 'utf8') === 'old pond');
 
+  check('the child requests a stream too, silently (a long generation is not cut off by the headers timeout)', model.requests[1].stream === true);
+
   const childFirst = model.requests[1];
   check('child starts from a clean history (system + task only)', childFirst.messages.length === 2 && childFirst.messages[1].role === 'user');
   check('child task is its first user message', childFirst.messages[1].content === 'Write docs/out.md with a haiku.');

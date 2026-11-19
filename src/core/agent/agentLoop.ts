@@ -38,6 +38,13 @@ export interface AgentOptions {
    * streaming, the agent remembers, and the run goes on: streaming is never a reason for a run to fail.
    */
   stream?: boolean;
+  /**
+   * Request a stream even when no deltas are wanted (default true). A plain request sends nothing until the model has
+   * finished, and Node drops it after 5 minutes without response headers: a long generation (a skill writing many files)
+   * fails with "Request timed out". A stream sends headers at once and keeps the connection alive; the pieces are read
+   * and joined silently. Set false to always use plain requests.
+   */
+  keepAlive?: boolean;
 }
 
 /**
@@ -98,7 +105,10 @@ export class AliaAgent {
   private emit: EventSink;
   private onHistory?: AgentOptions['onHistory'];
   private changeTracker?: ChangeTracker;
+  /** Emit `assistant_delta` / `thinking_delta` as pieces arrive. */
   private stream: boolean;
+  /** Ask the endpoint for a stream (also when nobody wants the deltas). */
+  private useStream: boolean;
   /** Set after a plain request succeeded where a streaming one was refused: from then on this agent does not ask again. */
   private streamRefused = false;
   private messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
@@ -116,6 +126,7 @@ export class AliaAgent {
     this.onHistory = options.onHistory;
     this.changeTracker = options.changeTracker;
     this.stream = options.stream === true;
+    this.useStream = this.stream || options.keepAlive !== false;
     this.emit = combineSinks(options.ui ? eventsToAgentUI(options.ui) : undefined, options.onEvent);
 
     this.reset();
@@ -197,7 +208,7 @@ export class AliaAgent {
     const params = { model: this.model, messages: this.messages, tools: this.toolRegistry.getOpenAITools(), tool_choice: 'auto' as const };
     const options = signal ? { signal } : undefined;
     let streamAttemptFailed = false;
-    if (this.stream && !this.streamRefused) {
+    if (this.useStream && !this.streamRefused) {
       try {
         return await raceAbort(this.streamResponse(params, options, step), signal);
       } catch (err: any) {
@@ -210,7 +221,7 @@ export class AliaAgent {
     // The plain request worked where the stream did not: this endpoint cannot stream. Say so once, and stop asking.
     if (streamAttemptFailed) {
       this.streamRefused = true;
-      this.emit({ type: 'notice', level: 'info', message: 'This endpoint does not stream: answers will appear when they are complete.' });
+      if (this.stream) this.emit({ type: 'notice', level: 'info', message: 'This endpoint does not stream: answers will appear when they are complete.' });
     }
     return response;
   }
@@ -238,11 +249,11 @@ export class AliaAgent {
       const thought: string | undefined = delta.reasoning_content ?? delta.reasoning ?? delta.provider_specific_fields?.reasoning;
       if (thought) {
         reasoning += thought;
-        this.emit({ type: 'thinking_delta', step, text: thought });
+        if (this.stream) this.emit({ type: 'thinking_delta', step, text: thought });
       }
       if (typeof delta.content === 'string' && delta.content) {
         content += delta.content;
-        this.emit({ type: 'assistant_delta', step, text: delta.content });
+        if (this.stream) this.emit({ type: 'assistant_delta', step, text: delta.content });
       }
       for (const tc of delta.tool_calls ?? []) {
         const at = typeof tc.index === 'number' ? tc.index : calls.size;

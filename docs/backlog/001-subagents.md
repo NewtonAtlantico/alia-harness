@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | In progress. Done: S1, S2, S3, S4, S5, S7 (isolation, depth guard, skill pre-load, inputs, nested output; `npm run test:subagents`). Next: S6 (blocked-at-gate resume), S8 (pipeline skill), S9 (docs). |
+| **Status** | In progress. Done: S1, S2, S3, S4, S5, S7, S8 (isolation, depth guard, skill pre-load, inputs, nested output, pipeline skill with one subagent per stage; `npm run test:subagents`). The main run's step cap is now 100 (`--max-steps`, `ALIA_MAX_STEPS`). Next: S6 (blocked-at-gate resume test with the fake model), S9 (docs). Not yet verified: a real pipeline run on the model with subagents (see section 9). |
 | **Depends on** | Skills phase 1: `use_skill`, skill catalog, pinned skill output, `requires:` gating |
 | **Primary consumer** | `requirements-to-tasks-pipeline` (`skills/e2e-pipeline`) |
 
@@ -107,7 +107,7 @@ Points are Fibonacci, capped at 8, matching the `spec-to-tasks` convention used 
 | S5 | Skill pre-load and `inputs` attachments (**done**; inputs and skill are validated before any child starts) | 3 | `skill` arg injects the pinned skill body; `inputs` attach through `resolveFileMentions`; unknown/unavailable skill returns an `Error:` string like `use_skill`. |
 | S6 | Blocked-at-gate protocol | 3 | A child that ends with `STATUS: blocked` returns `QUESTIONS`; parent asks the user, then re-spawns; second run resumes from `STATE.md`. Verified with a scripted fake model. |
 | S7 | Fake-model test harness + smoke test (`npm run test:subagents`). **Harness done** (`scripts/lib/fakeModel.ts`, with loop tests in `npm run test:agent`); the subagent-specific cases land with S4/S6. | 5 | Scripted `OpenAI`-compatible client drives the loop deterministically. Covers: isolation, depth guard, step cap, blocked path, error path. No network or API key needed. |
-| S8 | Update `requirements-to-tasks-pipeline` for the harness | 3 | Skill (or a harness-specific note in its README) says to use `run_subagent` per stage when available and falls back to inline stages when it is not. Add `requires: run_subagent` only to a harness-specific variant, so Claude Code still works. |
+| S8 | Update `requirements-to-tasks-pipeline` for the harness (**done**; "Running each stage in a subagent" section in the skill: parent owns stages, gates and user questions, child writes artifacts and records content, inline fallback kept) | 3 | Skill (or a harness-specific note in its README) says to use `run_subagent` per stage when available and falls back to inline stages when it is not. Add `requires: run_subagent` only to a harness-specific variant, so Claude Code still works. |
 | S9 | Docs + `/help` + README | 2 | `run_subagent` documented; `/tools` lists it; limits and gate protocol explained. |
 
 Suggested order: S1, S3, S2, S4, S7, S5, S6, S8, S9. Total: 29 points.

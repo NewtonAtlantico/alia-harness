@@ -23,9 +23,12 @@ copy in `e2e-pipeline/skills/`; that duplicate was removed, so there is one sour
 ## Running it
 
 - **Alia harness:** `/requirements-to-tasks-pipeline <input files>` (or let the model load it with
-  `use_skill`). It runs as one conversation: it asks the gate questions in plain text, stops, and
-  resumes from `STATE.md` on your next message. Long inputs can pressure the context window, which is
-  why running each stage in its own subagent is on the backlog: see
+  `use_skill`). Because the harness has `run_subagent`, each stage runs in its own fresh agent (own
+  context, own 80-step budget) and the main conversation only orchestrates: it asks the gate
+  questions, records the answers and moves the stages. A stage that needs a human decision comes back
+  `blocked` with its questions; the answers start a new subagent that resumes from the files. Without
+  `run_subagent` the skill falls back to running the stages inline in one conversation. The step cap
+  of the main run is 100 by default: `--max-steps <n>` in the CLI, or `ALIA_MAX_STEPS`. See
   [docs/backlog/001-subagents.md](../../docs/backlog/001-subagents.md).
 - **Claude Code:** make `skills/` available as `.claude/skills/` (or `~/.claude/skills/`) and ask
   Claude to use `requirements-to-tasks-pipeline`.

@@ -58,11 +58,17 @@ console.log('\n=== tool calls arrive in fragments ===');
   check('the second step streams as well, with its own step number', events.some((e) => e.type === 'assistant_delta' && (e as any).step === 2) && result.status === 'completed' && result.text === 'Li: ok.');
 }
 
-console.log('\n=== off by default ===');
+console.log('\n=== without the option: a silent stream (keeps the connection alive) ===');
 {
-  const { model, events, session } = open([{ content: 'Sem streaming.' }], 'ok', false);
+  const { model, events, session } = open([{ content: 'Sem deltas.', reasoning: 'Pensando.' }], 'ok', false);
   const result = await session.run('oi');
-  check('without the option nothing is streamed: no stream requested, no deltas, same answer', !model.requests[0].stream && !types(events).includes('assistant_delta') && result.text === 'Sem streaming.');
+  check('a stream is requested anyway (a long plain request is cut off by the headers timeout) but no deltas are emitted', model.requests[0].stream === true && !types(events).includes('assistant_delta') && !types(events).includes('thinking_delta'));
+  check('the answer and the reasoning arrive whole, as always', result.text === 'Sem deltas.' && events.some((e) => e.type === 'assistant_message' && e.final && e.text === 'Sem deltas.') && events.some((e) => e.type === 'thinking' && e.text === 'Pensando.'));
+}
+{
+  const { model, events, session } = open([{ content: 'Resposta inteira.' }], 'refuse-400', false);
+  const result = await session.run('oi');
+  check('an endpoint that cannot stream still works, without a notice nobody asked for', result.text === 'Resposta inteira.' && model.requests.length === 2 && !model.requests[1].stream && !events.some((e) => e.type === 'notice'));
 }
 
 console.log('\n=== an endpoint that cannot stream ===');

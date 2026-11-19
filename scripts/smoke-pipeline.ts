@@ -552,6 +552,25 @@ console.log('\n=== the pipeline skill tells the model about it ===');
   const skill = fs.readFileSync(path.resolve('skills', 'e2e-pipeline', 'SKILL.md'), 'utf8');
   check('SKILL.md says to use pipeline_state when available, and to fall back to writing STATE.md', skill.includes('pipeline_state') && /otherwise[^.]*STATE\.md by hand/i.test(skill));
   check('it covers recording inputs, gate questions and answers through the tool', skill.includes('add_input') && skill.includes('add_question') && skill.includes('answer_question') && skill.includes('defer_question'));
+  const flat = skill.replace(/\s+/g, ' ');
+  check('it runs each stage through run_subagent when available, with an inline fallback', flat.includes('Running each stage in a subagent') && flat.includes('If `run_subagent` is not available') && flat.includes('Calling a skill'));
+  check('the subagent records content but never moves a stage or a gate', flat.includes('must not move a stage or a gate') && flat.includes('`set_gate`'));
+  check('every stage skill is named for the subagent call', ['requirement-extraction', 'architecture-from-requirements', 'constitution-to-specs', 'spec-to-tasks'].every((n) => skill.includes(n)));
+}
+
+console.log('\n=== the step cap of a run ===');
+{
+  const { resolveMaxSteps, DEFAULT_MAX_STEPS } = await import('../src/core/session.js');
+  const saved = process.env.ALIA_MAX_STEPS;
+  delete process.env.ALIA_MAX_STEPS;
+  check('default is above the old 30 (a pipeline walks several stages)', resolveMaxSteps() === DEFAULT_MAX_STEPS && DEFAULT_MAX_STEPS > 30);
+  process.env.ALIA_MAX_STEPS = '45';
+  check('ALIA_MAX_STEPS overrides the default', resolveMaxSteps() === 45);
+  check('an explicit option wins over the environment', resolveMaxSteps(7) === 7);
+  process.env.ALIA_MAX_STEPS = 'abc';
+  check('a bad value falls back to the default', resolveMaxSteps() === DEFAULT_MAX_STEPS && resolveMaxSteps(0) === DEFAULT_MAX_STEPS && resolveMaxSteps(2.5) === DEFAULT_MAX_STEPS);
+  if (saved === undefined) delete process.env.ALIA_MAX_STEPS;
+  else process.env.ALIA_MAX_STEPS = saved;
 }
 
 if (failures > 0) {
