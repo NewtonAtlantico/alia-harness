@@ -14,7 +14,10 @@ import { usePipelineView } from '../hooks/usePipelineView';
 import { gateCardFor } from '../lib/pipelineRun';
 import { GateCard } from './GateCard';
 import { InteractionCards } from './InteractionCards';
+import { ArchitecturePanel } from './ArchitecturePanel';
 import { PipelineHeader } from './PipelineHeader';
+import { SpecsPanel } from './SpecsPanel';
+import { architectureFor, specsFor, stagePanelFor } from '../lib/stagePanels';
 import { QuestionCard } from './QuestionCard';
 import { SidePanel } from './SidePanel';
 import { Timeline } from './Timeline';
@@ -170,7 +173,11 @@ export function ConversationPane({ conversation, states, loading, intro, configu
   const [pipelineError, setPipelineError] = useState<string>();
   const [resuming, setResuming] = useState(false);
   const mine = forSession(interactions, info.id);
-  const card = pipeline && view && !running && mine.length === 0 ? gateCardFor(view) : null;
+  const idle = pipeline && !!view && !running && mine.length === 0;
+  const card = idle && view ? gateCardFor(view) : null;
+  const stage = idle && view ? stagePanelFor(view) : null;
+  const arch = stage === 'architecture' && view ? architectureFor(view) : null;
+  const specs = stage === 'specs' && view ? specsFor(view) : null;
   const resume = useCallback(async () => {
     setResuming(true);
     setPipelineError(undefined);
@@ -244,7 +251,9 @@ export function ConversationPane({ conversation, states, loading, intro, configu
             : undefined
         }
       />
-      {card && <GateCard key={card.gate} card={card} sessionId={info.id} defaultOwner={defaultOwner} onChanged={reload} onResume={resume} />}
+      {arch && <ArchitecturePanel data={arch} sessionId={info.id} onOpen={(file) => void openFile(file)} />}
+      {specs && <SpecsPanel key={info.id} data={specs} sessionId={info.id} by={defaultOwner.trim() || 'Usuário'} onChanged={reload} onResume={resume} onStarted={onStarted} />}
+      {card && !(stage === 'specs' && card.ready) && <GateCard key={card.gate} card={card} sessionId={info.id} defaultOwner={defaultOwner} onChanged={reload} onResume={resume} title={stage === 'architecture' ? t.run.arch.reviewTitle : undefined} chip={stage === 'architecture' ? arch?.recommendation : undefined} follows={stage !== 'specs'} />}
       <div className="composer-dock">
         <Composer sessionId={info.id} running={running} blockedReason={configured ? undefined : t.composer.notConfigured} onOpenSettings={onOpenSettings} onSubmit={submit} onStop={stop} />
       </div>

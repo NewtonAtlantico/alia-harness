@@ -74,6 +74,8 @@ interface Entry {
   projectSkills: { found: number; loaded: boolean };
   /** Calls closed as interrupted when this conversation was resumed; told to the page once, then zero. */
   interruptedPending: number;
+  /** A title to give the conversation once its first run has started (a pipeline is not called by its prompt). */
+  titleOnStart?: string;
 }
 
 interface PendingInteraction {
@@ -161,8 +163,10 @@ export class EngineRuntime {
   }
 
   /** Starts a run in the background: shows `text` as what the user said and gives the model `prompt`. */
-  private launch(e: Entry, text: string, prompt: string): void {
+  private launch(e: Entry, text: string, prompt: string, title?: string): void {
     const sessionId = e.id;
+    // Only the first run names a conversation: later ones (Retomar) keep the name it has.
+    if (title && !this.store.exists(e.id)) e.titleOnStart = title;
     this.options.post({ kind: 'user_message', sessionId, text });
     const controller = new AbortController();
     e.busy = true;
@@ -178,6 +182,12 @@ export class EngineRuntime {
         }
         if (!e.busy) this.closeInteractions(sessionId);
       });
+  }
+
+  /** A spec the state knows of (a typo in a slug must not create a review of nothing). */
+  private requireSpec(store: PipelineStateStore, spec: string): void {
+    const state = store.load();
+    if (!state?.specs.some((x) => x.slug === spec) && !state?.specReviews.some((x) => x.spec === spec)) throw new Error(`There is no spec "${spec}" in this pipeline.`);
   }
 
   /** The user chose these files in the page (or dropped them); only those, or files in the project, may be inventoried. */
@@ -259,6 +269,18 @@ export class EngineRuntime {
         onEvent: (event) => {
           // The run is over the moment run_finished is emitted; waiting for the promise to settle would make
           // a message sent right after the UI shows the end look like "still running".
+          {
+            // The conversation's file exists once its first message is saved: until then the rename has nothing to change.
+            const e = this.sessions.get(id);
+            if (e?.titleOnStart) {
+              try {
+                this.store.rename(id, e.titleOnStart);
+                e.titleOnStart = undefined;
+              } catch {
+                /* not saved yet: try again at the next event */
+              }
+            }
+          }
           if (event.type === 'run_finished' && !event.subagentId) {
             const e = this.sessions.get(id);
             if (e) {
@@ -441,7 +463,7 @@ export class EngineRuntime {
       const started = await e.session.startPipelinePrompt(inputs.map((i) => ({ path: path.resolve(i.path), ...(i.transcriptPath ? { transcriptPath: path.resolve(i.transcriptPath) } : {}) })));
       if (started.status === 'refused') return { started: false, problems: started.problems };
       const count = started.inputs.length;
-      this.launch(e, `Iniciar o pipeline com ${count} ${count === 1 ? 'entrada' : 'entradas'}: ${started.inputs.map((i) => i.name).join(', ')}`, started.prompt);
+      this.launch(e, `Iniciar o pipeline com ${count} ${count === 1 ? 'entrada' : 'entradas'}: ${started.inputs.map((i) => i.name).join(', ')}`, started.prompt, pipelineTitle(e.workspace));
       return { started: true, resumed: started.resumed, inputs: started.inputs.map((i) => ({ name: i.name, kind: i.kind, handledBy: i.handledBy })) };
     },
 
@@ -483,6 +505,37 @@ export class EngineRuntime {
       return { progress, clean: progress.open === 0 };
     },
 
+    'pipeline.reviewSpec': ({ sessionId, spec, status, comment, by }) => {
+      const e = this.entry(sessionId);
+      if (e.busy) throw new Error('This conversation is running. Pause it before reviewing here.');
+      const store = new PipelineStateStore(e.workspace);
+      this.requireSpec(store, spec);
+      const ops: Array<Record<string, unknown>> = [{ op: 'set_spec_review', spec, status, by }];
+      if (comment?.trim()) ops.push({ op: 'add_note', text: `Revisão de ${spec} (${by}): ${comment.trim()}` });
+      const result = store.apply(ops);
+      if (!result.ok) throw new Error(result.error);
+      return { status: getPipelineStatus(e.workspace) };
+    },
+
+    'pipeline.requestChanges': async ({ sessionId, spec, comment, by }): Promise<{ started: true }> => {
+      const e = this.entry(sessionId);
+      if (e.busy) throw new Error('This conversation is running. Pause it before asking for changes.');
+      const store = new PipelineStateStore(e.workspace);
+      this.requireSpec(store, spec);
+      const text = comment.trim();
+      // The specs stage (and what follows it) has to be redone and pass its gate again; the spec goes back to draft.
+      const result = store.apply([
+        { op: 'set_spec_review', spec, status: 'draft', by },
+        { op: 'add_note', text: `Alterações pedidas na spec ${spec} por ${by}: ${text}` },
+        { op: 'mark_stale', after_stage: 2, reason: `${by} pediu alterações na spec ${spec}: ${text}` },
+      ]);
+      if (!result.ok) throw new Error(result.error);
+      const resumed = await e.session.resumePipelinePrompt();
+      const prompt = `${resumed.prompt ?? ''}\n\nPedido de alterações de ${by} na spec "${spec}":\n${text}\n\nRefaça a etapa de specs levando isso em conta e registre a spec de novo (set_spec). Não aprove nada por conta própria: a revisão é humana.`;
+      this.launch(e, `Pedir alterações na spec ${spec}: ${text}`, prompt);
+      return { started: true };
+    },
+
     'pipeline.approveGate': ({ sessionId, gate }) => {
       const e = this.entry(sessionId);
       if (e.busy) throw new Error('This conversation is running. Pause it before approving here.');
@@ -496,7 +549,7 @@ export class EngineRuntime {
       if (e.busy) throw new Error('This conversation is already running. Stop it first, or wait for it to finish.');
       const resumed = await e.session.resumePipelinePrompt();
       if (!resumed.prompt) return { started: false, reason: 'no_pipeline' };
-      this.launch(e, 'Retomar o pipeline', resumed.prompt);
+      this.launch(e, 'Retomar o pipeline', resumed.prompt, pipelineTitle(e.workspace));
       return { started: true };
     },
 
@@ -583,6 +636,17 @@ export function countProjectSkills(workspace: string): number {
   } catch {
     return 0;
   }
+}
+
+/** What a pipeline conversation is called: "Pipeline: Portal do cliente". */
+function pipelineTitle(workspace: string): string {
+  let name = path.basename(workspace);
+  try {
+    name = new PipelineStateStore(workspace).load()?.project ?? name;
+  } catch {
+    /* the folder name will do */
+  }
+  return `Pipeline: ${name}`;
 }
 
 /** The pipeline of a project, reduced to what the sidebar chip needs. Never throws. */

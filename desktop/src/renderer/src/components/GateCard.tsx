@@ -18,8 +18,17 @@ export function GateCard({
   defaultOwner,
   onChanged,
   onResume,
+  title,
+  chip,
+  follows = true,
 }: {
   card: GateCardData;
+  /** Replaces the card's title (gate 2 calls it the architecture review). */
+  title?: string;
+  /** A chip beside the title (the recommendation of the architecture review). */
+  chip?: { label: string; tone: 'ok' | 'warn' | 'bad' };
+  /** Whether answering everything also approves the gate and goes on. False at gate 3, where the specs have to be reviewed first (that screen has its own button). */
+  follows?: boolean;
   sessionId: string;
   defaultOwner: string;
   /** The state changed: read it again. */
@@ -38,6 +47,7 @@ export function GateCard({
   const byId = new Map(card.open.map((q) => [q.id, q]));
   const set = (id: string, patch: Partial<QuestionForm>) => setForms((cur) => ({ ...cur, [id]: { ...cur[id], ...patch } }));
   const finish = finishAnswers(questions, forms, defaultOwner);
+  const goes = follows && finish.complete;
   const partial = partialAnswers(questions, forms, defaultOwner);
   const missingOwner = needsOwner(questions, forms, defaultOwner);
 
@@ -89,7 +99,13 @@ export function GateCard({
   return (
     <section className="interaction-card gate-card" role="group" aria-labelledby={titleId} data-testid="gate-card" data-gate={card.gate} aria-busy={working}>
       <h3 id={titleId}>
-        {card.title} <span className="hint">{t.run.gate.progress(card.settled.length, card.settled.length + card.open.length)}</span>
+        {title ?? card.title}{' '}
+        {chip && (
+          <span className={`chip small rec-${chip.tone}`} data-testid="gate-chip">
+            {chip.label}
+          </span>
+        )}{' '}
+        <span className="hint">{t.run.gate.progress(card.settled.length, card.settled.length + card.open.length)}</span>
       </h3>
 
       {card.settled.length > 0 && (
@@ -130,8 +146,8 @@ export function GateCard({
             }}
           />
           <div className="actions">
-            <button type="button" className="btn primary" disabled={working || (finish.complete ? false : partial.length === 0)} onClick={finish.complete ? sendAndGo : () => sendPartial(partial)}>
-              {working ? t.run.gate.working : finish.complete ? t.run.gate.sendAndGo : t.run.gate.send(partial.length, questions.length)}
+            <button type="button" className="btn primary" disabled={working || (finish.complete ? false : partial.length === 0)} onClick={goes ? sendAndGo : () => sendPartial(follows || !finish.complete ? partial : finish.answers)}>
+              {working ? t.run.gate.working : goes ? t.run.gate.sendAndGo : !follows && finish.complete ? t.approval.answer : t.run.gate.send(partial.length, questions.length)}
             </button>
             <button type="button" className="btn" disabled={working || partial.length === 0} onClick={() => sendPartial(partial)} title={t.run.gate.laterHint}>
               {t.run.gate.later}

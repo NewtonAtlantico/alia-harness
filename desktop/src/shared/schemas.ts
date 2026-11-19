@@ -98,6 +98,8 @@ export const rendererSchemas = {
   'pipeline.resume': strict({ sessionId }),
   'pipeline.state': strict({ projectPath }),
   'pipeline.answer': strict({ sessionId, gate: z.enum(['G1', 'G2', 'G3']), answers: z.array(userAnswer).min(1).max(50), by: z.string().trim().min(1).max(200) }),
+  'pipeline.reviewSpec': strict({ sessionId, spec: z.string().min(1).max(200).regex(/^[\w.-]+$/, 'not a valid spec name'), status: z.enum(['reviewed', 'in_review', 'draft']), comment: z.string().trim().max(5000).optional(), by: z.string().trim().min(1).max(200) }),
+  'pipeline.requestChanges': strict({ sessionId, spec: z.string().min(1).max(200).regex(/^[\w.-]+$/, 'not a valid spec name'), comment: z.string().trim().min(1).max(5000), by: z.string().trim().min(1).max(200) }),
   'pipeline.approveGate': strict({ sessionId, gate: z.enum(['G1', 'G2', 'G3']) }),
   'settings.get': none,
   'settings.update': strict({

@@ -631,6 +631,8 @@ console.log('\n=== pipeline intake: inspect, start, resume ===');
   await r.finished(sessionId, 0);
   const sent = JSON.stringify(r.model.requests[0]);
   check('the model got the pipeline skill and the inputs, and the page was told what the user "said"', sent.includes('requirements-to-tasks-pipeline') && sent.includes('BRD.pdf') && sent.includes('requirement-extraction-from-threads') && r.messages.some((m: any) => m.kind === 'user_message' && m.text.startsWith('Iniciar o pipeline com 3 entradas')));
+  const listed = await r.call('conversations.list', { projectPath: r.ws });
+  check('the conversation is called "Pipeline: <project>", not by its long prompt, and a later run does not rename it', listed.find((c: any) => c.id === sessionId)?.title === `Pipeline: ${path.basename(r.ws)}`, JSON.stringify(listed.map((c: any) => c.title)));
   check('the status request reads the pipeline', (await r.call('pipeline.status', { projectPath: r.ws })).next.kind === 'run_stage');
 
   check('a run in progress cannot be started over', await (async () => {
@@ -701,10 +703,54 @@ console.log('\n=== pipeline run: state, answers and approvals made by the user =
   check('the approval of the user passes the gate, and what comes next is the next gate (its question is open)', store.load()!.gates[0].status === 'passed' && approved.status.next.kind === 'answer_questions' && (approved.status.next as any).gate === 'G2');
 
   // Not while the model is working on the same file.
-  const busy = await rig(new FakeModel([{ content: 'x', delayMs: 800 } as any], 'repeat-last'), { ws: r.ws, dirs: r.dirs });
+  const pidA = path.join(mk('pid'), 'hang.pid');
+  const busy = await rig([toolTurn('run_bash', { command: hang.command(pidA), timeout_ms: 120000 }, 'h1'), { content: 'unused' }], { ws: r.ws, dirs: r.dirs, permissionMode: 'auto' });
   const bs = (await busy.open()).sessionId;
   await busy.call('session.run', { sessionId: bs, text: 'oi' });
+  await hang.started(pidA);
   check('while the conversation is running, answers and approvals are refused', (await busy.call('pipeline.answer', { sessionId: bs, gate: 'G2', answers: [{ id: 'q9', answer: 'CRM' }], by: 'N' }).then(() => '', (e) => e.message)).includes('running') && (await busy.call('pipeline.approveGate', { sessionId: bs, gate: 'G2' }).then(() => '', (e) => e.message)).includes('running'));
+  await busy.call('session.cancel', { sessionId: bs });
+  await busy.finished(bs, 0);
+}
+
+console.log('\n=== pipeline run: reviewing specs and asking for changes ===');
+{
+  const skillRoots = [{ label: 'bundled', dir: path.resolve('..', 'skills') }];
+  const r = await rig(new FakeModel([{ content: 'refiz as specs' }], 'repeat-last'), { skillRoots });
+  const { sessionId } = await r.open();
+  const store = new PipelineStateStore(r.ws);
+  store.apply([
+    { op: 'add_input', name: 'brd.pdf', input_kind: 'document' },
+    { op: 'set_stage', stage: 1, status: 'running' }, { op: 'set_stage', stage: 1, status: 'done' }, { op: 'set_gate', gate: 'G1', status: 'passed' },
+    { op: 'set_stage', stage: 2, status: 'running' }, { op: 'set_stage', stage: 2, status: 'done' }, { op: 'set_gate', gate: 'G2', status: 'passed' },
+    { op: 'set_stage', stage: 3, status: 'running' }, { op: 'set_stage', stage: 3, status: 'done' },
+    { op: 'set_spec', slug: 'login-sso', title: 'Login com SSO', persona: 'Cliente' },
+    { op: 'set_spec', slug: 'abrir-chamado', title: 'Abrir chamado', depends_on: ['login-sso'] },
+  ]);
+  const fails = (name: string, payload: object) => r.call(name, payload).then(() => '', (e) => e.message as string);
+
+  check('a spec that is not in the pipeline cannot be reviewed', (await fails('pipeline.reviewSpec', { sessionId, spec: 'nao-existe', status: 'reviewed', by: 'Ana' })).includes('There is no spec "nao-existe"'));
+  const approved = await r.call('pipeline.reviewSpec', { sessionId, spec: 'login-sso', status: 'reviewed', comment: 'Conferi com o BRD', by: 'Ana' });
+  const after = store.load()!;
+  check('approving records who and when, and keeps the comment as a note', after.specReviews.find((x) => x.spec === 'login-sso')!.status === 'reviewed' && after.specReviews.find((x) => x.spec === 'login-sso')!.by === 'Ana' && after.notes.some((n) => n.includes('login-sso') && n.includes('Ana') && n.includes('Conferi com o BRD')) && approved.status.next.kind === 'review_specs');
+  check('the gate cannot pass while a spec is unreviewed, and passes once all are', (await fails('pipeline.approveGate', { sessionId, gate: 'G3' })).includes('abrir-chamado') && (await r.call('pipeline.reviewSpec', { sessionId, spec: 'abrir-chamado', status: 'reviewed', by: 'Ana' })) && (await r.call('pipeline.approveGate', { sessionId, gate: 'G3' })).status.next.kind === 'run_stage');
+
+  const requested = await r.call('pipeline.requestChanges', { sessionId, spec: 'abrir-chamado', comment: 'Falta o critério de aceite de anexos.', by: 'Ana' });
+  await r.finished(sessionId, 0);
+  const redo = store.load()!;
+  check('asking for changes puts the spec back to draft, redoes the specs stage and gate 3, and keeps the request', requested.started === true && redo.specReviews.find((x) => x.spec === 'abrir-chamado')!.status === 'draft' && redo.stages[2].status === 'stale' && redo.gates[2].status !== 'passed' && redo.notes.some((n) => n.includes('Falta o critério de aceite de anexos.')));
+  const sent = JSON.stringify(r.model.requests[0]);
+  check('the agent is told the comment, that the review is human, and where it stopped', sent.includes('Falta o critério de aceite de anexos.') && sent.includes('a revisão é humana') && sent.includes('Redo stage 3') && r.messages.some((m: any) => m.kind === 'user_message' && m.text.startsWith('Pedir alterações na spec abrir-chamado')));
+  check('asking for changes needs a spec that exists, and is refused while the conversation runs', (await fails('pipeline.requestChanges', { sessionId, spec: 'x', comment: 'y', by: 'Ana' })).includes('There is no spec'));
+  const pidB = path.join(mk('pid'), 'hang.pid');
+  const busy = await rig([toolTurn('run_bash', { command: hang.command(pidB), timeout_ms: 120000 }, 'h1'), { content: 'unused' }], { ws: r.ws, dirs: r.dirs, skillRoots, permissionMode: 'auto' });
+  const bs = (await busy.open()).sessionId;
+  await busy.call('session.run', { sessionId: bs, text: 'oi' });
+  await hang.started(pidB);
+  const e1 = await busy.call('pipeline.requestChanges', { sessionId: bs, spec: 'login-sso', comment: 'y', by: 'Ana' }).then(() => '', (e) => e.message as string);
+  const e2 = await busy.call('pipeline.reviewSpec', { sessionId: bs, spec: 'login-sso', status: 'reviewed', by: 'Ana' }).then(() => '', (e) => e.message as string);
+  check('both are refused while a run is going', e1.includes('running') && e2.includes('running'), `${e1} | ${e2}`);
+  await busy.call('session.cancel', { sessionId: bs });
   await busy.finished(bs, 0);
 }
 

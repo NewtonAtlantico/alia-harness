@@ -36,10 +36,15 @@ import type {
   PipelineStage,
   Assumption,
   PipelineInput,
+  SpecReview,
+  SpecSummary,
+  ArchitectureSummary,
+  AdrAlignment,
+  AdrRef,
 } from 'alia-harness/core';
 
 export type { PermissionMode };
-export type { ToolAnnotation, DirectoryEntry, IntakeItem, IntakeProblem, PipelineStatus, PipelineState, GateId, GateProgress, GateQuestion, PipelineStage, Assumption, PipelineInput };
+export type { ToolAnnotation, DirectoryEntry, IntakeItem, IntakeProblem, PipelineStatus, PipelineState, GateId, GateProgress, GateQuestion, PipelineStage, Assumption, PipelineInput, SpecReview, SpecSummary, ArchitectureSummary, AdrAlignment, AdrRef };
 export type { AgentEvent, AliaModelConfig, ChatMessage, CommandInfo, CompactResult, ContextUsage, PermissionDecision, PermissionRule, RevertResult, SearchHit, SessionInfo, SwitchModelResult, UserAnswer, UserQuestion, WorkspaceEntry };
 
 // ------------------------------------------------------------------------------------ results
@@ -330,6 +335,10 @@ export interface RendererRequests {
   'pipeline.answer': { request: { sessionId: string; gate: GateId; answers: UserAnswer[]; by: string }; result: { progress: GateProgress; clean: boolean } };
   /** The user's approval of a gate (a human decision, never the model's): passes it if nothing is open. */
   'pipeline.approveGate': { request: { sessionId: string; gate: GateId }; result: { status: PipelineStatus } };
+  /** The user's review of one spec (gate 3): approve it (`reviewed`) or put it back (`in_review`, `draft`). A comment is kept as a note. Not while the conversation runs. */
+  'pipeline.reviewSpec': { request: { sessionId: string; spec: string; status: 'reviewed' | 'in_review' | 'draft'; comment?: string; by: string }; result: { status: PipelineStatus } };
+  /** The user asks for changes to a spec: the comment goes to the agent, the specs stage (and what follows) is marked stale, and the run starts. */
+  'pipeline.requestChanges': { request: { sessionId: string; spec: string; comment: string; by: string }; result: { started: true } };
   /** Resumes the pipeline from where `state.json` says it stopped. */
   'pipeline.resume': { request: { sessionId: string }; result: PipelineResumeResult };
   /** Opens a file or folder of the project with the system. Documents are opened, a folder is shown, anything else is only shown in its folder. */

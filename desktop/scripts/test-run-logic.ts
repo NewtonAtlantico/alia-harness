@@ -9,6 +9,7 @@ import path from 'node:path';
 import { PipelineStateStore, getPipelineStatus } from 'alia-harness/core';
 import type { PipelineView } from '../src/shared/ipc';
 import { canResume, categoryLabel, finishAnswers, gateCardFor, isBlankText, partialAnswers, runChip, settledText, stepperFor, toUserQuestions } from '../src/renderer/src/lib/pipelineRun';
+import { architectureFor, canFollowToTasks, reviewLine, specsFor, stagePanelFor } from '../src/renderer/src/lib/stagePanels';
 
 let failures = 0;
 function check(name: string, cond: boolean, extra = '') {
@@ -111,6 +112,72 @@ console.log('\n=== the gate card ===');
   check('a deferred question reads as an assumption of its owner, a yes/no as Sim/Não, a choice by its label', settledText(ready.settled.find((x) => x.id === 'q2')!) === 'adiada, suposição de Newton' && settledText(ready.settled.find((x) => x.id === 'q3')!) === 'Não' && settledText(ready.settled.find((x) => x.id === 'q1')!) === 'v2');
   s3.apply([{ op: 'set_gate', gate: 'G1', status: 'passed' }]);
   check('after the approval there is no card', gateCardFor(v()) === null);
+}
+
+console.log('\n=== gate 2 and gate 3 screens ===');
+{
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'alia-run4-'));
+  const s4 = new PipelineStateStore(ws);
+  const v = (): PipelineView => ({
+    status: getPipelineStatus(ws),
+    state: s4.load(),
+    artifacts: [
+      { stage: 2, path: 'docs/architecture/architecture.md', exists: fs.existsSync(path.join(ws, 'docs/architecture/architecture.md')), isDir: false },
+      { stage: 3, path: 'docs/specs/INDEX.md', exists: false, isDir: false },
+    ],
+    markdownExists: true,
+  });
+  s4.apply([
+    { op: 'add_input', name: 'a.pdf', input_kind: 'document' },
+    { op: 'set_stage', stage: 1, status: 'running' },
+    { op: 'set_stage', stage: 1, status: 'done' },
+    { op: 'set_gate', gate: 'G1', status: 'passed' },
+    { op: 'set_stage', stage: 2, status: 'running' },
+    { op: 'add_question', gate: 'G2', id: 'b1', prompt: 'Quem é dono das gravações?', kind: 'text', category: 'blocker' },
+  ]);
+  check('at gate 2 the architecture screen goes with the gate card', stagePanelFor(v()) === 'architecture');
+  check('with no summary recorded it says so, with no recommendation', architectureFor(v())!.summary === undefined && architectureFor(v())!.recommendation === undefined && architectureFor(v())!.adrs.length === 0);
+  fs.mkdirSync(path.join(ws, 'docs', 'architecture'), { recursive: true });
+  fs.writeFileSync(path.join(ws, 'docs/architecture/architecture.md'), '# Arquitetura');
+  check('...and points at the document when it exists', architectureFor(v())!.document === 'docs/architecture/architecture.md');
+
+  s4.apply([
+    { op: 'set_architecture', style: 'Monolito modular', driver: 'Equipe pequena', contexts: [{ name: 'Atendimento', role: 'Chamados' }, 'Pedidos'], recommendation: 'approve_with_notes', notes: 'Revisar o limite de Pedidos.' },
+    { op: 'add_adr', id: 'ADR-001', title: 'Usar PostgreSQL', status: 'accepted' },
+    { op: 'set_adr_alignment', adr: 'ADR-001', alignment: 'aligned' },
+    { op: 'set_adr_alignment', adr: 'ADR-002', alignment: 'misaligned', note: 'Propõe fila própria' },
+    { op: 'add_assumption', text: 'Sem multi-região no MVP', owner: 'Ana', stage: 2 },
+    { op: 'add_assumption', text: 'Outra etapa', owner: 'Ana', stage: 1 },
+  ]);
+  const arch = architectureFor(v())!;
+  check('the structured proposal: style, driver, contexts (a name alone is a context), notes', arch.summary?.style === 'Monolito modular' && arch.summary.driver === 'Equipe pequena' && arch.summary.contexts.length === 2 && arch.summary.contexts[1].name === 'Pedidos');
+  check('the recommendation reads as a chip in the words of the design', arch.recommendation?.label === 'Aprovar com notas' && arch.recommendation.tone === 'warn');
+  check('ADRs with their status, and the alignment rows say Alinhado or Desalinhado with the note', arch.adrs[0].id === 'ADR-001' && arch.adrs[0].status === 'accepted' && arch.alignment.length === 2 && arch.alignment[0].aligned === true && arch.alignment[1].aligned === false && arch.alignment[1].note === 'Propõe fila própria');
+  check('only the assumptions of this stage go forward from it', arch.assumptions.length === 1 && arch.assumptions[0].text === 'Sem multi-região no MVP');
+
+  s4.apply([{ op: 'answer_question', id: 'b1', answer: 'CRM', by: 'Ana' }, { op: 'set_stage', stage: 2, status: 'done' }, { op: 'set_gate', gate: 'G2', status: 'passed' }, { op: 'set_stage', stage: 3, status: 'running' }]);
+  check('after gate 2 the architecture screen is gone', stagePanelFor(v()) === null);
+  s4.apply([
+    { op: 'set_spec', slug: 'login-sso', title: 'Login com SSO', persona: 'Cliente', depends_on: [], path: 'docs/specs/login-sso-spec.md' },
+    { op: 'set_spec', slug: 'abrir-chamado', title: 'Abrir chamado', persona: 'Cliente', depends_on: ['login-sso'] },
+    { op: 'add_question', gate: 'G3', id: 'g1', prompt: 'Qual persona usa o painel?', kind: 'text' },
+    { op: 'set_stage', stage: 3, status: 'done' },
+  ]);
+  check('at gate 3 with a gap open, the specs screen goes with the gate card', stagePanelFor(v()) === 'specs' && specsFor(v())!.openGaps === 1);
+  s4.apply([{ op: 'answer_question', id: 'g1', answer: 'Atendente', by: 'Ana' }]);
+  const sp = specsFor(v())!;
+  check('the table joins the summaries with the reviews: persona, dependencies, a draft with nobody yet', sp.rows.length === 2 && sp.rows[1].persona === 'Cliente' && sp.rows[1].dependsOn.join() === 'login-sso' && sp.rows[0].status === 'draft' && sp.rows[0].by === undefined && sp.reviewed === 0 && !sp.allReviewed);
+  check('waiting for the reviews is its own screen, and a settled gap is shown as resolved', stagePanelFor(v()) === 'specs' && v().status.next.kind === 'review_specs' && sp.resolvedGaps.length === 1 && sp.openGaps === 0);
+  check('"Seguir para Tarefas" stays off until every spec is reviewed', !canFollowToTasks(sp));
+  s4.apply([{ op: 'set_spec_review', spec: 'login-sso', status: 'reviewed', by: 'Ana', date: '2026-11-18' }, { op: 'set_spec_review', spec: 'abrir-chamado', status: 'in_review' }]);
+  const half = specsFor(v())!;
+  check('who and when show for a reviewed spec, a status for the others, and still not all', reviewLine(half.rows[0]) === 'Aprovada por Ana em 2026-11-18' && reviewLine(half.rows[1]) === 'Em revisão' && half.reviewed === 1 && !canFollowToTasks(half));
+  s4.apply([{ op: 'set_spec_review', spec: 'abrir-chamado', status: 'reviewed', by: 'Ana', date: '2026-11-19' }]);
+  const all = specsFor(v())!;
+  check('every spec reviewed: it can follow to the tasks, and the gate is only waiting for that decision', all.allReviewed && canFollowToTasks(all) && v().status.next.kind === 'pass_gate' && stagePanelFor(v()) === 'specs');
+  s4.apply([{ op: 'reopen_question', id: 'g1' }]);
+  check('a gap reopened blocks it again', !canFollowToTasks(specsFor(v())!));
+  check('a review of a spec the summaries do not list still shows in the table', (() => { s4.apply([{ op: 'answer_question', id: 'g1', answer: 'x' }, { op: 'set_spec_review', spec: 'so-revisao', status: 'draft' }]); return specsFor(v())!.rows.some((r) => r.slug === 'so-revisao' && r.title === 'so-revisao'); })());
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

@@ -61,7 +61,8 @@
     "desktop:test:intake-logic": "npm --prefix desktop run test:intake-logic",
     "desktop:test:intake-app": "npm --prefix desktop run test:intake-app",
     "desktop:test:run-logic": "npm --prefix desktop run test:run-logic",
-    "desktop:test:run-app": "npm --prefix desktop run test:run-app"
+    "desktop:test:run-app": "npm --prefix desktop run test:run-app",
+    "desktop:test:gates-app": "npm --prefix desktop run test:gates-app"
   },
   "keywords": [
     "ai",
