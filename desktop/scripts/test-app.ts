@@ -52,6 +52,8 @@ const electronBinary: string = createRequire(path.join(desktop, 'package.json'))
 const env = { ...process.env, ALIA_DESKTOP_DATA_DIR: dataDir, ALIA_DESKTOP_TEST: '1', ALIA_TEST_PICK_FOLDER: project, ALIA_CONFIG: configFile } as NodeJS.ProcessEnv;
 delete env.ELECTRON_RUN_AS_NODE; // set in VS Code's terminal; with it the binary would behave as plain Node
 delete env.ELECTRON_RENDERER_URL;
+delete env.ALIA_API_KEY; // a developer's own key must not leak into the test
+delete env.OPENAI_API_KEY;
 
 const app: ElectronApplication = await electron.launch({ executablePath: electronBinary, args: ['.'], cwd: desktop, env });
 const page: Page = await app.firstWindow();

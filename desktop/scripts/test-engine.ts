@@ -11,6 +11,7 @@ import { EngineRuntime } from '../src/engine/runtime';
 import { Broker, ProjectRegistry } from '../src/main/broker';
 import type { Interaction, PushMessage } from '../src/shared/ipc';
 import { IpcValidationError } from '../src/shared/schemas';
+import { startFakeServer } from './lib/fakeServer';
 import { makeHang, sleep } from './lib/hang';
 
 let failures = 0;
@@ -48,13 +49,13 @@ interface Rig {
   waitInteraction: (since?: number) => Promise<Interaction>;
 }
 
-async function rig(turns: ScriptedTurn[] | FakeModel, opts: { cap?: number; dirs?: ReturnType<typeof dataDirs>; ws?: string; skillRoots?: Array<{ label: string; dir: string }> } = {}): Promise<Rig> {
+async function rig(turns: ScriptedTurn[] | FakeModel, opts: { permissionMode?: 'ask-dangerous' | 'ask-commands' | 'auto'; cap?: number; dirs?: ReturnType<typeof dataDirs>; ws?: string; skillRoots?: Array<{ label: string; dir: string }> } = {}): Promise<Rig> {
   const messages: PushMessage[] = [];
   const model = turns instanceof FakeModel ? turns : new FakeModel(turns);
   const rt = new EngineRuntime({ post: (m) => messages.push(m as PushMessage), clientFor: () => model.client, eventTextCap: opts.cap });
   const dirs = opts.dirs ?? dataDirs();
   const ws = opts.ws ?? mk('project');
-  await rt.handle('engine.configure', { config, skillRoots: opts.skillRoots ?? [], dataDirs: dirs });
+  await rt.handle('engine.configure', { config, skillRoots: opts.skillRoots ?? [], dataDirs: dirs, ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}) });
   const call = (name: string, payload: object = {}) => rt.handle(name as any, payload as any) as Promise<any>;
   const events = (sessionId: string, type?: string) => messages.filter((m) => m.kind === 'event' && m.sessionId === sessionId).map((m: any) => m.event).filter((e) => !type || e.type === type);
   const waitFor = async <T>(fn: () => T | undefined, ms = 8000): Promise<T> => {
@@ -388,6 +389,61 @@ console.log('\n=== models ===');
   check('model.switch to a configured model', (await r.call('model.switch', { sessionId, model: 'second' })).ok === true && (await r.call('model.list', { sessionId })).current === 'second');
   const bad = await r.call('model.switch', { sessionId, model: 'nonexistent' });
   check('an unknown model is reported with what is available', bad.ok === false && Array.isArray(bad.available));
+}
+
+console.log('\n=== the approval mode is a setting ===');
+{
+  const auto = await rig([toolTurn('run_bash', { command: 'echo no-prompt-needed' }, 'a1'), (req) => ({ content: `ran: ${lastToolContent(req).trim()}` })], { permissionMode: 'auto' });
+  const { sessionId } = await auto.open();
+  await auto.call('session.run', { sessionId, text: 'go' });
+  const fin = await auto.finished(sessionId);
+  check('in "auto" mode a command runs without asking', fin.result.text.includes('no-prompt-needed') && auto.interactions().length === 0, fin.result.text);
+
+  const strict = await rig([toolTurn('run_bash', { command: 'echo asked' }, 's1'), { content: 'done' }], { permissionMode: 'ask-commands' });
+  const s = await strict.open();
+  await strict.call('session.run', { sessionId: s.sessionId, text: 'go' });
+  check('in "ask-commands" mode (the default) it asks', (await strict.waitInteraction(0)).kind === 'permission');
+  await strict.call('session.cancel', { sessionId: s.sessionId });
+  await strict.finished(s.sessionId);
+
+  // The CLI's mode: only destructive commands ask.
+  const lenient = await rig([toolTurn('run_bash', { command: 'echo fine' }, 'l1'), (req) => ({ content: `ran: ${lastToolContent(req).trim()}` })], { permissionMode: 'ask-dangerous' });
+  const l = await lenient.open();
+  await lenient.call('session.run', { sessionId: l.sessionId, text: 'go' });
+  check('in "ask-dangerous" mode an ordinary command does not ask', (await lenient.finished(l.sessionId)).result.text.includes('fine') && lenient.interactions().length === 0);
+}
+
+console.log('\n=== the allowlist of a project, without an open conversation ===');
+{
+  const r = await rig([toolTurn('run_bash', { command: 'echo remembered' }, 'p1'), { content: 'ok' }]);
+  const { sessionId } = await r.open();
+  await r.call('session.run', { sessionId, text: 'go' });
+  const ask = await r.waitInteraction(0);
+  await r.call('interaction.respond', { id: ask.id, response: { decision: 'allow_always' } });
+  await r.finished(sessionId);
+  await r.call('session.close', { sessionId });
+  const rules = await r.call('permissions.listForProject', { projectPath: r.ws });
+  check('the rules saved by "always allow" can be listed for the project, with no conversation open', rules.length === 1 && rules[0].command === 'echo remembered' && rules[0].match === 'exact');
+  check('another project has none', (await r.call('permissions.listForProject', { projectPath: mk('other') })).length === 0);
+  check('a rule can be removed, and then it is gone', (await r.call('permissions.removeForProject', { projectPath: r.ws, command: 'echo remembered' })).removed === true && (await r.call('permissions.listForProject', { projectPath: r.ws })).length === 0 && (await r.call('permissions.removeForProject', { projectPath: r.ws, command: 'echo remembered' })).removed === false);
+}
+
+console.log('\n=== testing a connection ===');
+{
+  const KEY = 'sk-test-ENDPOINTKEY-42424242';
+  const server = await startFakeServer([], { apiKey: KEY });
+  const r = await rig(say('x'));
+  const good = await r.call('connection.test', { url: server.url, apiKey: KEY });
+  check('with the right key the endpoint\'s models are listed', good.ok === true && good.models.join() === 'fake-model', JSON.stringify(good));
+  const noSlash = await r.call('connection.test', { url: server.url.replace(/\/$/, ''), apiKey: KEY });
+  check('an address with or without the trailing slash works', noSlash.ok === true);
+  const wrong = await r.call('connection.test', { url: server.url, apiKey: 'sk-wrong-KEY-000000000' });
+  check('a rejected key is reported as such, without the key in the message', wrong.ok === false && wrong.reason === 'unauthorized' && !JSON.stringify(wrong).includes('sk-wrong-KEY'), JSON.stringify(wrong));
+  const missing = await r.call('connection.test', { url: server.url + 'nope/', apiKey: KEY });
+  check('an address that does not answer like an endpoint is "not found"', missing.ok === false && missing.reason === 'not_found', JSON.stringify(missing));
+  const down = await r.call('connection.test', { url: 'http://127.0.0.1:1/', apiKey: KEY });
+  check('a server that is not there is "unreachable"', down.ok === false && down.reason === 'unreachable' && !JSON.stringify(down).includes(KEY), JSON.stringify(down));
+  await server.close();
 }
 
 // ===================================================================================== broker

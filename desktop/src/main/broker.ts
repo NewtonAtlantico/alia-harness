@@ -40,8 +40,10 @@ export interface BrokerOptions {
   projects: ProjectRegistry;
   /** Shows the native folder dialog; resolves to the chosen folder, or null if the user cancelled. */
   pickFolder: () => Promise<string | null>;
-  /** Window controls, app info and the like. Optional so the engine-facing rules can be tested alone. */
+  /** Window controls, settings, app info and the like. Optional so the engine-facing rules can be tested alone. */
   main?: Partial<MainHandlers>;
+  /** Called when the user picks a folder, so it can be remembered across restarts. */
+  onProjectPicked?: (projectPath: string) => void;
 }
 
 export class Broker {
@@ -58,7 +60,12 @@ export class Broker {
     const { engine, projects } = this.options;
 
     if (name === 'projects.pick') {
-      return this.options.pickFolder().then((picked) => (picked ? { path: projects.allow(picked) } : null));
+      return this.options.pickFolder().then((picked) => {
+        if (!picked) return null;
+        const resolved = projects.allow(picked);
+        this.options.onProjectPicked?.(resolved);
+        return { path: resolved };
+      });
     }
 
     const handler = (this.options.main as Record<string, ((r: unknown, c: unknown) => unknown) | undefined> | undefined)?.[name];
@@ -75,9 +82,25 @@ export class Broker {
   }
 }
 
-const MAIN_ONLY: ReadonlySet<string> = new Set<MainRequestName>(['projects.pick', 'window.minimize', 'window.toggleMaximize', 'window.close', 'window.state', 'app.info', 'app.openExternal']);
+/** Requests that are never forwarded to the engine. The type makes this list complete: a new main request that is missing here does not compile. */
+const MAIN_ONLY = {
+  'projects.pick': true,
+  'projects.recent': true,
+  'settings.get': true,
+  'settings.update': true,
+  'settings.setApiKey': true,
+  'settings.clearApiKey': true,
+  'settings.testConnection': true,
+  'settings.legacyCandidate': true,
+  'settings.importLegacy': true,
+  'window.minimize': true,
+  'window.toggleMaximize': true,
+  'window.close': true,
+  'window.state': true,
+  'app.info': true,
+  'app.openExternal': true,
+} as const satisfies Record<MainRequestName, true>;
 
-/** Requests that are never forwarded to the engine. */
 function isMainOnly(name: string): boolean {
-  return MAIN_ONLY.has(name);
+  return Object.prototype.hasOwnProperty.call(MAIN_ONLY, name);
 }

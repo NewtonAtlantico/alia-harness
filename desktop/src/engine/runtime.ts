@@ -6,12 +6,14 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type OpenAI from 'openai';
+import OpenAI from 'openai';
 import {
   type AgentEvent,
   type AliaConfig,
   type AliaSession,
+  type PermissionMode,
   FileIndex,
+  PermissionStore,
   STAGES,
   SessionStore,
   createSession,
@@ -20,6 +22,7 @@ import {
 } from 'alia-harness/core';
 import type {
   ChangeInfo,
+  ConnectionTestResult,
   ConversationContent,
   DiffResult,
   EngineMessage,
@@ -68,6 +71,7 @@ export class EngineRuntime {
   private skillRoots: Array<{ label: string; dir: string }> = [];
   private store = new SessionStore();
   private permissionsDir?: string;
+  private permissionMode: PermissionMode = 'ask-commands';
   private readonly sessions = new Map<string, Entry>();
   private readonly pending = new Map<string, PendingInteraction>();
   private readonly cap: number;
@@ -165,8 +169,9 @@ export class EngineRuntime {
 
     selfTest: ({ dir }) => this.selfTest(dir),
 
-    'engine.configure': ({ config, skillRoots, dataDirs }) => {
+    'engine.configure': ({ config, skillRoots, dataDirs, permissionMode }) => {
       this.config = config;
+      this.permissionMode = permissionMode ?? 'ask-commands';
       this.skillRoots = skillRoots;
       this.store = new SessionStore({ dir: dataDirs?.sessions });
       this.permissionsDir = dataDirs?.permissions;
@@ -192,7 +197,7 @@ export class EngineRuntime {
         sessionStore: this.store,
         permissionsDir: this.permissionsDir,
         ...(resumeId ? { resume: resumeId } : { sessionId: id }),
-        permissionMode: 'ask-commands',
+        permissionMode: this.permissionMode,
         onEvent: (event) => {
           // The run is over the moment run_finished is emitted; waiting for the promise to settle would make
           // a message sent right after the UI shows the end look like "still running".
@@ -329,6 +334,12 @@ export class EngineRuntime {
 
     'permissions.remove': ({ sessionId, command, match }) => ({ removed: this.entry(sessionId).session.permissions.remove(command, match) }),
 
+    'permissions.listForProject': ({ projectPath }) => this.permissionsFor(projectPath).list(),
+
+    'permissions.removeForProject': ({ projectPath, command, match }) => ({ removed: this.permissionsFor(projectPath).remove(command, match) }),
+
+    'connection.test': ({ url, apiKey }) => this.testConnection(url, apiKey),
+
     'conversations.list': ({ projectPath, limit }) => this.store.list({ ...(projectPath ? { workspace: path.resolve(projectPath) } : {}), limit }),
 
     'conversations.search': ({ text, projectPath, limit }) => this.store.search(text, { ...(projectPath ? { workspace: path.resolve(projectPath) } : {}), limit }),
@@ -356,6 +367,31 @@ export class EngineRuntime {
 
     'interaction.pending': () => [...this.pending.values()].map((p) => p.interaction),
   };
+
+  /** The project's allowlist, read straight from its file (an open conversation reads the same file). */
+  private permissionsFor(projectPath: string): PermissionStore {
+    return new PermissionStore(path.resolve(projectPath), { dir: this.permissionsDir });
+  }
+
+  /** Lists the models at an endpoint. Fails with a reason the settings screen can explain; the key is never in the message. */
+  private async testConnection(url: string, apiKey: string): Promise<ConnectionTestResult> {
+    const client = new OpenAI({ apiKey, baseURL: url.endsWith('/') ? url : `${url}/`, timeout: 10_000, maxRetries: 0 });
+    try {
+      const list = await client.models.list();
+      return { ok: true, models: list.data.map((m) => m.id).slice(0, 500) };
+    } catch (err: any) {
+      const message = String(err?.message ?? err).split(apiKey).join('[redacted]').slice(0, 300);
+      const status: number | undefined = err?.status;
+      // The SDK's errors are named by class (`APIConnectionError`), while `name` is just "Error".
+      const name = `${err?.constructor?.name ?? ''} ${err?.name ?? ''}`;
+      let reason: NonNullable<ConnectionTestResult['reason']> = 'other';
+      if (status === 401 || status === 403) reason = 'unauthorized';
+      else if (status === 404) reason = 'not_found';
+      else if (/Timeout/i.test(name)) reason = 'timeout';
+      else if (/Connection/i.test(name) || ['ECONNREFUSED', 'ENOTFOUND', 'ECONNRESET', 'EHOSTUNREACH'].includes(err?.code ?? err?.cause?.code)) reason = 'unreachable';
+      return { ok: false, models: [], reason, message };
+    }
+  }
 
   // ---------------------------------------------------------------------------------- self test
 

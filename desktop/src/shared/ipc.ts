@@ -15,6 +15,7 @@ import type {
   CompactResult,
   ContextUsage,
   PermissionDecision,
+  PermissionMode,
   PermissionRule,
   RevertResult,
   SearchHit,
@@ -25,6 +26,7 @@ import type {
   WorkspaceEntry,
 } from 'alia-harness/core';
 
+export type { PermissionMode };
 export type { AgentEvent, AliaModelConfig, ChatMessage, CommandInfo, CompactResult, ContextUsage, PermissionDecision, PermissionRule, RevertResult, SearchHit, SessionInfo, SwitchModelResult, UserAnswer, UserQuestion, WorkspaceEntry };
 
 // ------------------------------------------------------------------------------------ results
@@ -123,6 +125,69 @@ export type Interaction =
 
 export type InteractionResponse = { decision: PermissionDecision } | { answers: UserAnswer[] };
 
+// ------------------------------------------------------------------------------------ settings
+
+/** A model the endpoint serves. `maxInputTokens` is the context size the app plans around. */
+export interface ModelSetting {
+  id: string;
+  name: string;
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  toolCalling?: boolean;
+  vision?: boolean;
+}
+
+/**
+ * What the settings screen sees. The API key is never in it: only whether one is stored. The key goes from the
+ * form to main and from main to the engine, and nowhere else.
+ */
+export interface SettingsView {
+  displayName: string;
+  organization: string;
+  endpointUrl: string;
+  models: ModelSetting[];
+  /** How commands are approved by default in new conversations. */
+  permissionMode: PermissionMode;
+  hasApiKey: boolean;
+  /** False when the OS cannot encrypt secrets: the key cannot be stored (it is never written in plain text). */
+  secureStorage: boolean;
+  /** An endpoint, a model and a key are all set, so conversations can start. */
+  configured: boolean;
+}
+
+/** What may be changed with `settings.update`; only the fields present change. */
+export interface SettingsUpdate {
+  displayName?: string;
+  organization?: string;
+  endpointUrl?: string;
+  models?: ModelSetting[];
+  permissionMode?: PermissionMode;
+}
+
+export interface ConnectionTestResult {
+  ok: boolean;
+  /** Model ids the endpoint reports (empty when it does not list any). */
+  models: string[];
+  reason?: 'unauthorized' | 'not_found' | 'unreachable' | 'timeout' | 'other';
+  /** Detail for the log or a tooltip; never contains the key. */
+  message?: string;
+}
+
+/** A configuration from an earlier setup (the CLI's alia-config.json) that can be imported. */
+export interface LegacyCandidate {
+  path: string;
+  endpointUrl: string;
+  models: number;
+  /** A key was found beside it (environment or .env). The key itself is never shown. */
+  hasApiKey: boolean;
+}
+
+export interface ImportSummary {
+  endpointUrl: string;
+  models: number;
+  importedKey: boolean;
+}
+
 // ------------------------------------------------------------------------------------ requests
 
 /** What the renderer may ask for, with the shape of each request and reply. */
@@ -145,6 +210,9 @@ export interface RendererRequests {
   'changes.keep': { request: { sessionId: string; paths?: string[] }; result: { kept: number } };
   'permissions.list': { request: { sessionId: string }; result: PermissionRule[] };
   'permissions.remove': { request: { sessionId: string; command: string; match?: 'exact' | 'prefix' }; result: { removed: boolean } };
+  /** The same, for a project that has no open conversation (the settings screen). */
+  'permissions.listForProject': { request: { projectPath: string }; result: PermissionRule[] };
+  'permissions.removeForProject': { request: { projectPath: string; command: string; match?: 'exact' | 'prefix' }; result: { removed: boolean } };
   'conversations.list': { request: { projectPath?: string; limit?: number }; result: SessionInfo[] };
   'conversations.search': { request: { text: string; projectPath?: string; limit?: number }; result: SearchHit[] };
   'conversations.rename': { request: { id: string; title: string }; result: SessionInfo };
@@ -154,6 +222,18 @@ export interface RendererRequests {
   'interaction.pending': { request: Record<string, never>; result: Interaction[] };
   /** Asks the user for a project folder with the native dialog; only folders chosen this way can be opened. */
   'projects.pick': { request: Record<string, never>; result: { path: string } | null };
+  /** Projects the user opened before, newest first. Only these (and ones picked now) can be opened. */
+  'projects.recent': { request: Record<string, never>; result: string[] };
+  'settings.get': { request: Record<string, never>; result: SettingsView };
+  'settings.update': { request: SettingsUpdate; result: SettingsView };
+  /** Stores the API key, encrypted with the OS. Write-only: nothing ever returns it. */
+  'settings.setApiKey': { request: { apiKey: string }; result: SettingsView };
+  'settings.clearApiKey': { request: Record<string, never>; result: SettingsView };
+  /** Lists the endpoint's models with the given address and key (or the saved ones). */
+  'settings.testConnection': { request: { endpointUrl?: string; apiKey?: string }; result: ConnectionTestResult };
+  'settings.legacyCandidate': { request: Record<string, never>; result: LegacyCandidate | null };
+  /** Asks the user for an alia-config.json (native dialog) and imports it, with the key from the environment or its .env. */
+  'settings.importLegacy': { request: Record<string, never>; result: ImportSummary | null };
   'window.minimize': { request: Record<string, never>; result: { ok: true } };
   'window.toggleMaximize': { request: Record<string, never>; result: { maximized: boolean } };
   'window.close': { request: Record<string, never>; result: { ok: true } };
@@ -164,7 +244,7 @@ export interface RendererRequests {
 }
 
 /** Requests answered by main itself; they never reach the engine. */
-export type MainRequestName = 'projects.pick' | 'window.minimize' | 'window.toggleMaximize' | 'window.close' | 'window.state' | 'app.info' | 'app.openExternal';
+export type MainRequestName = 'projects.pick' | 'projects.recent' | 'settings.get' | 'settings.update' | 'settings.setApiKey' | 'settings.clearApiKey' | 'settings.testConnection' | 'settings.legacyCandidate' | 'settings.importLegacy' | 'window.minimize' | 'window.toggleMaximize' | 'window.close' | 'window.state' | 'app.info' | 'app.openExternal';
 
 export interface AppInfo {
   name: string;
@@ -186,9 +266,11 @@ export interface InternalRequests {
    * once the user trusts the folder (A5).
    */
   'engine.configure': {
-    request: { config: AliaConfig; skillRoots: Array<{ label: string; dir: string }>; dataDirs?: { sessions?: string; permissions?: string } };
+    request: { config: AliaConfig; skillRoots: Array<{ label: string; dir: string }>; permissionMode?: PermissionMode; dataDirs?: { sessions?: string; permissions?: string } };
     result: { ok: true; models: number };
   };
+  /** Lists the models at an endpoint, to test an address and key. Runs in the engine (it has the HTTP client). */
+  'connection.test': { request: { url: string; apiKey: string }; result: ConnectionTestResult };
 }
 
 export type EngineRequests = Omit<RendererRequests, MainRequestName> & InternalRequests;

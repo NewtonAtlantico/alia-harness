@@ -19,7 +19,12 @@ export interface FakeServer {
   close(): Promise<void>;
 }
 
-export async function startFakeServer(turns: FakeTurnSource[]): Promise<FakeServer> {
+export interface FakeServerOptions {
+  /** When set, requests without `Authorization: Bearer <apiKey>` get a 401, like a real endpoint. */
+  apiKey?: string;
+}
+
+export async function startFakeServer(turns: FakeTurnSource[], options: FakeServerOptions = {}): Promise<FakeServer> {
   const queue = [...turns];
   const requests: FakeServer['requests'] = [];
   let ids = 0;
@@ -29,10 +34,13 @@ export async function startFakeServer(turns: FakeTurnSource[]): Promise<FakeServ
       res.writeHead(status, { 'content-type': 'application/json' });
       res.end(JSON.stringify(body));
     };
-    if (req.method === 'GET' && req.url?.endsWith('/models')) {
+    if (options.apiKey && req.headers.authorization !== `Bearer ${options.apiKey}`) {
+      return send(401, { error: { message: 'Incorrect API key provided', type: 'invalid_request_error' } });
+    }
+    if (req.method === 'GET' && req.url === '/models') {
       return send(200, { object: 'list', data: [{ id: 'fake-model', object: 'model' }] });
     }
-    if (req.method === 'POST' && req.url?.endsWith('/chat/completions')) {
+    if (req.method === 'POST' && req.url === '/chat/completions') {
       let raw = '';
       req.on('data', (d) => (raw += d));
       req.on('end', () => {

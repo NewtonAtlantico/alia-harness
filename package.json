@@ -43,7 +43,9 @@
     "desktop:test:app": "npm --prefix desktop run test:app",
     "desktop:test:security": "npm --prefix desktop run test:security",
     "desktop:test:hardening": "npm --prefix desktop run test:hardening",
-    "desktop:test:package": "npm --prefix desktop run test:package"
+    "desktop:test:package": "npm --prefix desktop run test:package",
+    "desktop:test:settings": "npm --prefix desktop run test:settings",
+    "desktop:test:settings-app": "npm --prefix desktop run test:settings-app"
   },
   "keywords": [
     "ai",

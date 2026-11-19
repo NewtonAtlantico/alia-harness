@@ -15,7 +15,9 @@
     "test:app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-app.ts",
     "test:security": "tsx --tsconfig tsconfig.node.json scripts/test-security.ts",
     "test:hardening": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-hardening.ts",
-    "test:package": "tsx --tsconfig tsconfig.node.json scripts/test-package.ts"
+    "test:package": "tsx --tsconfig tsconfig.node.json scripts/test-package.ts",
+    "test:settings": "tsx --tsconfig tsconfig.node.json scripts/test-settings.ts",
+    "test:settings-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-settings-app.ts"
   },
   "devDependencies": {
     "@electron/fuses": "^2.1.3",

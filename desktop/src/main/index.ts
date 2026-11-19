@@ -1,12 +1,15 @@
+import os from 'node:os';
 import path from 'node:path';
-import { BrowserWindow, Menu, app, dialog, ipcMain } from 'electron';
+import { BrowserWindow, Menu, app, dialog, ipcMain, safeStorage } from 'electron';
 import { CHANNELS, type AppCommand, type PushMessage } from '../shared/ipc';
 import { registerAppSchemePrivileges, serveApp } from './appProtocol';
-import { loadBootConfig, skillRoots } from './bootConfig';
 import { Broker, ProjectRegistry } from './broker';
 import { EngineHost } from './engineHost';
 import { confirmAndOpenExternal, installSessionGuards, installWebContentsGuards, isTrustedSender } from './guards';
 import { Logger } from './logger';
+import { SecretStore } from './secrets';
+import { SettingsService } from './settingsService';
+import { SettingsStore, defaultSettings } from './settings';
 import { buildMenu } from './menu';
 import { APP_ORIGIN } from './securityRules';
 import { commandForInput } from './shortcuts';
@@ -49,6 +52,26 @@ function start(): void {
   const openedLinks: string[] = [];
   const guardOptions = { devUrl, log, onExternalLink: testMode ? (url: string) => void openedLinks.push(url) : undefined };
 
+  // Settings and the encrypted API key live in the user's data folder, never in the project and never in a plain file.
+  const userData = app.getPath('userData');
+  const defaultName = os.userInfo().username.replace(/^./, (c) => c.toUpperCase());
+  const store = new SettingsStore(path.join(userData, 'settings.json'), defaultSettings(defaultName));
+  const secrets = new SecretStore(path.join(userData, 'credentials.bin'), {
+    isAvailable: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (plain) => safeStorage.encryptString(plain),
+    decrypt: (data) => safeStorage.decryptString(data),
+  });
+  const pickLegacyFile = async (suggestedFolder?: string): Promise<string | null> => {
+    if (testMode && process.env.ALIA_TEST_PICK_FILE) return process.env.ALIA_TEST_PICK_FILE;
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+    const options = { title: mainStrings.dialogs.pickConfig, defaultPath: suggestedFolder, filters: [{ name: 'alia-config.json', extensions: ['json'] }], properties: ['openFile' as const] };
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+  };
+
+  // eslint-disable-next-line prefer-const
+  let settings: SettingsService;
+
   const broadcast = (message: PushMessage): void => {
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send(CHANNELS.push, message);
@@ -61,21 +84,26 @@ function start(): void {
       if (message.kind === 'engine_status') log.warn(`engine ${message.status}`);
       broadcast(message);
     },
-    onStart: async (host) => {
-      const config = loadBootConfig(repoRoot);
-      if (!config) {
-        log.warn('no usable configuration yet (alia-config.json with an API key); sessions cannot open until there is one');
-        return;
-      }
-      log.addSecret(config.apiKey);
-      await host.request('engine.configure', {
-        config,
-        skillRoots: skillRoots(bundledSkills),
-        dataDirs: dataDir ? { sessions: path.join(dataDir, 'sessions'), permissions: path.join(dataDir, 'permissions') } : undefined,
-      });
-      log.info(`engine configured (${config.models.length} model${config.models.length === 1 ? '' : 's'})`);
+    // Every (re)start of the engine: give it the saved configuration (the service reads the key from the encrypted file).
+    onStart: async () => {
+      await settings.configureEngine();
     },
   });
+
+  settings = new SettingsService({
+    store,
+    secrets,
+    engine,
+    legacyFolders: [repoRoot, process.cwd(), path.join(os.homedir(), '.alia')],
+    pickLegacyFile,
+    bundledSkillsDir: bundledSkills,
+    userSkillsDir: path.join(os.homedir(), '.alia', 'skills'),
+    dataDirs: dataDir ? { sessions: path.join(dataDir, 'sessions'), permissions: path.join(dataDir, 'permissions') } : undefined,
+    log,
+    onSecret: (secret) => log.addSecret(secret),
+  });
+  // Folders the user opened before stay openable after a restart.
+  for (const folder of store.recentProjects()) projects.allow(folder);
 
   const windowOf = (context: unknown): BrowserWindow | undefined => {
     const sender = (context as { sender?: Electron.WebContents } | undefined)?.sender;
@@ -85,6 +113,7 @@ function start(): void {
   const broker = new Broker({
     engine,
     projects,
+    onProjectPicked: (folder) => store.rememberProject(folder),
     pickFolder: async () => {
       if (testMode && process.env.ALIA_TEST_PICK_FOLDER) return process.env.ALIA_TEST_PICK_FOLDER;
       const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
@@ -103,6 +132,14 @@ function start(): void {
       },
       'window.close': (_req, ctx) => (windowOf(ctx)?.close(), { ok: true as const }),
       'window.state': (_req, ctx) => ({ maximized: windowOf(ctx)?.isMaximized() ?? false }),
+      'projects.recent': () => store.recentProjects(),
+      'settings.get': () => settings.view(),
+      'settings.update': (patch) => settings.update(patch),
+      'settings.setApiKey': ({ apiKey }) => settings.setApiKey(apiKey),
+      'settings.clearApiKey': () => settings.clearApiKey(),
+      'settings.testConnection': (args) => settings.testConnection(args),
+      'settings.legacyCandidate': () => settings.legacyCandidate(),
+      'settings.importLegacy': () => settings.importLegacy(),
       'app.info': () => ({ name: mainStrings.appName, version: app.getVersion(), platform: process.platform }),
       'app.openExternal': async ({ url }, ctx) => ({ opened: await confirmAndOpenExternal(url, windowOf(ctx), guardOptions) }),
     },
@@ -190,7 +227,8 @@ function start(): void {
 
   installWebContentsGuards(guardOptions);
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
+    await settings.seedFromEnvironment();
     if (!devUrl) serveApp(path.join(import.meta.dirname, '../renderer'));
     installSessionGuards(guardOptions);
 
