@@ -33,9 +33,23 @@
     "test:pipeline": "tsx scripts/smoke-pipeline.ts",
     "test:resume": "tsx scripts/smoke-resume.ts",
     "test:issues": "tsx scripts/smoke-issues.ts",
-    "test:e2e": "tsx scripts/smoke-e2e.ts"
+    "test:e2e": "tsx scripts/smoke-e2e.ts",
+    "desktop:install": "npm --prefix desktop install",
+    "desktop:dev": "npm --prefix desktop run dev",
+    "desktop:build": "npm --prefix desktop run build",
+    "desktop:typecheck": "npm --prefix desktop run typecheck",
+    "desktop:smoke": "npm --prefix desktop run smoke",
+    "desktop:test:engine": "npm --prefix desktop run test:engine",
+    "desktop:test:app": "npm --prefix desktop run test:app"
   },
-  "keywords": ["ai", "agent", "alia", "llm", "cli", "harness"],
+  "keywords": [
+    "ai",
+    "agent",
+    "alia",
+    "llm",
+    "cli",
+    "harness"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {

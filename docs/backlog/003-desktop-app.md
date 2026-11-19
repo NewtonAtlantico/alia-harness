@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Not started. Written against the finished core work of backlog 002 (D1-D13). |
+| **Status** | In progress. Done: A13 (structured summaries in `core`; `npm run test:pipeline`), A1 (scaffold; `npm run desktop:smoke`), A2 (engine, IPC contract and validation; `desktop:test:engine`, `desktop:test:app`) and the part of A0 that did not need the design owner (logos, fonts, tokens). Proposals P1-P7 are being followed as recommended until someone says otherwise. Next: A3 (shell and hardening), then A4/A5. A0 still needs the color and string-list sign-off. See section 11 for what was built and where it departs from this document. |
 | **Depends on** | Backlog 002 (done): `createSession` and everything on it, plus the pipeline state and status APIs |
 | **Design** | `alia Harness Desktop.pdf`, 8 screens (listed in section 3). The PDF is flattened screenshots, so colors and type below are sampled, not specified |
 | **Primary consumer** | People at Instituto Atlântico on Windows 11 who turn BRDs, SOWs and transcripts into a backlog (the pipeline), and who use the agent on a code project (chat) |
@@ -148,9 +148,9 @@ Points are Fibonacci, capped at 8, matching `spec-to-tasks`. "Core" marks a task
 
 | ID | Task | Pts | Acceptance criteria |
 |---|---|---|---|
-| A0 | Design tokens and assets | 3 | Sampled palette checked against the design owner (primary blue about `#2f61c0`, selected `#dde6f7`, sidebar `#edf0f5`, background `#f6f7f9`, warning card `#fff6ed` and orange `#c25d00`, success `#1c7a3b`, diff add `#e8f3ea` / remove `#fdebeb`, terminal `#121826`); type (a UI sans, apparently Inter, and a monospace) confirmed and bundled offline; the alia and Atlântico logos obtained as SVG; spacing/radius scale and the full pt-BR string list written down. Output: a tokens file and a checklist per screen |
-| A1 | Scaffold: workspaces, `electron-vite` (main, engine, preload, renderer), scripts | 5 | `npm run dev` opens a window with the engine started and a "ping" round trip; typecheck, build and lint cover all packages; CLI install does not pull Electron; **an unsigned installer builds and launches on a clean profile with `core` imported** (finds ESM, ASAR and path problems on day one) |
-| A2 | Engine process, IPC contract, validation, event bridge | 8 | Types in `shared/ipc.ts`; every request has a schema and unknown fields are rejected; sessions are created per project with the app's `skillRoots`, `sessionStore`, `permissionMode: 'ask-commands'`, `onEvent`, `onConfirm`, `onAskUser`; events reach the renderer tagged by session; the engine restarts after a crash without losing saved conversations; a cancel kills the running command (a test runs a real long command) |
+| A0 | **Partly done** (see 11). Design tokens and assets | 3 | Sampled palette checked against the design owner (primary blue about `#2f61c0`, selected `#dde6f7`, sidebar `#edf0f5`, background `#f6f7f9`, warning card `#fff6ed` and orange `#c25d00`, success `#1c7a3b`, diff add `#e8f3ea` / remove `#fdebeb`, terminal `#121826`); type (a UI sans, apparently Inter, and a monospace) confirmed and bundled offline; the alia and Atlântico logos obtained as SVG; spacing/radius scale and the full pt-BR string list written down. Output: a tokens file and a checklist per screen |
+| A1 | **Done** (see 11). Scaffold: workspaces, `electron-vite` (main, engine, preload, renderer), scripts | 5 | `npm run dev` opens a window with the engine started and a "ping" round trip; typecheck, build and lint cover all packages; CLI install does not pull Electron; **an unsigned installer builds and launches on a clean profile with `core` imported** (finds ESM, ASAR and path problems on day one) |
+| A2 | **Done** (see 11). Engine process, IPC contract, validation, event bridge | 8 | Types in `shared/ipc.ts`; every request has a schema and unknown fields are rejected; sessions are created per project with the app's `skillRoots`, `sessionStore`, `permissionMode: 'ask-commands'`, `onEvent`, `onConfirm`, `onAskUser`; events reach the renderer tagged by session; the engine restarts after a crash without losing saved conversations; a cancel kills the running command (a test runs a real long command) |
 | A3 | Shell and hardening | 5 | Custom title bar and window controls as in the design; single-instance lock; app menu and shortcuts (Ctrl N); everything in 4.3 verified by a test that tries to navigate, open a window, and call Node from the renderer and fails; logs with no secrets |
 | A4 | Settings, config and secrets | 5 | The `/config` screen: endpoint URL, models (id, name, context size), display name, organization, default permission mode; API key stored with `safeStorage` and never sent to the renderer; "test connection" lists the endpoint's models; first-run import from an existing `alia-config.json` / `.env`; the allowlist per project can be listed and removed (`session.permissions`) |
 | A5 | Projects, trust, sidebar, conversations | 5 | Open folder, recent projects, switching projects; a one-time "trust this folder?" before project skills load; conversations list from `SessionStore` (newest first, by project), search, rename, delete; Ctrl N; the greeting by time of day with the display name; pipeline sessions listed with their gate chip from `getPipelineStatus`; per P5 the sidebar shows running and waiting states |
@@ -161,7 +161,7 @@ Points are Fibonacci, capped at 8, matching `spec-to-tasks`. "Core" marks a task
 | A10 | Right panel: Alterações, Arquivos, Terminal | 8 | **Alterações:** the changed files with +/- counts, a unified diff view (inline, horizontally scrollable as in the design) from `changes.diff`, "Desfazer" and "Manter alterações" (all or per file), conflicts reported when a file was edited since, "untracked" files listed without a diff, and a visible note that changes made through commands are not tracked. **Arquivos:** the project tree (built from `FileIndex`) with a read-only preview. **Terminal:** a read-only log of `run_bash` commands with output and exit codes. The panel toggles with the "Painel" button |
 | A11 | Pipeline: intake | 5 | **Core:** a small `classifyInput(path)` (document / transcript / short request / recording, from extension and size) and `startPipelinePrompt(inputs)`, mirroring `resumePipelinePrompt`. **UI:** target project selector, the resume banner when `getPipelineStatus` says a state exists, drag and drop or "Escolher arquivos", each file shown with its class and the skill that will read it, a recording refused with "Anexar transcrição" (attaches a transcript for it), unreadable files (scanned PDF, `.doc`) explained using `readDocument`'s own messages, the inventory (names, kinds, hashes) written to `state.json` **before** anything runs, then the run starts |
 | A12 | Pipeline: run view and the gate card | 8 | The stepper (Entradas, 1-4) with the status and gate progress of each stage from `getPipelineStatus`; the status chip ("Aguardando suas respostas / sua decisão / revisão das specs / Pipeline concluído"); "Pausar" cancels, "Retomar" uses `resumePipelinePrompt`; the **gate card** lists answered questions collapsed (from state) and the open ones with options and sources, categories ("Contradição entre documentos", "Baixa confiança", "Bloqueia as specs"), "Adiar" as a deferral with an owner (default: the user) and a blank text answer sent as that deferral; "Responder depois" returns the answers given so far; "Enviar e seguir" submits and, when the gate is clean, calls `set_gate` **directly** through `PipelineStateStore` (a human approval, not something the model does) and continues; the right panel shows artifacts (open with the system), inputs, assumptions and the context note; STATE.md opens from the header |
-| A13 | **Core:** structured pipeline summaries | 5 | New typed `pipeline_state` operations and `state.json` fields: `set_architecture` (style, driver, contexts, recommendation such as "Aprovar com notas"), `set_adr_alignment` (ADR, aligned / misaligned, note), `set_spec` (slug, title, persona, depends on, constraints); `pipeline_state get` returns them; STATE.md renders them; the pipeline skill is updated to record them (and to fall back to prose when the tool is missing); the status keeps working for states without them; golden files updated |
+| A13 | **Done** (see 11). **Core:** structured pipeline summaries | 5 | New typed `pipeline_state` operations and `state.json` fields: `set_architecture` (style, driver, contexts, recommendation such as "Aprovar com notas"), `set_adr_alignment` (ADR, aligned / misaligned, note), `set_spec` (slug, title, persona, depends on, constraints); `pipeline_state get` returns them; STATE.md renders them; the pipeline skill is updated to record them (and to fall back to prose when the tool is missing); the status keeps working for states without them; golden files updated |
 | A14 | Pipeline: architecture and specs screens | 8 | **Gate 2:** "Arquitetura proposta" and the ADR list from the structured summary (markdown fallback when absent), the review card with the recommendation chip and ADR alignment rows, the blocking question, non-blocking items listed as assumptions. **Gate 3:** the spec table (persona, depends on, status, who and when) from `specReviews` + `set_spec`; "Revisar" opens the spec preview (problem, acceptance criteria, out of scope, slices, rendered from the spec file); the review comment; "Aprovar spec" records `set_spec_review`; "Pedir alterações" sends the comment to the agent and reopens the stage (`mark_stale`) after confirmation; "Seguir para Tarefas" stays disabled until every spec is reviewed, then passes G3 directly |
 | A15 | Pipeline: final report, cross-checks and publish | 5 | **Core:** `pipeline_state` `set_check` (key, status, detail) and `summarizeTasks` extended to check task dependencies against story dependencies. **UI:** the backlog by spec (ids, points, dependencies) from `summarizeTasks`; "Checagem entre specs" combining computed checks (points, cycles, dependency consistency) with the model-recorded one (acceptance criteria coverage), each failing check explained; "Relatório final" (specs, tasks, points, ADRs) and "Nada bloqueado" / what blocks; assumptions with owners; "Abrir docs/tasks/"; **"Publicar issues"** calls `session.issuePublishing()` at every attempt: with `mode: 'publish'` it runs the suggested skill, otherwise it shows the warning (why, the exact fix, where drafts go) and runs in draft mode only after the user confirms |
 | A16 | Test harness and end-to-end tests | 5 | A local fake OpenAI-compatible server (scripted turns, tool calls, hangs) the app can be pointed at; Playwright-for-Electron tests for: first run and settings, open a project and chat with a tool call, approve and deny a command, cancel mid-command, undo a change, resume a conversation after restart, the whole pipeline through all three gates with the fake model, publish falling back to drafts; screenshots of every design screen stored for review |
@@ -216,3 +216,82 @@ A18                           Last, across everything.
 - An installer built by CI runs on a clean Windows 11 profile without admin rights, with a clean first run (settings, connection test, first chat).
 - Killing the engine, closing the app mid-run, and restarting loses no saved conversation and leaves no orphaned process.
 - `npm run typecheck`, the existing core suites (`test:*`) and the app's tests pass in CI; the CLI still installs without Electron.
+
+## 11. As built
+
+### A13: structured pipeline summaries (core)
+
+- Three new `pipeline_state` operations, all validated and all-or-nothing like the rest: `set_architecture` (`style`, `driver`,
+  `contexts` as names or `{ name, role }`, `recommendation` = `approve | approve_with_notes | request_changes`, `notes`; recording it again replaces
+  it), `set_adr_alignment` (`adr`, `alignment` = `aligned | misaligned`, `note` required when misaligned) and `set_spec` (`slug`, `title`, `persona`,
+  `depends_on`, `constraints`, `path`).
+- `state.json` gained `architecture?`, `adrAlignment` and `specs`. The version stays 1: an older file loads with empty summaries, and a state
+  without them renders exactly the same STATE.md as before (the existing golden file is unchanged). `pipeline_state get` returns them, and STATE.md
+  renders "Architecture", "ADR alignment" and "Specs" sections only when there is something to show (new golden: `expected-STATE-structured.md`).
+- **A spec recorded with `set_spec` starts as a `draft` review**, and a spec added after gate 3 passed reopens it. Without this, a model could pass
+  G3 without ever listing a spec for review, and the "Seguir para Tarefas" button would have nothing to wait for. Editing a spec that was already
+  reviewed does not undo its review.
+- Not validated on purpose: that an ADR in `set_adr_alignment` is in `adrs` (it is usually an ADR that already existed in the repository) and that
+  `depends_on` slugs exist yet (specs are recorded in any order). The UI should show an unknown slug as such.
+- `skills/e2e-pipeline/SKILL.md` tells the model to record them when the tool is available and to rely on the markdown otherwise.
+
+### A1: scaffold (`desktop/`)
+
+- `desktop/` is a **separate npm package, not an npm workspace** (a small departure from P2's wording). Reason: with workspaces, a plain `npm install` at the
+  root would also install Electron, which is exactly what P2 wanted to avoid. The root install and lockfile are untouched; run `npm run desktop:install` once.
+  Root scripts: `desktop:dev`, `desktop:build`, `desktop:typecheck`, `desktop:smoke`.
+- Layout: `src/main` (broker, `EngineHost`), `src/engine` (the utility process), `src/preload`, `src/renderer` (React), `src/shared/ipc.ts` (the one
+  types-only contract). `alia-harness/core` is aliased to `../src/core/index.ts`, so the app never depends on a stale `dist/`.
+- **No runtime dependencies**: `core` and its packages are bundled into `out/main/engine.js`, so the packaged app carries no `node_modules`.
+- **Main and the engine are ES modules; the preload is CommonJS** (`index.cjs`), because a sandboxed preload cannot be an ES module. Bundling `core` into CommonJS
+  broke `import.meta` (pdf.js), hence ESM.
+- **`fflate` is aliased to its browser build** in the bundle: its Node ESM entry declares its own `require`, which collides with the one electron-vite injects. Core
+  only uses the synchronous API, which the browser build has.
+- **`ELECTRON_RUN_AS_NODE` is set in VS Code's terminal**, which makes the Electron binary behave as plain Node. Anything that launches Electron from a script or a
+  test (A16) must delete it from the environment. The smoke script does.
+- The renderer's dev config needs `dedupe` and an explicit `cacheDir`; without them the dev server loaded two copies of React.
+- `npm run desktop:smoke` builds, launches the real app against a throwaway profile and checks: renderer -> preload -> main -> engine round trip; the engine
+  is another process; the engine reads a PDF, a Word file and a deck and creates a session. `ALIA_SMOKE_EXE` runs the same checks against a packaged build.
+  The unpacked ASAR build (`dist/win-unpacked`) passes. The NSIS installer (about 122 MB, per user) and the portable zip build.
+- **Not done in A1:** the installer was built but not installed and launched on a clean Windows profile (A17 does that); there is no linter in the repository, so
+  "lint" in the acceptance criteria is covered by `typecheck` for now; `npm audit` reports 6 moderate findings, all in electron-builder's build-time tooling (nothing
+  in the shipped app); the default Electron icon is used (A0 brings the assets).
+
+### A0: what was possible without the design owner
+
+- **Logos:** the alia and Atlântico logos arrived as small PNGs (185x115 and 226x78), not SVG, so they are used as they are in `renderer/src/assets/`. They will look soft on
+  high-density screens, and the alia one has its pale background baked in. Replace them when SVGs exist.
+- **Fonts**, from the Atlântico site as the reference: **Inter** (interface), **Poppins** 600/700 (display headings, as the site's), and **JetBrains Mono** (code; the design
+  does not name a monospace, so this is my choice and open to change). All are open-source (OFL), bundled through `@fontsource` packages, no network at run time.
+- **Tokens:** `renderer/src/styles/tokens.css` holds the sampled palette from this document plus the brand navy (`#26409a`, read off the website). Still to confirm with the design
+  owner: the sampled colors, and the per-screen checklist and pt-BR string list (not written).
+
+### A2: engine, IPC contract and validation
+
+- **Contract:** `desktop/src/shared/ipc.ts` (types only) and `schemas.ts` (zod). Every renderer request has a strict schema (unknown fields are an error) and the compiler checks each schema
+  against its type. Internal requests (`ping`, `selfTest`, `engine.configure`) are not in the renderer's table, so the page cannot make them. Names that exist on every object
+  (`constructor`, `__proto__`) are not requests. Ids that could name a path are refused; prompts over 200,000 characters are refused.
+- **The broker** (`main/broker.ts`, no Electron imports) validates, then checks every `projectPath` against the folders the user picked through the native dialog (`projects.pick`), then forwards.
+  A folder next to or inside a picked one is not covered. Main holds no conversation state.
+- **The engine** (`engine/runtime.ts`, no Electron imports, tested with the fake model) owns the sessions. Created per project with `ask-commands`, the app's `skillRoots`, a `SessionStore`, and
+  `onEvent`/`onConfirm`/`onAskUser`. **Project skills are not in the roots** (decision 4.3): they must wait for the trust prompt (A5). The host command `/config` is registered.
+- **Runs do not hold a request open.** `session.run` replies at once (`started`, what was attached, mention errors) and the end arrives as the `run_finished` event, so no request has a long timeout
+  (only `session.compact` has five minutes). `/skill input` and `@` mentions are expanded in the engine; an app command such as `/compact` is refused as a prompt (the page calls its own request).
+- **Interactions:** a permission request or `ask_user` becomes an `Interaction` pushed to the page, answered with `interaction.respond` (the kind of answer must match). A cancelled run, a closed
+  session or a finished run closes what is open (`interaction_closed`); `interaction.pending` lets a reloaded page show them again.
+- **Events** are pushed tagged with the session id. Text fields over 32,000 characters (tool output, mainly) are cut in the event and say how much was left out; the model still saw all of it.
+  Diffs are fetched on demand (`changes.diff`, capped at 400,000 characters).
+- **Crash handling:** an unexpected engine exit rejects the requests in flight, pushes `engine_status: down`, starts a new engine, configures it again and pushes `restarted`. In-memory sessions
+  are gone; the page reopens them with `session.open { resumeId }`. A handler exception or unhandled rejection in the engine exits the process on purpose, so main restarts it.
+- **Core change, found while doing this:** a run cut off by a crash can leave tool calls without results, which the endpoint rejects on the next request. `repairInterruptedHistory`
+  (core, tested in `test:store`) closes them with an "[Interrupted]" result when a conversation is resumed.
+- **A race fixed on the way:** `run_finished` is emitted slightly before the run's promise settles, so a message sent right after the page showed the end could be refused as "still running".
+  The conversation is freed at the event, and the older run's cleanup no longer touches a newer run.
+- **Tests:** `npm run desktop:test:engine` (93 checks: sessions, tagged events, permission and question round trips, dangerous commands, cancelling with a question open, a real long command killed
+  with its process tree in under two seconds, two conversations at once, changes/undo, event caps, saved conversations and resume, resume after a cut-off, models, and the broker's validation and folder rules)
+  and `npm run desktop:test:app` (the same flows through the real app with Playwright for Electron and a fake OpenAI-compatible server in `scripts/lib/fakeServer.ts`: IPC validation, a real command
+  approved and stopped, Desfazer, killing the engine process and carrying on, and no engine process left after quitting). The latter opens a window for a few seconds.
+- **Temporary:** the engine's config comes from `ALIA_CONFIG` or the repository's `alia-config.json` with the key from `ALIA_API_KEY` or a `.env` (`main/bootConfig.ts`); A4 replaces it with settings and
+  `safeStorage`. Environment switches (set by whoever launches the app, never by the page): `ALIA_DESKTOP_DATA_DIR`, `ALIA_DESKTOP_SMOKE`, `ALIA_DESKTOP_TEST` (see `main/index.ts`).
+- **Not done in A2:** `pipeline.*` and `issues.*` requests (they belong to A11, A12 and A15, which define what they need); `conversations.load` returns whole messages (A9 adds the annotations and a lighter form);
+  the app's bundled skills folder in a packaged build (`resources/skills`, A17).

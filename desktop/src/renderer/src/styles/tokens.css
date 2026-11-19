@@ -1,0 +1,70 @@
+/*
+ * Design tokens (A0). Colors marked "sampled" were read off the flattened design PDF and still need the design
+ * owner's confirmation; "brand" comes from the Atlântico website. Light theme only for v1: every color is a variable,
+ * so a dark theme later is a second block of values, not a rewrite.
+ */
+@import '@fontsource-variable/inter/index.css';
+@import '@fontsource/poppins/600.css';
+@import '@fontsource/poppins/700.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
+
+:root {
+  /* Type: Inter for the interface, Poppins for display headings (as on atlantico.com.br), JetBrains Mono for code. */
+  --font-ui: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Poppins', var(--font-ui);
+  --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+
+  /* Surfaces */
+  --bg: #f6f7f9; /* sampled */
+  --surface: #ffffff;
+  --sidebar: #edf0f5; /* sampled */
+  --border: #dfe3ea;
+  --terminal: #121826; /* sampled */
+
+  /* Text */
+  --text: #1f2937;
+  --text-muted: #6b7280;
+
+  /* Primary */
+  --primary: #2f61c0; /* sampled */
+  --primary-selected: #dde6f7; /* sampled */
+  --brand-navy: #26409a; /* brand: headings and accents on the Atlântico site */
+
+  /* Status */
+  --success: #1c7a3b; /* sampled */
+  --warning: #c25d00; /* sampled */
+  --warning-bg: #fff6ed; /* sampled: the permission card */
+  --danger: #b42318;
+  --diff-add: #e8f3ea; /* sampled */
+  --diff-remove: #fdebeb; /* sampled */
+
+  /* Scale */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --text-sm: 12.5px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 22px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+}
