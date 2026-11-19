@@ -17,8 +17,8 @@ export function App() {
   const [screen, setScreen] = useState<Screen>('chat');
   const [settings, setSettings] = useState<SettingsView>();
   const [now, setNow] = useState(() => new Date());
-  const ws = useWorkspace(() => setScreen('chat'));
   const inter = useInteractions();
+  const ws = useWorkspace(() => setScreen('chat'), inter.pending);
 
   useEffect(() => {
     window.alia.request('settings.get', {}).then((s) => {
@@ -85,7 +85,7 @@ export function App() {
             <SettingsScreen onClose={() => setScreen('chat')} onSaved={(s) => { setSettings(s); ws.actions.ensureDraft(); }} onProjectsChanged={ws.actions.refreshProjects} />
           ) : ws.open ? (
             <ConversationPane
-              key={ws.open.info.id}
+              key={`${ws.open.info.id}:${ws.open.epoch ?? 0}`}
               conversation={ws.open}
               states={ws.states}
               loading={ws.opening}

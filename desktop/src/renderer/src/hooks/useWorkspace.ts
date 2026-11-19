@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ActiveSession, ChatMessage, OpenedSession, PipelineBrief, SearchHit, SessionInfo } from '../../../shared/ipc';
+import type { ActiveSession, ChatMessage, OpenedSession, PipelineBrief, SearchHit, SessionInfo, ToolAnnotation } from '../../../shared/ipc';
 import { t } from '../i18n/pt-BR';
-import { fromActive, projectMarks, reduceSessionStates, type SessionState, type SessionStates } from '../lib/sessionStates';
+import { fromActive, projectMarks, withWaiting, reduceSessionStates, type SessionState, type SessionStates } from '../lib/sessionStates';
 
 const STORAGE_KEY = 'alia.currentProject';
 const errorText = (err: unknown) => String((err as Error)?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
@@ -28,6 +28,10 @@ export interface OpenConversation {
   info: SessionInfo;
   opened: OpenedSession;
   messages: ChatMessage[];
+  /** How long each call took and what it changed, from the saved conversation. */
+  annotations?: Record<string, ToolAnnotation>;
+  /** Bumped when the conversation is reloaded from disk (after an engine restart), so its view starts over from what is saved. */
+  epoch?: number;
 }
 
 export interface TrustPrompt {
@@ -41,7 +45,7 @@ const same = (a: string, b: string) => a.toLowerCase().replace(/[\\/]+$/, '') ==
  * Everything the sidebar and the home screen need: the projects, the conversations of the current one, search,
  * pipelines, which conversations are running or waiting, trust, and the conversation that is open.
  */
-export function useWorkspace(onNewConversation?: () => void) {
+export function useWorkspace(onNewConversation?: () => void, pending: ReadonlyArray<{ sessionId: string }> = []) {
   const [projects, setProjects] = useState<string[]>([]);
   const [currentProject, setCurrentProject] = useState<string>();
   const [conversations, setConversations] = useState<SessionInfo[]>([]);
@@ -113,9 +117,9 @@ export function useWorkspace(onNewConversation?: () => void) {
     })().catch(fail);
   }, []);
 
-  const loadOpen = useCallback(async (info: SessionInfo, opened: OpenedSession) => {
+  const loadOpen = useCallback(async (info: SessionInfo, opened: OpenedSession, reload = false) => {
     const content = await api('conversations.load', { id: info.id });
-    setOpen({ info: content?.info ?? info, opened, messages: content?.messages ?? [] });
+    setOpen((prev) => ({ info: content?.info ?? info, opened, messages: content?.messages ?? [], annotations: content?.annotations, epoch: reload ? (prev?.epoch ?? 0) + 1 : (prev?.epoch ?? 0) }));
   }, []);
 
   const draftToken = useRef(0);
@@ -156,7 +160,7 @@ export function useWorkspace(onNewConversation?: () => void) {
         const was = openRef.current;
         void refreshActive();
         if (was?.draft) void startDraft(was.info.workspace);
-        else if (was) void api('session.open', { projectPath: was.info.workspace, resumeId: was.info.id }).then((o) => loadOpen(was.info, o)).catch(fail);
+        else if (was) void api('session.open', { projectPath: was.info.workspace, resumeId: was.info.id }).then((o) => loadOpen(was.info, o, true)).catch(fail);
         return;
       }
       const isRunEdge = m.kind === 'event' && !m.event.subagentId && (m.event.type === 'run_started' || m.event.type === 'run_finished');
@@ -342,14 +346,16 @@ export function useWorkspace(onNewConversation?: () => void) {
     return () => clearTimeout(timer);
   }, [query]);
 
-  const marks: Record<string, SessionState> = projectMarks(activeList, states, projects);
+  // What is waiting for the user comes from the pending list, not from counting pushes (see withWaiting).
+  const shown = withWaiting(states, pending);
+  const marks: Record<string, SessionState> = projectMarks(activeList, shown, projects);
 
   return {
     projects,
     currentProject,
     conversations,
     pipelines,
-    states,
+    states: shown,
     projectMarks: marks,
     open,
     opening,

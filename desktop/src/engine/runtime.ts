@@ -64,6 +64,8 @@ interface Entry {
   controller?: AbortController;
   busy: boolean;
   projectSkills: { found: number; loaded: boolean };
+  /** Calls closed as interrupted when this conversation was resumed; told to the page once, then zero. */
+  interruptedPending: number;
 }
 
 interface PendingInteraction {
@@ -166,7 +168,9 @@ export class EngineRuntime {
 
   private describe(e: Entry, resumed: boolean): OpenedSession {
     const usage = e.session.getContextUsage();
-    return { sessionId: e.id, workspace: e.workspace, model: e.session.getModel(), resumed, messages: usage.messages, usage, projectSkills: e.projectSkills };
+    const interrupted = e.interruptedPending;
+    e.interruptedPending = 0;
+    return { sessionId: e.id, workspace: e.workspace, model: e.session.getModel(), resumed, messages: usage.messages, usage, projectSkills: e.projectSkills, interrupted };
   }
 
   // ---------------------------------------------------------------------------------- requests
@@ -241,7 +245,7 @@ export class EngineRuntime {
       // Commands only the app can perform; the renderer decides how.
       session.commands.register({ name: 'config', description: 'Open settings' });
 
-      const entry: Entry = { id, session, workspace, files: new FileIndex(workspace), busy: false, projectSkills: { found: countProjectSkills(workspace), loaded: trustedProject === true } };
+      const entry: Entry = { id, session, workspace, files: new FileIndex(workspace), busy: false, projectSkills: { found: countProjectSkills(workspace), loaded: trustedProject === true }, interruptedPending: session.interruptedCalls };
       this.sessions.set(id, entry);
       return this.describe(entry, Boolean(resumeId));
     },
@@ -372,7 +376,7 @@ export class EngineRuntime {
 
     'conversations.load': ({ id }): ConversationContent | null => {
       const loaded = this.store.load(id);
-      return loaded ? { info: loaded.info, messages: loaded.messages, skipped: loaded.skipped } : null;
+      return loaded ? { info: loaded.info, messages: loaded.messages, annotations: loaded.annotations, skipped: loaded.skipped } : null;
     },
 
     'interaction.respond': ({ id, response }) => {

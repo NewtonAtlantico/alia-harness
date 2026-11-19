@@ -6,7 +6,7 @@ import { chipFor } from '../src/renderer/src/lib/pipelineChip';
 import { greetingFor } from '../src/renderer/src/lib/greeting';
 import { projectName } from '../src/renderer/src/lib/projectName';
 import { relativeTime } from '../src/renderer/src/lib/relativeTime';
-import { fromActive, reduceSessionStates, stateOf, type SessionStates } from '../src/renderer/src/lib/sessionStates';
+import { fromActive, reduceSessionStates, stateOf, withWaiting, type SessionStates } from '../src/renderer/src/lib/sessionStates';
 import type { PushMessage } from '../src/shared/ipc';
 
 let failures = 0;
@@ -52,17 +52,10 @@ console.log('\n=== running and waiting marks ===');
   check('nothing is known: idle', stateOf(s, 'a').running === false && stateOf(s, 'a').waiting === 0);
   s = reduceSessionStates(s, started('a'));
   check('a run starting marks it running', stateOf(s, 'a').running && !stateOf(s, 'b').running);
-  s = reduceSessionStates(s, ask('a'));
-  s = reduceSessionStates(s, ask('a'));
-  check('each approval or question adds one waiting, and keeps it running', stateOf(s, 'a').waiting === 2 && stateOf(s, 'a').running);
-  s = reduceSessionStates(s, closed('a'));
-  check('answering one leaves the other', stateOf(s, 'a').waiting === 1);
-  s = reduceSessionStates(s, closed('a'));
-  s = reduceSessionStates(s, closed('a'));
-  check('the count never goes below zero', stateOf(s, 'a').waiting === 0);
-  s = reduceSessionStates(s, ask('a'));
+  const afterAsk = reduceSessionStates(reduceSessionStates(s, ask('a')), closed('a'));
+  check('approvals and questions are not counted here (the pending list is the one source for that), so nothing changes', afterAsk === s || JSON.stringify(afterAsk) === JSON.stringify(s));
   s = reduceSessionStates(s, finished('a'));
-  check('the end of the run clears both, whatever was still open', !stateOf(s, 'a').running && stateOf(s, 'a').waiting === 0);
+  check('the end of the run clears it', !stateOf(s, 'a').running && stateOf(s, 'a').waiting === 0);
   s = reduceSessionStates(s, started('a'));
   s = reduceSessionStates(s, started('b', { subagentId: 'child' }));
   s = reduceSessionStates(s, finished('a', { subagentId: 'child' }));
@@ -71,6 +64,16 @@ console.log('\n=== running and waiting marks ===');
   check('the engine going down forgets every conversation; coming back changes nothing', Object.keys(reduceSessionStates(s, { kind: 'engine_status', status: 'down' })).length === 0 && reduceSessionStates(s, { kind: 'engine_status', status: 'restarted' }) === s);
   const snap = fromActive([{ sessionId: 'x', workspace: 'w', running: true, waiting: 2 }, { sessionId: 'y', workspace: 'w', running: false, waiting: 0 }]);
   check('the engine\'s own list is the starting point after a reload', stateOf(snap, 'x').running && stateOf(snap, 'x').waiting === 2 && !stateOf(snap, 'y').running);
+}
+
+console.log('\n=== what is waiting comes from the pending list ===');
+{
+  const base = { a: { running: true, waiting: 5 }, b: { running: false, waiting: 0 } } as const;
+  const shown = withWaiting(base, [{ sessionId: 'a' }, { sessionId: 'c' }, { sessionId: 'c' }]);
+  check('the count is the number of pending items, whatever the pushes said before', shown.a.waiting === 1 && shown.c.waiting === 2 && shown.b.waiting === 0);
+  check('a conversation with something waiting is running, even if no run event was seen (a page opened mid-run)', shown.c.running === true && shown.b.running === false && shown.a.running === true);
+  check('answering the last one clears the mark at once', withWaiting(base, []).a.waiting === 0 && withWaiting(base, []).a.running === true);
+  check('nothing pending, nothing known: nothing', Object.keys(withWaiting({}, [])).length === 0);
 }
 
 console.log('\n=== the pipeline chip ===');

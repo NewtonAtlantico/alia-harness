@@ -34,9 +34,20 @@ export interface SessionInfo {
   updatedAt: string;
 }
 
+/**
+ * What the messages do not say about a tool call: how long it took and which files it wrote (path and line counts, never
+ * content). Saved beside the conversation so a reopened one can look like it did when it ran.
+ */
+export interface ToolAnnotation {
+  durationMs?: number;
+  changes?: Array<{ path: string; kind: 'created' | 'modified' | 'untracked'; added: number; removed: number }>;
+}
+
 export interface LoadedSession {
   info: SessionInfo;
   messages: ChatMessage[];
+  /** By tool call id. */
+  annotations: Record<string, ToolAnnotation>;
   /** Lines that could not be read (a write cut short by a crash, or damage). They are ignored. */
   skipped: number;
 }
@@ -70,7 +81,8 @@ interface MetaFile {
 type Entry =
   | { t: 'msg'; m: ChatMessage }
   | { t: 'set'; i: number; m: ChatMessage }
-  | { t: 'replace'; messages: ChatMessage[] };
+  | { t: 'replace'; messages: ChatMessage[] }
+  | { t: 'ann'; id: string; a: ToolAnnotation };
 
 const ID_PATTERN = /^[\w.-]+$/;
 const MAX_TITLE = 60;
@@ -142,6 +154,7 @@ function readEntries(file: string): { entries: Entry[]; skipped: number } {
       if (e?.t === 'msg' && e.m && typeof e.m.role === 'string') entries.push(e);
       else if (e?.t === 'set' && Number.isInteger(e.i) && e.i >= 0 && e.m && typeof e.m.role === 'string') entries.push(e);
       else if (e?.t === 'replace' && Array.isArray(e.messages)) entries.push(e);
+      else if (e?.t === 'ann' && typeof e.id === 'string' && e.a && typeof e.a === 'object') entries.push(e);
       else skipped++;
     } catch {
       skipped++;
@@ -156,9 +169,27 @@ function applyEntries(entries: Entry[]): ChatMessage[] {
     if (e.t === 'msg') messages.push(e.m);
     else if (e.t === 'set') {
       if (e.i < messages.length) messages[e.i] = e.m;
-    } else messages = [...e.messages];
+    } else if (e.t === 'replace') messages = [...e.messages];
   }
   return messages;
+}
+
+/** The annotations in a file, the last one for a call winning, kept only for calls that are in the history. */
+function collectAnnotations(entries: Entry[], messages: ChatMessage[]): Record<string, ToolAnnotation> {
+  const live = toolCallIds(messages);
+  const out: Record<string, ToolAnnotation> = {};
+  for (const e of entries) if (e.t === 'ann' && live.has(e.id)) out[e.id] = { ...out[e.id], ...e.a };
+  return out;
+}
+
+/** Ids of the tool calls a history mentions (announced by the assistant or answered by a tool message). */
+function toolCallIds(messages: ChatMessage[]): Set<string> {
+  const ids = new Set<string>();
+  for (const m of messages) {
+    if (m.role === 'tool') ids.add((m as { tool_call_id: string }).tool_call_id);
+    else if (m.role === 'assistant' && 'tool_calls' in m) for (const c of m.tool_calls ?? []) ids.add(c.id);
+  }
+  return ids;
 }
 
 export class SessionStore {
@@ -213,7 +244,8 @@ export class SessionStore {
     const info = this.readInfo(dir, id);
     if (!info) return undefined;
     const { entries, skipped } = readEntries(path.join(dir, `${id}.jsonl`));
-    return { info, messages: applyEntries(entries), skipped };
+    const messages = applyEntries(entries);
+    return { info, messages, annotations: collectAnnotations(entries, messages), skipped };
   }
 
   /** Newest first. With `workspace`, only that project's sessions. */
@@ -291,7 +323,7 @@ export class SessionStore {
    * after any change. `initial` is what is already saved (a resumed session's messages).
    * The files are created on the first real message, so opening a window leaves nothing behind.
    */
-  recorder(id: string, opts: { workspace: string; getModel: () => string; initial?: ChatMessage[] }): SessionRecorder {
+  recorder(id: string, opts: { workspace: string; getModel: () => string; initial?: ChatMessage[]; annotations?: Record<string, ToolAnnotation> }): SessionRecorder {
     assertId(id);
     return new SessionRecorder(this, id, opts);
   }
@@ -392,13 +424,17 @@ export class SessionRecorder {
   private needsNewline = false;
   private titled = false;
   private readonly file: string;
+  /** What is known about each tool call, written as it arrives and carried through every rewrite of the file. */
+  private annotations = new Map<string, ToolAnnotation>();
+  private flushedAnnotations = false;
 
   constructor(
     private store: SessionStore,
     readonly id: string,
-    private opts: { workspace: string; getModel: () => string; initial?: ChatMessage[] }
+    private opts: { workspace: string; getModel: () => string; initial?: ChatMessage[]; annotations?: Record<string, ToolAnnotation> }
   ) {
     this.persisted = (opts.initial ?? []).slice();
+    for (const [callId, a] of Object.entries(opts.annotations ?? {})) this.annotations.set(callId, a);
     this.file = path.join(store.projectDir(opts.workspace), `${id}.jsonl`);
     this.created = store.exists(id);
     if (this.created) this.needsNewline = this.endsMidLine();
@@ -410,6 +446,22 @@ export class SessionRecorder {
       this.write(messages);
     } catch {
       // Could not save this time; the next sync retries from the same baseline.
+    }
+  }
+
+  /**
+   * Remembers how long a tool call took and what it changed. Appended to the file at once (before the call's result
+   * message, which is saved next); until the conversation has a file it is kept and written with the first message.
+   */
+  annotate(toolCallId: string, annotation: ToolAnnotation): void {
+    try {
+      const merged = { ...this.annotations.get(toolCallId), ...annotation };
+      this.annotations.set(toolCallId, merged);
+      if (!this.created) return;
+      fs.appendFileSync(this.file, (this.needsNewline ? '\n' : '') + JSON.stringify({ t: 'ann', id: toolCallId, a: annotation } satisfies Entry) + '\n', 'utf-8');
+      this.needsNewline = false;
+    } catch {
+      // not critical: the conversation reads fine without it
     }
   }
 
@@ -433,7 +485,11 @@ export class SessionRecorder {
 
     // History shrank or was replaced (/clear, /compact): rewrite the file so old content is really gone.
     if (messages.length < this.persisted.length) {
-      writeAtomic(file, JSON.stringify({ t: 'replace', messages } satisfies Entry) + '\n');
+      // What is still in the history keeps what is known about it; what was cleared or summarized away does not.
+      const live = toolCallIds(messages);
+      for (const callId of [...this.annotations.keys()]) if (!live.has(callId)) this.annotations.delete(callId);
+      const kept = [...this.annotations].map(([id, a]) => JSON.stringify({ t: 'ann', id, a } satisfies Entry));
+      writeAtomic(file, [JSON.stringify({ t: 'replace', messages } satisfies Entry), ...kept].join('\n') + '\n');
       this.persisted = messages.slice();
       this.needsNewline = false;
       // After /clear nothing of the conversation is left, so an automatic title (taken from what was
@@ -456,6 +512,11 @@ export class SessionRecorder {
     for (let i = this.persisted.length; i < messages.length; i++) {
       lines.push(JSON.stringify({ t: 'msg', m: messages[i] } satisfies Entry));
     }
+    // Annotations that arrived before the file existed.
+    if (!this.flushedAnnotations && this.annotations.size > 0 && this.persisted.length === 0) {
+      for (const [id, a] of this.annotations) lines.push(JSON.stringify({ t: 'ann', id, a } satisfies Entry));
+    }
+    this.flushedAnnotations = true;
     if (lines.length > 0) {
       // If a crash cut the last line short, start on a fresh line so the new entry stays readable.
       fs.appendFileSync(file, (this.needsNewline ? '\n' : '') + lines.join('\n') + '\n', 'utf-8');

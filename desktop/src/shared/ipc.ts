@@ -21,12 +21,14 @@ import type {
   SearchHit,
   SessionInfo,
   SwitchModelResult,
+  ToolAnnotation,
   UserAnswer,
   UserQuestion,
   WorkspaceEntry,
 } from 'alia-harness/core';
 
 export type { PermissionMode };
+export type { ToolAnnotation };
 export type { AgentEvent, AliaModelConfig, ChatMessage, CommandInfo, CompactResult, ContextUsage, PermissionDecision, PermissionRule, RevertResult, SearchHit, SessionInfo, SwitchModelResult, UserAnswer, UserQuestion, WorkspaceEntry };
 
 // ------------------------------------------------------------------------------------ results
@@ -56,6 +58,8 @@ export interface OpenedSession {
   messages: number;
   /** Project skills in the folder, and whether they were loaded (only for a trusted folder). */
   projectSkills: { found: number; loaded: boolean };
+  /** Tool calls that had no result because the app stopped mid-run, closed when this conversation was resumed. Reported once. */
+  interrupted: number;
   /** Context window use right after opening (feeds the context meter). */
   usage: ContextUsage;
 }
@@ -126,6 +130,8 @@ export interface ModelList {
 export interface ConversationContent {
   info: SessionInfo;
   messages: ChatMessage[];
+  /** How long each tool call took and what it changed, by call id. */
+  annotations: Record<string, ToolAnnotation>;
   skipped: number;
 }
 

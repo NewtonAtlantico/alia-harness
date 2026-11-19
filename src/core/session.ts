@@ -159,6 +159,8 @@ export class AliaSession {
   /** The slash commands to offer: built-ins, the front-end's own (`register`), and one per available skill. */
   readonly commands: CommandRegistry;
   private recorder?: SessionRecorder;
+  /** Tool calls that had no result when this conversation was resumed (the app stopped mid-run), closed as interrupted. */
+  interruptedCalls = 0;
   private emit: EventSink;
   private activeRuns = 0;
   private compacting = false;
@@ -203,7 +205,13 @@ export class AliaSession {
     this.systemPrompt = catalog ? `${DEFAULT_SYSTEM_PROMPT}\n\n${catalog}` : DEFAULT_SYSTEM_PROMPT;
 
     const ui = options.ui;
-    const emit = combineSinks(ui ? eventsToAgentUI(ui) : undefined, options.onEvent);
+    // What a reopened conversation needs to look as it did: how long each call took, and what it changed.
+    const annotate: EventSink = (event) => {
+      if (event.type !== 'tool_call_finished' || event.subagentId) return;
+      const changes = event.changes?.map((c) => ({ path: c.path, kind: c.kind, added: c.added, removed: c.removed }));
+      this.recorder?.annotate(event.id, { durationMs: event.durationMs, ...(changes && changes.length > 0 ? { changes } : {}) });
+    };
+    const emit = combineSinks(ui ? eventsToAgentUI(ui) : undefined, options.onEvent, annotate);
     this.emit = emit;
     this.changes = new ChangeTracker(this.workspace);
     this.commands = new CommandRegistry(() => this.skills);
@@ -267,11 +275,13 @@ export class AliaSession {
         workspace: this.workspace,
         getModel: () => this.agent.getModel(),
         initial: resumed?.messages,
+        annotations: resumed?.annotations,
       });
       if (resumed) {
         // Same conversation, current system prompt.
         // A run cut short (the app or engine died) can leave tool calls without results; the endpoint would reject those.
-        const { messages: whole } = repairInterruptedHistory(resumed.messages);
+        const { messages: whole, repaired } = repairInterruptedHistory(resumed.messages);
+        this.interruptedCalls = repaired;
         const rest = whole[0]?.role === 'system' ? whole.slice(1) : whole;
         this.agent.setMessages([{ role: 'system', content: this.systemPrompt }, ...rest]);
       }

@@ -41,7 +41,7 @@ export interface NoticeRow {
   kind: 'notice';
   id: string;
   /** What happened; the catalog turns the code into words. `message` carries detail the code does not. */
-  code: 'cancelled' | 'failed' | 'max_steps' | 'compacted' | 'error' | 'info' | 'success';
+  code: 'cancelled' | 'failed' | 'max_steps' | 'compacted' | 'interrupted' | 'error' | 'info' | 'success';
   message: string;
   tokensBefore?: number;
   tokensAfter?: number;
@@ -261,7 +261,16 @@ export function applyPush(state: TimelineState, message: TimelineAction): Timeli
  * A call with no result is still running if the conversation is (the page opened mid-run: live events will finish it),
  * and otherwise it was cut off.
  */
-export function rowsFromMessages(messages: ChatMessage[], options: { running?: boolean } = {}): TimelineState {
+export function rowsFromMessages(
+  messages: ChatMessage[],
+  options: {
+    running?: boolean;
+    /** How long each call took and what it changed (saved beside the messages). */
+    annotations?: Record<string, { durationMs?: number; changes?: ChangeSummary[] }>;
+    /** Calls that were cut off by the app stopping, closed when the conversation was resumed. */
+    interrupted?: number;
+  } = {}
+): TimelineState {
   const rows: Row[] = [];
   const byCall = new Map<string, ToolRow>();
   let seq = 0;
@@ -289,6 +298,13 @@ export function rowsFromMessages(messages: ChatMessage[], options: { running?: b
       row.status = result.startsWith(CANCELLED_PREFIX) || result.startsWith(INTERRUPTED_PREFIX) ? 'cancelled' : isErrorResult(result) ? 'error' : 'done';
     }
   }
+  for (const [callId, row] of byCall) {
+    const a = options.annotations?.[callId];
+    if (!a) continue;
+    if (a.durationMs !== undefined) row.durationMs = a.durationMs;
+    if (a.changes && a.changes.length > 0) row.changes = a.changes;
+  }
+  if (options.interrupted && options.interrupted > 0) rows.push({ kind: 'notice', id: id(), code: 'interrupted', message: String(options.interrupted) });
   return { rows, modelBusy: false, running: options.running === true, seq, finalSeen: true };
 }
 

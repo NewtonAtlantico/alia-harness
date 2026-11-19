@@ -216,6 +216,10 @@ try {
   await page.getByRole('list', { name: 'Conversas de projeto' }).getByRole('button', { name: /organize o projeto/ }).click();
   await page.getByText('Primeira parte pronta.').waitFor();
   check('the first conversation is its own (the later runs of the other did not appear in it)', (await page.locator('.timeline').getByText('inicie o servidor').count()) === 0 && (await page.locator('[data-notice="cancelled"]').count()) === 0);
+  const reopenedWrite = (await page.locator('[data-tool="write_file"]').innerText()).replace(/\s+/g, ' ');
+  const reopenedEdit = (await page.locator('[data-tool="edit_file"]').innerText()).replace(/\s+/g, ' ');
+  check('a conversation reopened from disk shows what each call changed, as it did live (+2 for the write, +2 −1 for the edit)', reopenedWrite.includes('Gravou out/novo.md') && reopenedWrite.includes('+2') && reopenedEdit.includes('+2') && reopenedEdit.includes('−1'), `${reopenedWrite} | ${reopenedEdit}`);
+  check('...and how long each took', /\d+(,\d)? (ms|s)/.test(reopenedWrite) && /\d+(,\d)? (ms|s)/.test(await page.locator('[data-tool="run_bash"]').last().innerText()));
   check('it keeps the live rows of its second run, from disk', (await page.locator('.timeline').getByText('agora mude os arquivos').count()) === 1 && (await page.locator('[data-tool="write_file"]').count()) === 1);
 
   console.log('\n=== accessibility ===');

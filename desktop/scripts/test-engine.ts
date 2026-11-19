@@ -303,6 +303,8 @@ console.log('\n=== changes: list, diff, undo, keep ===');
   const diff = await r.call('changes.diff', { sessionId, path: 'src/new.ts' });
   check('changes.diff returns a unified diff', diff.truncated === false && diff.diff?.includes('+export const a = 1;') === true && diff.diff.includes('@@'));
   check('a file that is not pending has no diff', (await r.call('changes.diff', { sessionId, path: 'nothing.ts' })).diff === null);
+  const saved = await r.call('conversations.load', { id: sessionId });
+  check('the saved conversation is returned with what each call took and changed (and no file content)', typeof saved.annotations.w1?.durationMs === 'number' && saved.annotations.w1.changes?.[0].path === 'src/new.ts' && saved.annotations.w1.changes[0].added === 2 && !JSON.stringify(saved.annotations).includes('dois'), JSON.stringify(saved.annotations));
   const undone = await r.call('changes.revert', { sessionId, paths: ['src/new.ts'] });
   check('Desfazer deletes a file the agent created', undone.reverted.includes('src/new.ts') && !fs.existsSync(path.join(r.ws, 'src', 'new.ts')) && (await r.call('changes.list', { sessionId })).length === 0);
 
@@ -373,7 +375,8 @@ console.log('\n=== a conversation cut off by a crash resumes cleanly ===');
   fs.writeFileSync(file, lines.slice(0, at + 1).join('\n') + '\n');
 
   const back = await rig([{ content: 'recovered' }], { dirs, ws: r.ws });
-  await back.open(sessionId);
+  const reopened = await back.open(sessionId);
+  check('reopening a conversation cut off mid-run says how many calls were closed, once', reopened.interrupted === 1 && (await back.open(sessionId)).interrupted === 0);
   await back.call('session.run', { sessionId, text: 'are you there?' });
   const fin = await back.finished(sessionId);
   const sent = back.model.requests[0].messages;

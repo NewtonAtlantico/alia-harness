@@ -39,7 +39,7 @@ interface PaneProps {
 export function ConversationPane({ conversation, states, loading, intro, configured, onOpenSettings, onStarted, interactions, onRespond, defaultOwner }: PaneProps) {
   const { info, opened } = conversation;
   const state = stateOf(states, info.id);
-  const [timeline, dispatch] = useReducer(applyPush, conversation.messages, (messages) => rowsFromMessages(messages, { running: state.running }));
+  const [timeline, dispatch] = useReducer(applyPush, conversation.messages, (messages) => rowsFromMessages(messages, { running: state.running, annotations: conversation.annotations, interrupted: opened.interrupted }));
   const [usage, setUsage] = useState<ContextUsage>(opened.usage);
   const [model, setModel] = useState(opened.model);
   const root = useRef<HTMLElement>(null);

@@ -216,6 +216,9 @@ function NoticeBlock({ row }: { row: NoticeRow }) {
     case 'max_steps':
       text = t.timeline.notices.maxSteps;
       break;
+    case 'interrupted':
+      text = t.timeline.notices.interrupted(Number(row.message) || 1);
+      break;
     case 'compacted':
       text = t.timeline.notices.compacted(row.tokensBefore, row.tokensAfter);
       break;

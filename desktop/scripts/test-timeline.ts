@@ -266,7 +266,9 @@ console.log('\n=== the same conversation, reopened from disk ===');
     { setup: (ws) => fs.writeFileSync(path.join(ws, 'a.txt'), 'x\n') }
   );
   const saved = await live.call('conversations.load', { id: live.sessionId });
-  const reopened = rowsFromMessages(saved.messages);
+  const reopened = rowsFromMessages(saved.messages, { annotations: saved.annotations });
+  check('the saved conversation carries how long each call took', toolRows(reopened).every((t) => typeof t.durationMs === 'number') && toolRows(reopened).length === 2);
+  check('...the same numbers the live run showed', toolRows(reopened).map((t) => t.durationMs).join() === toolRows(live.state).map((t) => t.durationMs).join());
   check('the rows are the same kinds in the same order', kinds(reopened).join() === kinds(live.state).join(), `${kinds(reopened).join()}  vs  ${kinds(live.state).join()}`);
   check('the same tool calls, with the same arguments and outcomes', toolRows(reopened).map((t) => `${t.name}:${t.status}:${JSON.stringify(t.args)}`).join('|') === toolRows(live.state).map((t) => `${t.name}:${t.status}:${JSON.stringify(t.args)}`).join('|'));
   check('the command still reads as failed with its exit code', bashOutcome(toolRows(reopened)[1]).state === 'failed' && bashOutcome(toolRows(reopened)[1]).exitCode === 2);
@@ -281,6 +283,17 @@ console.log('\n=== the same conversation, reopened from disk ===');
   ] as any);
   check('a call closed by the crash repair is shown as cancelled; one with no result at all too; a result with no call is ignored', toolRows(withGap).map((t) => t.status).join() === 'cancelled,cancelled' && withGap.rows.length === 3);
   const parts = rowsFromMessages([{ role: 'user', content: [{ type: 'text', text: 'em ' }, { type: 'text', text: 'partes' }] }] as any);
+  const withNotes = rowsFromMessages(
+    [
+      { role: 'user', content: 'x' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'w', type: 'function', function: { name: 'write_file', arguments: '{"path":"a.md"}' } }] },
+      { role: 'tool', tool_call_id: 'w', content: 'ok' },
+    ] as any,
+    { annotations: { w: { durationMs: 420, changes: [{ path: 'a.md', kind: 'created', added: 3, removed: 0 }] }, ghost: { durationMs: 1 } }, interrupted: 2 }
+  );
+  check('a reopened write shows its +/- again, from the annotations; an annotation for a call that is not there is ignored', JSON.stringify(summarizeTool(toolRows(withNotes)[0])) === JSON.stringify({ kind: 'write', target: 'a.md', added: 3, removed: 0 }) && toolRows(withNotes)[0].durationMs === 420 && toolRows(withNotes).length === 1);
+  check('a conversation that was interrupted says so, at the end, with how many calls', withNotes.rows.at(-1)!.kind === 'notice' && (withNotes.rows.at(-1) as any).code === 'interrupted' && (withNotes.rows.at(-1) as any).message === '2');
+  check('without interrupted calls there is no such row', !rowsFromMessages([{ role: 'user', content: 'x' }] as any, { interrupted: 0 }).rows.some((r) => r.kind === 'notice'));
   const midRun = rowsFromMessages([{ role: 'user', content: 'x' }, { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'run_bash', arguments: '{}' } }] }] as any, { running: true });
   check('opened mid-run, a call with no result yet is running (live events will finish it), not cancelled', toolRows(midRun)[0].status === 'running' && midRun.running === true);
   check('text stored as parts reads as text', (parts.rows[0] as any).text === 'em partes');

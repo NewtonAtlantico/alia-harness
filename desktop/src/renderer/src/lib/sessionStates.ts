@@ -29,20 +29,30 @@ export function reduceSessionStates(states: SessionStates, message: PushMessage)
       if (event.type === 'run_finished') return { ...states, [message.sessionId]: { running: false, waiting: 0 } };
       return states;
     }
-    case 'interaction': {
-      const cur = stateOf(states, message.interaction.sessionId);
-      return { ...states, [message.interaction.sessionId]: { running: true, waiting: cur.waiting + 1 } };
-    }
-    case 'interaction_closed': {
-      const cur = stateOf(states, message.sessionId);
-      return { ...states, [message.sessionId]: { ...cur, waiting: Math.max(0, cur.waiting - 1) } };
-    }
+    // Approvals and questions are not counted here: the pending list is the one source of truth for what is
+    // waiting (see `withWaiting`), so an answer given in the page takes effect at once.
     case 'engine_status':
       // The engine process died or restarted: its conversations are gone until they are opened again.
       return message.status === 'down' ? {} : states;
     default:
       return states;
   }
+}
+
+/**
+ * The states as the sidebar shows them: what is waiting for the user comes from the list of pending approvals and
+ * questions (the one source of truth: an answered card leaves it at once, a cancelled run's cards are closed), and a
+ * conversation with something waiting is, of course, still running.
+ */
+export function withWaiting(states: SessionStates, pending: ReadonlyArray<{ sessionId: string }>): SessionStates {
+  const waiting: Record<string, number> = {};
+  for (const p of pending) waiting[p.sessionId] = (waiting[p.sessionId] ?? 0) + 1;
+  const out: Record<string, SessionState> = {};
+  for (const id of new Set([...Object.keys(states), ...Object.keys(waiting)])) {
+    const n = waiting[id] ?? 0;
+    out[id] = { running: (states[id]?.running ?? false) || n > 0, waiting: n };
+  }
+  return out;
 }
 
 const sameFolder = (a: string, b: string) => a.toLowerCase().replace(/[\\/]+$/, '') === b.toLowerCase().replace(/[\\/]+$/, '');

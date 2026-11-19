@@ -27,6 +27,8 @@ const mk = (label: string) => {
 const newStore = () => new SessionStore({ dir: mk('store') });
 const json = (v: unknown) => JSON.stringify(v);
 const lines = (file: string) => fs.readFileSync(file, 'utf8').split('\n').filter((l) => l.trim());
+/** The lines that are messages (annotations sit beside them in the same file). */
+const messageLines = (file: string) => lines(file).filter((l) => !l.includes('"t":"ann"'));
 
 const config = (maxInputTokens?: number): AliaConfig => ({
   name: 't',
@@ -114,7 +116,7 @@ console.log('\n=== a run is persisted, and nothing is written in the workspace =
   check('the saved history equals the live one, message for message', json(loaded.messages) === json(session.agent.getMessages()) && loaded.messages.length === 5);
   check('auto title comes from the first user message', loaded.info.title === 'Explain the project structure' && loaded.info.titleSource === 'auto');
   check('model and workspace are recorded', loaded.info.model === 'fake-model' && loaded.info.workspace === path.resolve(ws));
-  check('one line per message, no duplicates', lines(sessionFile(store, ws, 'rec1')).length === 5);
+  check('one line per message, no duplicates', messageLines(sessionFile(store, ws, 'rec1')).length === 5);
   check('the workspace is untouched', fs.readdirSync(ws).length === 0);
   check('the system prompt is saved too (resume sees what the model saw)', loaded.messages[0].role === 'system');
 }
@@ -132,7 +134,7 @@ console.log('\n=== resume ===');
   await second.session.run('and then?');
   check('the model received the earlier conversation plus the new question', second.model.requests[0].messages.length === 6 && messageText(second.model.requests[0].messages[5]) === 'and then?');
   const after = store.load('r1')!;
-  check('the same files carry on (7 messages, no duplicates)', after.messages.length === 7 && lines(sessionFile(store, ws, 'r1')).length === 7 && json(after.messages) === json(second.session.agent.getMessages()));
+  check('the same files carry on (7 messages, no duplicates)', after.messages.length === 7 && messageLines(sessionFile(store, ws, 'r1')).length === 7 && json(after.messages) === json(second.session.agent.getMessages()));
   check('an unchanged system prompt writes no spurious edit', !lines(sessionFile(store, ws, 'r1')).some((l) => l.includes('"t":"set"')));
   check('the title is kept', after.info.title === 'first question');
 
@@ -377,6 +379,65 @@ console.log('\n=== a run that was cut short can be resumed ===');
   const sent = resumed.model.requests[0].messages;
   const toolIds = sent.filter((m) => m.role === 'tool').map((m: any) => m.tool_call_id);
   check('the resumed conversation answers every tool call it announced', r.status === 'completed' && toolIds.join() === 'x1,x2');
+  check('and it says how many calls it had to close (the app stopped mid-run)', resumed.session.interruptedCalls === 1);
+  const clean = open(store, ws, say('fine'), { resume: 'cut' });
+  check('a conversation that stopped cleanly reports none', clean.session.interruptedCalls === 0);
+}
+
+console.log('\n=== annotations: how long a call took and what it changed ===');
+{
+  const store = newStore();
+  const ws = mk('ws');
+  const turns: ScriptedTurn[] = [
+    { toolCalls: [{ name: 'write_file', args: { path: 'out/novo.md', content: 'um\ndois\n' }, id: 'w1' }] },
+    { toolCalls: [{ name: 'list_files', args: { path: '.' }, id: 'l1' }] },
+    { content: 'pronto' },
+  ];
+  const first = open(store, ws, turns, { sessionId: 'ann' });
+  await first.session.run('crie um arquivo');
+  const loaded = store.load('ann')!;
+  const w = loaded.annotations['w1'];
+  check('each finished call is annotated with how long it took', typeof w?.durationMs === 'number' && w.durationMs >= 0 && typeof loaded.annotations['l1']?.durationMs === 'number');
+  check('a call that wrote a file says which, and the line counts, and nothing of the content', w?.changes?.length === 1 && w.changes[0].path === 'out/novo.md' && w.changes[0].kind === 'created' && w.changes[0].added === 2 && w.changes[0].removed === 0 && !JSON.stringify(loaded.annotations).includes('dois'));
+  check('a call that wrote nothing has no changes', loaded.annotations['l1'].changes === undefined);
+  check('the messages are exactly what they were (annotations are beside them, not in them)', loaded.messages.length === first.session.agent.getMessages().length && loaded.skipped === 0);
+  check('searching ignores them', store.search('w1').length === 0 && store.search('crie um arquivo').length === 1);
+
+  const again = open(store, ws, [{ content: 'mais uma' }], { resume: 'ann' });
+  await again.session.run('e agora?');
+  check('they survive being resumed and carried on', store.load('ann')!.annotations['w1']?.changes?.[0].path === 'out/novo.md');
+
+  const file = sessionFile(store, ws, 'ann');
+  fs.appendFileSync(file, '{"t":"ann","id":5}\n{"t":"ann","id":"x"}\n');
+  const damaged = store.load('ann')!;
+  check('an annotation line that is wrong is skipped and counted, never fatal', damaged.skipped === 2 && damaged.annotations['w1'] !== undefined);
+  check('an annotation for a call that is not in the history is not returned', damaged.annotations['x'] === undefined);
+
+  again.session.reset();
+  const cleared = store.load('ann')!;
+  check('/clear takes the annotations with the messages, from the file too', Object.keys(cleared.annotations).length === 0 && !fs.readFileSync(file, 'utf8').includes('"t":"ann"'));
+
+  // A rewrite that keeps some of the history keeps what is known about it.
+  const rec = store.recorder('keep', { workspace: ws, getModel: () => 'm' });
+  const call = (id: string) => ({ id, type: 'function' as const, function: { name: 'list_files', arguments: '{}' } });
+  rec.annotate('early', { durationMs: 5 }); // before the file exists
+  const history: ChatMessage[] = [
+    { role: 'user', content: 'x' },
+    { role: 'assistant', content: null, tool_calls: [call('early'), call('late')] },
+    { role: 'tool', tool_call_id: 'early', content: 'a' },
+    { role: 'tool', tool_call_id: 'late', content: 'b' },
+  ];
+  rec.sync(history);
+  rec.annotate('late', { durationMs: 9, changes: [{ path: 'a.ts', kind: 'modified', added: 1, removed: 1 }] });
+  const stored = store.load('keep')!;
+  check('an annotation that arrived before the conversation had a file is written with it', stored.annotations['early']?.durationMs === 5 && stored.annotations['late']?.changes?.[0].path === 'a.ts');
+  rec.annotate('stray', { durationMs: 1 }); // a call that is not in this conversation at all (a subagent's, for instance)
+  rec.sync([{ role: 'user', content: 'resumo' }, history[1], history[3]]); // a compaction: one result is summarized away
+  const compacted = store.load('keep')!;
+  check('after a compaction, the calls still in the history keep what is known about them', compacted.annotations['late']?.durationMs === 9 && compacted.annotations['late'].changes?.length === 1 && compacted.annotations['early']?.durationMs === 5);
+  check('...and an id that is nowhere in the history is dropped', compacted.annotations['stray'] === undefined && !fs.readFileSync(sessionFile(store, ws, 'keep'), 'utf8').includes('stray'));
+  store.delete('keep');
+  check('deleting the conversation deletes them', store.load('keep') === undefined);
 }
 
 if (failures > 0) {

@@ -75,6 +75,8 @@ const server = await startFakeServer(
     // R8: a background conversation
     bash('echo fundo', 'b8'),
     { content: 'fundo ok' },
+    // R9: the app stops while a card is open
+    bash('echo queda', 'b9'),
   ],
   { apiKey: KEY }
 );
@@ -215,6 +217,18 @@ try {
   await card().getByRole('button', { name: 'Negar' }).click();
   await sleep(300);
   check('and when the last is answered the card is gone', (await card().count()) === 0);
+  check('the orange dot and the "aguardando" notice go with it at once (not when the run ends)', (await page.getByRole('img', { name: 'Aguardando sua aprovação' }).count()) === 0 && (await page.getByText('Aguardando sua aprovação.').count()) === 0);
+
+  console.log('\n=== the app stops while a card is open ===');
+  await box().waitFor();
+  await said('rode antes da queda');
+  await card().waitFor({ timeout: 15000 });
+  await app.evaluate(() => (globalThis as any).__aliaTest.engine.crashForTest());
+  const interrupted = page.locator('[data-notice="interrupted"]');
+  await interrupted.waitFor({ timeout: 30000 });
+  check('the card is gone (nothing is waiting any more), and the conversation says it was interrupted', (await card().count()) === 0 && (await interrupted.innerText()).includes('foi interrompida') && (await interrupted.innerText()).includes('1 chamada'), await interrupted.innerText());
+  check('the command that was waiting is shown as cancelled, not as waiting for an approval nobody can give', (await page.locator('[data-tool="run_bash"]').last().innerText()).includes('cancelado') && !(await page.locator('[data-tool="run_bash"]').last().innerText()).includes('aguardando'));
+  check('nothing is left pending, no dot, and the box is ready to carry on', (await ok('interaction.pending')).length === 0 && (await page.getByRole('img', { name: 'Aguardando sua aprovação' }).count()) === 0 && (await page.getByRole('button', { name: 'Enviar' }).count()) === 1);
 
   console.log('\n=== accessibility ===');
   await page.evaluate(() => {});

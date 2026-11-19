@@ -229,6 +229,7 @@ export const t = {
       cancelled: 'Execução cancelada.',
       failed: (why: string) => `A execução falhou: ${why}`,
       maxSteps: 'O agente atingiu o limite de passos sem concluir.',
+      interrupted: (n: number) => (n === 1 ? 'Esta conversa foi interrompida: o aplicativo parou durante uma execução e 1 chamada não terminou. Você pode continuar de onde parou.' : `Esta conversa foi interrompida: o aplicativo parou durante uma execução e ${n} chamadas não terminaram. Você pode continuar de onde parou.`),
       compacted: (before: number | undefined, after: number | undefined) =>
         before !== undefined && after !== undefined ? `Contexto compactado: de ${before.toLocaleString('pt-BR')} para ${after.toLocaleString('pt-BR')} tokens.` : 'Contexto compactado.',
     },
