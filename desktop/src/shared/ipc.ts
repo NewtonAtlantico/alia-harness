@@ -54,8 +54,40 @@ export interface OpenedSession {
   resumed: boolean;
   /** Messages in the history now. */
   messages: number;
+  /** Project skills in the folder, and whether they were loaded (only for a trusted folder). */
+  projectSkills: { found: number; loaded: boolean };
   /** Context window use right after opening (feeds the context meter). */
   usage: ContextUsage;
+}
+
+/** What main knows about a folder before it is opened: whether the user trusts it, and whether it carries project skills. */
+export interface ProjectInspection {
+  /** `unknown`: never asked. Project skills load only for `trusted`. */
+  trust: 'unknown' | 'trusted' | 'declined';
+  /** Skills found in `<project>/.alia/skills`, by folder name. They are instructions the agent follows, hence the question. */
+  projectSkills: string[];
+}
+
+/** A conversation that is open in the engine, for the sidebar's running and waiting marks. */
+export interface ActiveSession {
+  sessionId: string;
+  workspace: string;
+  running: boolean;
+  /** How many approvals or questions are waiting for the user. */
+  waiting: number;
+}
+
+/** The pipeline of a project in a few fields, for the sidebar chip. */
+export interface PipelineBrief {
+  exists: boolean;
+  project?: string;
+  summary: string;
+  /** What the chip should show. */
+  state: 'not_started' | 'damaged' | 'answer_questions' | 'review_specs' | 'pass_gate' | 'run_stage' | 'inputs_changed' | 'complete';
+  gate?: 'G1' | 'G2' | 'G3';
+  stage?: number;
+  answered?: number;
+  total?: number;
 }
 
 export interface RunStarted {
@@ -224,6 +256,13 @@ export interface RendererRequests {
   'projects.pick': { request: Record<string, never>; result: { path: string } | null };
   /** Projects the user opened before, newest first. Only these (and ones picked now) can be opened. */
   'projects.recent': { request: Record<string, never>; result: string[] };
+  /** Trust state and project skills of a folder the user opened. */
+  'projects.inspect': { request: { projectPath: string }; result: ProjectInspection };
+  /** Records the user's answer to "trust this folder?". Project skills load only after `trusted: true`. */
+  'projects.setTrust': { request: { projectPath: string; trusted: boolean }; result: ProjectInspection };
+  /** Conversations currently open in the engine, with whether each is running or waiting for an answer. */
+  'sessions.active': { request: Record<string, never>; result: ActiveSession[] };
+  'pipeline.brief': { request: { projectPath: string }; result: PipelineBrief };
   'settings.get': { request: Record<string, never>; result: SettingsView };
   'settings.update': { request: SettingsUpdate; result: SettingsView };
   /** Stores the API key, encrypted with the OS. Write-only: nothing ever returns it. */
@@ -244,7 +283,7 @@ export interface RendererRequests {
 }
 
 /** Requests answered by main itself; they never reach the engine. */
-export type MainRequestName = 'projects.pick' | 'projects.recent' | 'settings.get' | 'settings.update' | 'settings.setApiKey' | 'settings.clearApiKey' | 'settings.testConnection' | 'settings.legacyCandidate' | 'settings.importLegacy' | 'window.minimize' | 'window.toggleMaximize' | 'window.close' | 'window.state' | 'app.info' | 'app.openExternal';
+export type MainRequestName = 'projects.pick' | 'projects.recent' | 'projects.inspect' | 'projects.setTrust' | 'settings.get' | 'settings.update' | 'settings.setApiKey' | 'settings.clearApiKey' | 'settings.testConnection' | 'settings.legacyCandidate' | 'settings.importLegacy' | 'window.minimize' | 'window.toggleMaximize' | 'window.close' | 'window.state' | 'app.info' | 'app.openExternal';
 
 export interface AppInfo {
   name: string;
@@ -273,7 +312,16 @@ export interface InternalRequests {
   'connection.test': { request: { url: string; apiKey: string }; result: ConnectionTestResult };
 }
 
-export type EngineRequests = Omit<RendererRequests, MainRequestName> & InternalRequests;
+/**
+ * What the engine receives for `session.open`: the page's request plus a flag only main can set. The page's schema is
+ * strict, so it cannot send `trustedProject` itself.
+ */
+export interface EngineSessionOpen {
+  request: RendererRequests['session.open']['request'] & { trustedProject?: boolean };
+  result: OpenedSession;
+}
+
+export type EngineRequests = Omit<RendererRequests, MainRequestName | 'session.open'> & InternalRequests & { 'session.open': EngineSessionOpen };
 export type RendererRequestName = keyof RendererRequests;
 export type EngineRequestName = keyof EngineRequests;
 

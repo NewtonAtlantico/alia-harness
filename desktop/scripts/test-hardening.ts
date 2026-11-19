@@ -257,7 +257,7 @@ try {
 
   console.log('\n=== closing ===');
   const closed = app.waitForEvent('close', { timeout: 15000 }).then(() => true, () => false);
-  await page.dispatchEvent('button[aria-label="Fechar"]', 'click');
+  await page.dispatchEvent('button[aria-label="Fechar"]', 'click').catch(() => {}); // the page may vanish mid-call: that is the point
   check('the close button ends the app', await closed);
 } catch (err: any) {
   failures++;

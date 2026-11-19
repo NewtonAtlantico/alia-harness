@@ -17,7 +17,10 @@
     "test:hardening": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-hardening.ts",
     "test:package": "tsx --tsconfig tsconfig.node.json scripts/test-package.ts",
     "test:settings": "tsx --tsconfig tsconfig.node.json scripts/test-settings.ts",
-    "test:settings-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-settings-app.ts"
+    "test:settings-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-settings-app.ts",
+    "test:projects": "tsx --tsconfig tsconfig.node.json scripts/test-projects.ts",
+    "test:ui-logic": "tsx --tsconfig tsconfig.node.json scripts/test-ui-logic.ts",
+    "test:sidebar-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-sidebar-app.ts"
   },
   "devDependencies": {
     "@electron/fuses": "^2.1.3",

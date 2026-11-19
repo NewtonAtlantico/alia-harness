@@ -18,9 +18,11 @@ import {
   SessionStore,
   createSession,
   newSessionId,
+  getPipelineStatus,
   readDocument,
 } from 'alia-harness/core';
 import type {
+  ActiveSession,
   ChangeInfo,
   ConnectionTestResult,
   ConversationContent,
@@ -32,6 +34,7 @@ import type {
   InteractionResponse,
   ModelList,
   OpenedSession,
+  PipelineBrief,
   PingResult,
   RunStarted,
   SelfTestResult,
@@ -59,6 +62,7 @@ interface Entry {
   files: FileIndex;
   controller?: AbortController;
   busy: boolean;
+  projectSkills: { found: number; loaded: boolean };
 }
 
 interface PendingInteraction {
@@ -159,7 +163,7 @@ export class EngineRuntime {
 
   private describe(e: Entry, resumed: boolean): OpenedSession {
     const usage = e.session.getContextUsage();
-    return { sessionId: e.id, workspace: e.workspace, model: e.session.getModel(), resumed, messages: usage.messages, usage };
+    return { sessionId: e.id, workspace: e.workspace, model: e.session.getModel(), resumed, messages: usage.messages, usage, projectSkills: e.projectSkills };
   }
 
   // ---------------------------------------------------------------------------------- requests
@@ -178,7 +182,7 @@ export class EngineRuntime {
       return { ok: true, models: config.models.length };
     },
 
-    'session.open': ({ projectPath, resumeId }) => {
+    'session.open': ({ projectPath, resumeId, trustedProject }) => {
       const config = this.config;
       if (!config) throw new Error('The engine is not configured yet (no endpoint or API key).');
       const workspace = path.resolve(projectPath);
@@ -193,7 +197,8 @@ export class EngineRuntime {
         workspace,
         config,
         client: this.options.clientFor?.(config),
-        skillRoots: this.skillRoots,
+        // Project skills are instructions the agent follows: they load only for a folder the user trusts (main decides).
+        skillRoots: trustedProject ? [...this.skillRoots, { label: 'project', dir: path.join(workspace, '.alia', 'skills') }] : this.skillRoots,
         sessionStore: this.store,
         permissionsDir: this.permissionsDir,
         ...(resumeId ? { resume: resumeId } : { sessionId: id }),
@@ -225,7 +230,7 @@ export class EngineRuntime {
       // Commands only the app can perform; the renderer decides how.
       session.commands.register({ name: 'config', description: 'Open settings' });
 
-      const entry: Entry = { id, session, workspace, files: new FileIndex(workspace), busy: false };
+      const entry: Entry = { id, session, workspace, files: new FileIndex(workspace), busy: false, projectSkills: { found: countProjectSkills(workspace), loaded: trustedProject === true } };
       this.sessions.set(id, entry);
       return this.describe(entry, Boolean(resumeId));
     },
@@ -365,6 +370,16 @@ export class EngineRuntime {
       return { ok: true };
     },
 
+    'sessions.active': (): ActiveSession[] =>
+      [...this.sessions.values()].map((e) => ({
+        sessionId: e.id,
+        workspace: e.workspace,
+        running: e.busy,
+        waiting: [...this.pending.values()].filter((p) => p.interaction.sessionId === e.id).length,
+      })),
+
+    'pipeline.brief': ({ projectPath }) => pipelineBrief(path.resolve(projectPath)),
+
     'interaction.pending': () => [...this.pending.values()].map((p) => p.interaction),
   };
 
@@ -425,5 +440,41 @@ export class EngineRuntime {
       return names.includes('compact') ? true : `commands: ${names.join(', ')}`;
     });
     return { ok: checks.every((c) => c.ok), checks };
+  }
+}
+
+/** How many skills a folder carries in `.alia/skills` (a folder with a SKILL.md each). */
+export function countProjectSkills(workspace: string): number {
+  const dir = path.join(workspace, '.alia', 'skills');
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory() && fs.existsSync(path.join(dir, d.name, 'SKILL.md'))).length;
+  } catch {
+    return 0;
+  }
+}
+
+/** The pipeline of a project, reduced to what the sidebar chip needs. Never throws. */
+export function pipelineBrief(workspace: string): PipelineBrief {
+  const status = getPipelineStatus(workspace);
+  if (!status.exists) return { exists: false, summary: status.summary, state: 'not_started' };
+  const base = { exists: true, ...(status.project ? { project: status.project } : {}), summary: status.summary };
+  const next = status.next;
+  switch (next.kind) {
+    case 'answer_questions':
+      return { ...base, state: 'answer_questions', gate: next.gate, answered: next.answered, total: next.total };
+    case 'review_specs':
+      return { ...base, state: 'review_specs', gate: next.gate };
+    case 'pass_gate':
+      return { ...base, state: 'pass_gate', gate: next.gate };
+    case 'run_stage':
+      return { ...base, state: 'run_stage', stage: next.stage };
+    case 'inputs_changed':
+      return { ...base, state: 'inputs_changed' };
+    case 'complete':
+      return { ...base, state: 'complete' };
+    case 'damaged':
+      return { ...base, state: 'damaged' };
+    default:
+      return { ...base, state: 'not_started' };
   }
 }

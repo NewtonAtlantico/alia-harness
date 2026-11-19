@@ -180,7 +180,7 @@ try {
   await app.close();
   ({ app, page } = await launch());
   await page.waitForSelector('.display');
-  check('the next start goes straight to the app (nothing to set up again)', (await page.locator('.settings').count()) === 0 && (await page.locator('.display').innerText()).startsWith('Maria'));
+  check('the next start goes straight to the app (nothing to set up again)', (await page.locator('.settings').count()) === 0 && (await page.locator('.home .display').innerText()).endsWith('Maria'));
   const v2 = await ok(page, 'settings.get');
   check('everything persisted, including the encrypted key', v2.configured && v2.hasApiKey && v2.endpointUrl === server.url && v2.organization === 'Instituto Atlântico');
   const reopened = await ok(page, 'session.open', { projectPath: project });

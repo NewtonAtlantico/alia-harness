@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ConnectionTestResult, LegacyCandidate, ModelSetting, PermissionMode, PermissionRule, SettingsView } from '../../../shared/ipc';
+import type { ConnectionTestResult, LegacyCandidate, ModelSetting, PermissionMode, PermissionRule, ProjectInspection, SettingsView } from '../../../shared/ipc';
+import { projectName } from '../lib/projectName';
 import { t } from '../i18n/pt-BR';
 
 const MODES: PermissionMode[] = ['ask-commands', 'ask-dangerous', 'auto'];
@@ -42,7 +43,7 @@ function validate(draft: Draft, newKey: string | undefined): Record<string, stri
   return errors;
 }
 
-export function SettingsScreen({ onClose, onSaved }: { onClose: () => void; onSaved: (view: SettingsView) => void }) {
+export function SettingsScreen({ onClose, onSaved, onProjectsChanged }: { onClose: () => void; onSaved: (view: SettingsView) => void; onProjectsChanged?: () => void }) {
   const [view, setView] = useState<SettingsView>();
   const [draft, setDraft] = useState<Draft>();
   const [newKey, setNewKey] = useState<string>(''); // what is typed in the key field (never read back from anywhere)
@@ -54,6 +55,7 @@ export function SettingsScreen({ onClose, onSaved }: { onClose: () => void; onSa
   const [recent, setRecent] = useState<string[]>([]);
   const [project, setProject] = useState('');
   const [rules, setRules] = useState<PermissionRule[]>([]);
+  const [inspections, setInspections] = useState<Record<string, ProjectInspection>>({});
   const [showErrors, setShowErrors] = useState(false);
 
   const load = useCallback(async () => {
@@ -63,6 +65,8 @@ export function SettingsScreen({ onClose, onSaved }: { onClose: () => void; onSa
     setLegacy(v.configured ? null : candidate);
     setRecent(projects);
     setProject((p) => p || projects[0] || '');
+    const found = await Promise.all(projects.map(async (p) => [p, await window.alia.request('projects.inspect', { projectPath: p }).catch(() => undefined)] as const));
+    setInspections(Object.fromEntries(found.filter((f): f is readonly [string, ProjectInspection] => !!f[1])));
     setEditingKey(!v.hasApiKey);
   }, []);
 
@@ -159,6 +163,12 @@ export function SettingsScreen({ onClose, onSaved }: { onClose: () => void; onSa
   const removeRule = async (rule: PermissionRule) => {
     await window.alia.request('permissions.removeForProject', { projectPath: project, command: rule.command, match: rule.match });
     setRules(await window.alia.request('permissions.listForProject', { projectPath: project }));
+  };
+
+  const setTrust = async (projectPath: string, trusted: boolean) => {
+    const next = await window.alia.request('projects.setTrust', { projectPath, trusted });
+    setInspections((cur) => ({ ...cur, [projectPath]: next }));
+    onProjectsChanged?.();
   };
 
   const configuredIds = new Set(draft.models.map((m) => m.id));
@@ -321,6 +331,36 @@ export function SettingsScreen({ onClose, onSaved }: { onClose: () => void; onSa
             )}
           </>
         )}
+      </div>
+
+      <div className="card">
+        <h2>{t.settings.trust.title}</h2>
+        <p className="hint">{t.settings.trust.hint}</p>
+        {recent.length === 0 ? (
+          <p className="hint">{t.settings.permissions.noProjects}</p>
+        ) : (
+          <ul className="rules" data-testid="trust-list">
+            {recent.map((p) => {
+              const info = inspections[p];
+              if (!info) return null;
+              const name = projectName(p);
+              return (
+                <li key={p}>
+                  <span className="grow">
+                    <strong>{name}</strong> <span className="hint">{info.projectSkills.length === 0 ? t.settings.trust.noSkills : t.settings.trust.skills(info.projectSkills.length)}</span>
+                  </span>
+                  <span className={`pill ${info.trust === 'trusted' ? 'ok' : ''}`}>{t.settings.trust[info.trust]}</span>
+                  {info.trust === 'trusted' ? (
+                    <button type="button" className="btn small danger" aria-label={t.settings.trust.revokeLabel(name)} onClick={() => setTrust(p, false)}>{t.settings.trust.revoke}</button>
+                  ) : (
+                    <button type="button" className="btn small" aria-label={t.settings.trust.grantLabel(name)} onClick={() => setTrust(p, true)}>{t.settings.trust.grant}</button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <p className="hint">{t.settings.trust.applies}</p>
       </div>
 
       <footer className="settings-footer">

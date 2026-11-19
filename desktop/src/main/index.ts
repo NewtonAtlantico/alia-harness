@@ -10,6 +10,7 @@ import { Logger } from './logger';
 import { SecretStore } from './secrets';
 import { SettingsService } from './settingsService';
 import { SettingsStore, defaultSettings } from './settings';
+import { TrustStore, inspectProject } from './trust';
 import { buildMenu } from './menu';
 import { APP_ORIGIN } from './securityRules';
 import { commandForInput } from './shortcuts';
@@ -61,6 +62,7 @@ function start(): void {
     encrypt: (plain) => safeStorage.encryptString(plain),
     decrypt: (data) => safeStorage.decryptString(data),
   });
+  const trust = new TrustStore(path.join(userData, 'trust.json'));
   const pickLegacyFile = async (suggestedFolder?: string): Promise<string | null> => {
     if (testMode && process.env.ALIA_TEST_PICK_FILE) return process.env.ALIA_TEST_PICK_FILE;
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
@@ -114,6 +116,8 @@ function start(): void {
     engine,
     projects,
     onProjectPicked: (folder) => store.rememberProject(folder),
+    // Only main knows whether a folder is trusted; the page cannot say so (its request schema has no such field).
+    enrich: (name, request) => (name === 'session.open' ? { ...(request as object), trustedProject: trust.isTrusted((request as { projectPath: string }).projectPath) } : request),
     pickFolder: async () => {
       if (testMode && process.env.ALIA_TEST_PICK_FOLDER) return process.env.ALIA_TEST_PICK_FOLDER;
       const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
@@ -133,6 +137,12 @@ function start(): void {
       'window.close': (_req, ctx) => (windowOf(ctx)?.close(), { ok: true as const }),
       'window.state': (_req, ctx) => ({ maximized: windowOf(ctx)?.isMaximized() ?? false }),
       'projects.recent': () => store.recentProjects(),
+      'projects.inspect': ({ projectPath }) => inspectProject(trust, projectPath),
+      'projects.setTrust': ({ projectPath, trusted }) => {
+        trust.set(projectPath, trusted);
+        log.info(`project skills ${trusted ? 'trusted' : 'not trusted'} for ${path.basename(projectPath)}`);
+        return inspectProject(trust, projectPath);
+      },
       'settings.get': () => settings.view(),
       'settings.update': (patch) => settings.update(patch),
       'settings.setApiKey': ({ apiKey }) => settings.setApiKey(apiKey),

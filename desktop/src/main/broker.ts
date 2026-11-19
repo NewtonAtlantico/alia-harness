@@ -42,6 +42,8 @@ export interface BrokerOptions {
   pickFolder: () => Promise<string | null>;
   /** Window controls, settings, app info and the like. Optional so the engine-facing rules can be tested alone. */
   main?: Partial<MainHandlers>;
+  /** Adds what only main knows to a request before it goes to the engine (for example, whether a folder is trusted). */
+  enrich?: (name: string, request: unknown) => unknown;
   /** Called when the user picks a folder, so it can be remembered across restarts. */
   onProjectPicked?: (projectPath: string) => void;
 }
@@ -68,17 +70,18 @@ export class Broker {
       });
     }
 
-    const handler = (this.options.main as Record<string, ((r: unknown, c: unknown) => unknown) | undefined> | undefined)?.[name];
-    if (handler) return Promise.resolve(handler(request, context));
-    if (isMainOnly(name)) return Promise.reject(new Error(`"${name}" is not available here.`));
-
-    // Anything that names a folder must name one the user opened.
+    // Anything that names a folder must name one the user opened, whoever answers it (main or the engine).
     const folder = (request as { projectPath?: string }).projectPath;
     if (folder !== undefined && !projects.isAllowed(folder)) {
       return Promise.reject(new IpcValidationError('That folder was not opened through the folder dialog, so it cannot be used.'));
     }
 
-    return engine.request(name as keyof EngineRequests, request as never);
+    const handler = (this.options.main as Record<string, ((r: unknown, c: unknown) => unknown) | undefined> | undefined)?.[name];
+    if (handler) return Promise.resolve(handler(request, context));
+    if (isMainOnly(name)) return Promise.reject(new Error(`"${name}" is not available here.`));
+
+    const forwarded = this.options.enrich ? this.options.enrich(name, request) : request;
+    return engine.request(name as keyof EngineRequests, forwarded as never);
   }
 }
 
@@ -86,6 +89,8 @@ export class Broker {
 const MAIN_ONLY = {
   'projects.pick': true,
   'projects.recent': true,
+  'projects.inspect': true,
+  'projects.setTrust': true,
   'settings.get': true,
   'settings.update': true,
   'settings.setApiKey': true,

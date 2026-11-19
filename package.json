@@ -45,7 +45,10 @@
     "desktop:test:hardening": "npm --prefix desktop run test:hardening",
     "desktop:test:package": "npm --prefix desktop run test:package",
     "desktop:test:settings": "npm --prefix desktop run test:settings",
-    "desktop:test:settings-app": "npm --prefix desktop run test:settings-app"
+    "desktop:test:settings-app": "npm --prefix desktop run test:settings-app",
+    "desktop:test:projects": "npm --prefix desktop run test:projects",
+    "desktop:test:ui-logic": "npm --prefix desktop run test:ui-logic",
+    "desktop:test:sidebar-app": "npm --prefix desktop run test:sidebar-app"
   },
   "keywords": [
     "ai",

@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { AliaConfig } from 'alia-harness/core';
+import { PipelineStateStore, type AliaConfig } from 'alia-harness/core';
 import { FakeModel, type ScriptedTurn } from '../../scripts/lib/fakeModel';
 import { EngineRuntime } from '../src/engine/runtime';
 import { Broker, ProjectRegistry } from '../src/main/broker';
@@ -444,6 +444,68 @@ console.log('\n=== testing a connection ===');
   const down = await r.call('connection.test', { url: 'http://127.0.0.1:1/', apiKey: KEY });
   check('a server that is not there is "unreachable"', down.ok === false && down.reason === 'unreachable' && !JSON.stringify(down).includes(KEY), JSON.stringify(down));
   await server.close();
+}
+
+console.log('\n=== project skills load only for a trusted folder ===');
+{
+  const r = await rig(say('x'));
+  const dir = path.join(r.ws, '.alia', 'skills', 'proj-skill');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'SKILL.md'), '---\nname: proj-skill\ndescription: A skill this project carries\n---\nPROJECT-SKILL-BODY\n');
+  const plain = await r.open();
+  check('by default the project\'s skills are found but not loaded', plain.projectSkills.found === 1 && plain.projectSkills.loaded === false);
+  check('...so they are not offered as commands', !(await r.call('commands.list', { sessionId: plain.sessionId })).some((c: any) => c.name === 'proj-skill'));
+  const refused = await r.call('session.run', { sessionId: plain.sessionId, text: '/proj-skill do it' }).then((x) => x.kind, () => 'error');
+  check('...and /proj-skill is just text, not an instruction from the project', refused === 'prompt');
+  await r.finished(plain.sessionId);
+  await r.call('session.close', { sessionId: plain.sessionId });
+
+  const trusted = await r.call('session.open', { projectPath: r.ws, trustedProject: true });
+  check('for a trusted folder they load', trusted.projectSkills.found === 1 && trusted.projectSkills.loaded === true && (await r.call('commands.list', { sessionId: trusted.sessionId })).some((c: any) => c.name === 'proj-skill' && c.kind === 'skill'));
+  const second = await rig(say('x'), { ws: mk('empty-project') });
+  check('a folder with no project skills reports zero', (await second.open()).projectSkills.found === 0);
+}
+
+console.log('\n=== which conversations are running or waiting ===');
+{
+  const r = await rig([{ hang: 'honor-signal' }, toolTurn('run_bash', { command: 'echo wait' }, 'w1'), { content: 'done' }]);
+  const a = await r.open();
+  const b = await r.call('session.open', { projectPath: mk('other') });
+  let active: any[] = await r.call('sessions.active');
+  check('open conversations are listed, idle at first', active.length === 2 && active.every((s) => s.running === false && s.waiting === 0));
+  await r.call('session.run', { sessionId: a.sessionId, text: 'slow one' });
+  active = await r.call('sessions.active');
+  check('a conversation that is running says so, and the other stays idle', active.find((s) => s.sessionId === a.sessionId)?.running === true && active.find((s) => s.sessionId === b.sessionId)?.running === false);
+  await r.call('session.cancel', { sessionId: a.sessionId });
+  await r.finished(a.sessionId);
+  check('after it ends it is idle again', (await r.call('sessions.active')).every((s: any) => s.running === false));
+
+  await r.call('session.run', { sessionId: b.sessionId, text: 'needs approval' });
+  const ask = await r.waitInteraction(0);
+  active = await r.call('sessions.active');
+  const mine = active.find((s) => s.sessionId === b.sessionId);
+  check('a conversation waiting for an approval is running, with one thing waiting (the orange dot)', mine?.running === true && mine.waiting === 1 && active.find((s) => s.sessionId === a.sessionId)?.waiting === 0 && mine.workspace === (await r.call('session.usage', { sessionId: b.sessionId }) && mine.workspace));
+  await r.call('interaction.respond', { id: ask.id, response: { decision: 'allow_once' } });
+  await r.finished(b.sessionId);
+  check('once answered and finished, nothing is waiting', (await r.call('sessions.active')).every((s: any) => s.waiting === 0 && s.running === false));
+}
+
+console.log('\n=== the pipeline in the sidebar ===');
+{
+  const r = await rig(say('x'));
+  check('a project without a pipeline says so', (await r.call('pipeline.brief', { projectPath: r.ws })).exists === false && (await r.call('pipeline.brief', { projectPath: r.ws })).state === 'not_started');
+  const store = new PipelineStateStore(r.ws);
+  const q = (id: string) => ({ op: 'add_question', gate: 'G1', id, prompt: `Pergunta ${id}?` });
+  store.apply([{ op: 'set_project', name: 'Portal do cliente' }, { op: 'set_stage', stage: 1, status: 'running' }, q('q1'), q('q2'), q('q3'), q('q4'), q('q5')]);
+  store.apply([{ op: 'answer_question', id: 'q1', answer: 'sim' }, { op: 'answer_question', id: 'q2', answer: 'não' }, { op: 'defer_question', id: 'q3', owner: 'Newton' }]);
+  const waiting = await r.call('pipeline.brief', { projectPath: r.ws });
+  check('stopped at gate 1 with 3 of 5 answered: the chip data says so', waiting.exists && waiting.state === 'answer_questions' && waiting.gate === 'G1' && waiting.answered === 3 && waiting.total === 5 && waiting.project === 'Portal do cliente' && waiting.summary.includes('G1'), JSON.stringify(waiting));
+  store.apply([{ op: 'answer_question', id: 'q4', answer: 'a' }, { op: 'answer_question', id: 'q5', answer: 'b' }, { op: 'set_stage', stage: 1, status: 'done' }]);
+  const approve = await r.call('pipeline.brief', { projectPath: r.ws });
+  check('all answered but not approved: waiting for the user to pass the gate', approve.state === 'pass_gate' && approve.gate === 'G1', JSON.stringify(approve));
+  fs.writeFileSync(path.join(r.ws, 'docs', 'pipeline', 'state.json'), '{ broken');
+  const damaged = await r.call('pipeline.brief', { projectPath: r.ws });
+  check('a damaged state is reported, never thrown', damaged.exists === true && damaged.state === 'damaged');
 }
 
 // ===================================================================================== broker

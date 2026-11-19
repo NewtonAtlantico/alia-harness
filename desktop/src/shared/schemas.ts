@@ -85,6 +85,10 @@ export const rendererSchemas = {
   'permissions.removeForProject': strict({ projectPath, command: z.string().min(1).max(4000), match: z.enum(['exact', 'prefix']).optional() }),
   'projects.pick': none,
   'projects.recent': none,
+  'projects.inspect': strict({ projectPath }),
+  'projects.setTrust': strict({ projectPath, trusted: z.boolean() }),
+  'sessions.active': none,
+  'pipeline.brief': strict({ projectPath }),
   'settings.get': none,
   'settings.update': strict({
     displayName: z.string().trim().max(100).optional(),

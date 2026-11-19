@@ -7,6 +7,8 @@ import type { AddressInfo } from 'node:net';
  * a function of the request (to react to the previous tool result). Grows into the A16 test harness.
  */
 export interface FakeTurn {
+  /** Wait this long before answering (to keep a run "running" while a test looks at the screen). */
+  delayMs?: number;
   content?: string;
   toolCalls?: Array<{ name: string; args?: unknown; id?: string }>;
 }
@@ -54,14 +56,14 @@ export async function startFakeServer(turns: FakeTurnSource[], options: FakeServ
           type: 'function',
           function: { name: c.name, arguments: typeof c.args === 'string' ? c.args : JSON.stringify(c.args ?? {}) },
         }));
-        send(200, {
+        setTimeout(() => send(200, {
           id: `chatcmpl-${++ids}`,
           object: 'chat.completion',
           created: Math.floor(Date.now() / 1000),
           model: body.model,
           choices: [{ index: 0, finish_reason: toolCalls.length ? 'tool_calls' : 'stop', message: { role: 'assistant', content: turn.content ?? null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) } }],
           usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
-        });
+        }), turn.delayMs ?? 0);
       });
       return;
     }

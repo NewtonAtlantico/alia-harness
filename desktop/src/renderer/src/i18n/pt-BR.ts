@@ -2,7 +2,7 @@
  * Every string the interface shows lives here (pt-BR is the only language for v1), so another language is a new
  * catalog and not a hunt through components. Agent-facing prompts are not here; they stay in English.
  */
-import type { ConnectionTestResult, PermissionMode } from '../../../shared/ipc';
+import type { ConnectionTestResult, PermissionMode, PipelineBrief } from '../../../shared/ipc';
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -23,7 +23,83 @@ export const t = {
   home: {
     openSettings: 'Configurações',
     needsSetup: 'Falta configurar o acesso aos modelos antes de começar uma conversa.',
+    project: (name: string) => `Projeto: ${name}`,
+    noProject: 'Nenhum projeto aberto',
+    hint: 'Escolha um projeto na barra lateral e comece uma conversa.',
     configure: 'Configurar agora',
+  },
+  greeting: {
+    morning: 'Bom dia',
+    afternoon: 'Boa tarde',
+    evening: 'Boa noite',
+  },
+  time: {
+    now: 'agora',
+    minutes: (n: number) => `há ${n} min`,
+    hours: (n: number) => `há ${n} h`,
+    yesterday: 'ontem',
+    days: (n: number) => `há ${n} dias`,
+  },
+  sidebar: {
+    label: 'Navegação',
+    newConversation: 'Nova conversa',
+    search: 'Buscar conversas',
+    searchPlaceholder: 'Buscar…',
+    searching: 'Buscando…',
+    noResults: 'Nada encontrado.',
+    resultsIn: (project: string) => `em ${project}`,
+    pipelines: 'Pipelines',
+    projects: 'Projetos',
+    openFolder: 'Abrir pasta…',
+    openFolderTitle: 'Abrir a pasta de um projeto (Ctrl O)',
+    recents: 'Recentes',
+    noProject: 'Abra a pasta de um projeto para começar.',
+    noConversations: 'Nenhuma conversa neste projeto.',
+    settings: 'Configurações',
+    rename: (title: string) => `Renomear a conversa ${title}`,
+    delete: (title: string) => `Excluir a conversa ${title}`,
+    renameInput: 'Novo nome da conversa',
+    running: 'Em execução',
+    waiting: 'Aguardando sua aprovação',
+    currentProject: 'Projeto atual',
+    conversationsOf: (project: string) => `Conversas de ${project}`,
+    pipelineOf: (project: string) => `Pipeline de ${project}`,
+  },
+  chip: {
+    gateQuestions: (gate: string, answered: number, total: number) => `${gate} · ${answered}/${total}`,
+    gateApprove: (gate: string) => `${gate} · aprovar`,
+    gateReview: (gate: string) => `${gate} · revisão`,
+    stage: (n: number) => `Etapa ${n}`,
+    inputsChanged: 'Entradas mudaram',
+    complete: 'Concluído',
+    damaged: 'Estado inválido',
+  },
+  trust: {
+    title: 'Confiar nesta pasta?',
+    body: 'Esta pasta traz skills próprias. Skills são instruções que o agente segue, e uma pasta de outra pessoa pode trazer instruções que você não conhece. Só carregue skills de pastas em que você confia.',
+    skills: (n: number) => (n === 1 ? 'Skill encontrada nesta pasta:' : `${n} skills encontradas nesta pasta:`),
+    trust: 'Confiar e carregar as skills',
+    notNow: 'Agora não',
+    notNowHint: 'A pasta abre normalmente, sem as skills dela. Você pode mudar isso em Configurações.',
+  },
+  confirmDelete: {
+    title: 'Excluir esta conversa?',
+    body: (title: string) => `"${title}" será apagada deste computador, inclusive o histórico. Isso não pode ser desfeito.`,
+    confirm: 'Excluir',
+    cancel: 'Cancelar',
+  },
+  conversation: {
+    project: 'Projeto',
+    model: 'Modelo',
+    context: (percent: number) => `Contexto ${percent}%`,
+    messages: (n: number) => `${n} mensagens`,
+    you: 'Você',
+    assistant: 'alia',
+    loading: 'Abrindo a conversa…',
+    empty: 'Esta conversa ainda não tem mensagens.',
+    failed: (why: string) => `Não foi possível abrir a conversa: ${why}`,
+    running: 'Em execução…',
+    waiting: 'Aguardando sua aprovação.',
   },
   common: {
     loading: 'Carregando…',
@@ -108,6 +184,20 @@ export const t = {
       remove: 'Remover',
       removeRule: (command: string) => `Remover a permissão do comando ${command}`,
       prefix: 'prefixo',
+    },
+    trust: {
+      title: 'Pastas confiáveis',
+      hint: 'Skills que ficam dentro de uma pasta de projeto só são carregadas se você confiar nela.',
+      trusted: 'Confiável',
+      declined: 'Não confiável',
+      unknown: 'Sem resposta ainda',
+      noSkills: 'sem skills próprias',
+      skills: (n: number) => (n === 1 ? '1 skill própria' : `${n} skills próprias`),
+      grant: 'Confiar',
+      revoke: 'Deixar de confiar',
+      grantLabel: (project: string) => `Confiar na pasta ${project}`,
+      revokeLabel: (project: string) => `Deixar de confiar na pasta ${project}`,
+      applies: 'Vale a partir da próxima vez que a conversa for aberta.',
     },
     errors: {
       endpoint: 'Informe um endereço http ou https, sem usuário e senha.',
