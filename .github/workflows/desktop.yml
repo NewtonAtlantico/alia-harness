@@ -1,11 +1,10 @@
 # The desktop app: everything it is held to, then the installer and the portable zip as downloadable artifacts.
 # Electron needs a desktop session for the end-to-end suites, which the Windows runners provide.
 # Code signing is optional: with the secrets below the installer is signed, without them it is not (SmartScreen warns).
+# Pull requests only: an update of main is handled by release.yml, which runs the same checks and publishes the release.
 name: desktop
 
 on:
-  push:
-    branches: [main]
   pull_request:
 
 jobs:
@@ -26,9 +25,9 @@ jobs:
         run: |
           npm run typecheck
           npm run build
-      - name: Desktop: every suite, and the packaged app
+      - name: Desktop, every suite and the packaged app
         run: npm run desktop:test:all -- --core --package
-      - name: Desktop: installer and portable zip
+      - name: Desktop, installer and portable zip
         run: npm run desktop:dist
         env:
           # Optional. A certificate (a base64 .pfx, or a path) and its password; without them the build is unsigned.
