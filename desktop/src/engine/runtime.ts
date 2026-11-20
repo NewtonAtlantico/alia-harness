@@ -631,7 +631,15 @@ export class EngineRuntime {
     const client = new OpenAI({ apiKey, baseURL: url.endsWith('/') ? url : `${url}/`, timeout: 10_000, maxRetries: 0 });
     try {
       const list = await client.models.list();
-      return { ok: true, models: list.data.map((m) => m.id).slice(0, 500) };
+      // The service (Open WebUI) adds a display name to each entry; the id is the fallback.
+      const limit = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined);
+      const models = list.data.slice(0, 500).map((m) => {
+        const extra = m as { name?: unknown; max_input_tokens?: unknown; max_output_tokens?: unknown };
+        const maxInputTokens = limit(extra.max_input_tokens);
+        const maxOutputTokens = limit(extra.max_output_tokens);
+        return { id: m.id, name: String(extra.name || m.id), ...(maxInputTokens ? { maxInputTokens } : {}), ...(maxOutputTokens ? { maxOutputTokens } : {}) };
+      });
+      return { ok: true, models };
     } catch (err: any) {
       const message = String(err?.message ?? err).split(apiKey).join('[redacted]').slice(0, 300);
       const status: number | undefined = err?.status;

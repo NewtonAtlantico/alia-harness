@@ -242,14 +242,14 @@ export interface ModelSetting {
 export interface SettingsView {
   displayName: string;
   organization: string;
-  endpointUrl: string;
+  /** The models the service reported for this key (loaded automatically; the endpoint itself is fixed). */
   models: ModelSetting[];
   /** How commands are approved by default in new conversations. */
   permissionMode: PermissionMode;
   hasApiKey: boolean;
   /** False when the OS cannot encrypt secrets: the key cannot be stored (it is never written in plain text). */
   secureStorage: boolean;
-  /** An endpoint, a model and a key are all set, so conversations can start. */
+  /** A key is saved and the service reported at least one model, so conversations can start. */
   configured: boolean;
 }
 
@@ -257,33 +257,32 @@ export interface SettingsView {
 export interface SettingsUpdate {
   displayName?: string;
   organization?: string;
-  endpointUrl?: string;
   models?: ModelSetting[];
   permissionMode?: PermissionMode;
 }
 
+/** A model as the service lists it. */
+export interface RemoteModel {
+  id: string;
+  name: string;
+  /** Limits the service states for the model, when it does. */
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+}
+
 export interface ConnectionTestResult {
   ok: boolean;
-  /** Model ids the endpoint reports (empty when it does not list any). */
-  models: string[];
-  reason?: 'unauthorized' | 'not_found' | 'unreachable' | 'timeout' | 'other';
+  /** The models the service reports for the key (empty when it does not list any). */
+  models: RemoteModel[];
+  reason?: 'unauthorized' | 'not_found' | 'unreachable' | 'timeout' | 'no_models' | 'other';
   /** Detail for the log or a tooltip; never contains the key. */
   message?: string;
 }
 
-/** A configuration from an earlier setup (the CLI's alia-config.json) that can be imported. */
-export interface LegacyCandidate {
-  path: string;
-  endpointUrl: string;
-  models: number;
-  /** A key was found beside it (environment or .env). The key itself is never shown. */
-  hasApiKey: boolean;
-}
-
-export interface ImportSummary {
-  endpointUrl: string;
-  models: number;
-  importedKey: boolean;
+/** What entering or refreshing the key comes back with: the new state, and how the service answered. */
+export interface ConnectResult {
+  view: SettingsView;
+  connection: ConnectionTestResult;
 }
 
 // ------------------------------------------------------------------------------------ requests
@@ -362,14 +361,10 @@ export interface RendererRequests {
   'attachments.pick': { request: Record<string, never>; result: { paths: string[] } };
   'settings.get': { request: Record<string, never>; result: SettingsView };
   'settings.update': { request: SettingsUpdate; result: SettingsView };
-  /** Stores the API key, encrypted with the OS. Write-only: nothing ever returns it. */
-  'settings.setApiKey': { request: { apiKey: string }; result: SettingsView };
+  /** Checks the key against the service; only when it accepts it is the key stored (encrypted with the OS) and the models loaded. Write-only: nothing ever returns the key. */
+  'settings.setApiKey': { request: { apiKey: string }; result: ConnectResult };
+  'settings.refreshModels': { request: Record<string, never>; result: ConnectResult };
   'settings.clearApiKey': { request: Record<string, never>; result: SettingsView };
-  /** Lists the endpoint's models with the given address and key (or the saved ones). */
-  'settings.testConnection': { request: { endpointUrl?: string; apiKey?: string }; result: ConnectionTestResult };
-  'settings.legacyCandidate': { request: Record<string, never>; result: LegacyCandidate | null };
-  /** Asks the user for an alia-config.json (native dialog) and imports it, with the key from the environment or its .env. */
-  'settings.importLegacy': { request: Record<string, never>; result: ImportSummary | null };
   'window.minimize': { request: Record<string, never>; result: { ok: true } };
   'window.toggleMaximize': { request: Record<string, never>; result: { maximized: boolean } };
   'window.close': { request: Record<string, never>; result: { ok: true } };
@@ -380,7 +375,7 @@ export interface RendererRequests {
 }
 
 /** Requests answered by main itself; they never reach the engine. */
-export type MainRequestName = 'attachments.pick' | 'diagnostics.run' | 'diagnostics.copy' | 'projects.openFile' | 'projects.pick' | 'projects.recent' | 'projects.inspect' | 'projects.setTrust' | 'settings.get' | 'settings.update' | 'settings.setApiKey' | 'settings.clearApiKey' | 'settings.testConnection' | 'settings.legacyCandidate' | 'settings.importLegacy' | 'window.minimize' | 'window.toggleMaximize' | 'window.close' | 'window.state' | 'app.info' | 'app.openExternal';
+export type MainRequestName = 'attachments.pick' | 'diagnostics.run' | 'diagnostics.copy' | 'projects.openFile' | 'projects.pick' | 'projects.recent' | 'projects.inspect' | 'projects.setTrust' | 'settings.get' | 'settings.update' | 'settings.setApiKey' | 'settings.clearApiKey' | 'settings.refreshModels' | 'window.minimize' | 'window.toggleMaximize' | 'window.close' | 'window.state' | 'app.info' | 'app.openExternal';
 
 export interface DiagnosticsResult {
   items: Array<{ id: 'bash' | 'git' | 'python' | 'python-docx' | 'skills' | 'endpoint'; status: 'ok' | 'warn' | 'missing'; value?: string; optional: boolean }>;

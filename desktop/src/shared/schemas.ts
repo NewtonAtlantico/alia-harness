@@ -31,21 +31,6 @@ const interactionResponse = z.union([
 
 const none = strict({});
 
-/** The address of the model endpoint: http(s) only, no credentials in it. */
-export const endpointUrl = z
-  .string()
-  .trim()
-  .min(1)
-  .max(2048)
-  .refine((v) => {
-    try {
-      const u = new URL(v);
-      return (u.protocol === 'https:' || u.protocol === 'http:') && !!u.hostname && !u.username && !u.password;
-    } catch {
-      return false;
-    }
-  }, 'must be an http or https address without a user name or password');
-
 const modelSetting = strict({
   id: z.string().trim().min(1).max(200),
   name: z.string().trim().min(1).max(200),
@@ -106,15 +91,12 @@ export const rendererSchemas = {
   'settings.update': strict({
     displayName: z.string().trim().max(100).optional(),
     organization: z.string().trim().max(100).optional(),
-    endpointUrl: endpointUrl.optional(),
     models: z.array(modelSetting).min(1, 'at least one model is needed').max(50).optional(),
     permissionMode: z.enum(['ask-dangerous', 'ask-commands', 'auto']).optional(),
   }),
   'settings.setApiKey': strict({ apiKey: z.string().trim().min(8, 'that looks too short to be an API key').max(4096) }),
   'settings.clearApiKey': none,
-  'settings.testConnection': strict({ endpointUrl: endpointUrl.optional(), apiKey: z.string().trim().min(1).max(4096).optional() }),
-  'settings.legacyCandidate': none,
-  'settings.importLegacy': none,
+  'settings.refreshModels': none,
   'window.minimize': none,
   'window.toggleMaximize': none,
   'window.close': none,

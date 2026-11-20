@@ -1,17 +1,18 @@
 import path from 'node:path';
-import type { EngineRequests, ImportSummary, LegacyCandidate, SettingsUpdate, SettingsView, ConnectionTestResult } from '../shared/ipc';
-import { buildEngineConfig, findLegacyConfig, readLegacyConfig, skillRoots } from './legacyConfig';
+import type { ConnectResult, ConnectionTestResult, EngineRequests, ModelSetting, RemoteModel, SettingsUpdate, SettingsView } from '../shared/ipc';
+import { buildEngineConfig, readLegacyConfig, skillRoots } from './legacyConfig';
 import type { SecretStore } from './secrets';
 import type { SettingsStore } from './settings';
+
+/** The context size the app plans around when the service does not state one for a model (the engine's own default). */
+export const DEFAULT_CONTEXT_TOKENS = 128_000;
 
 export interface SettingsServiceOptions {
   store: SettingsStore;
   secrets: SecretStore;
   engine: { request<K extends keyof EngineRequests>(name: K, payload: EngineRequests[K]['request']): Promise<EngineRequests[K]['result']> };
-  /** Folders to look in for an existing alia-config.json (besides ALIA_CONFIG). */
-  legacyFolders: string[];
-  /** Asks the user for an alia-config.json (native file dialog); null if they cancel. */
-  pickLegacyFile: (suggestedFolder?: string) => Promise<string | null>;
+  /** The service's address. Fixed (see endpoint.ts): the user never types it. */
+  endpointUrl: string;
   bundledSkillsDir: string;
   userSkillsDir: string;
   dataDirs?: { sessions?: string; permissions?: string };
@@ -22,8 +23,8 @@ export interface SettingsServiceOptions {
 }
 
 /**
- * Everything behind the settings screen: what is saved, the encrypted key, testing a connection, importing an
- * earlier configuration, and keeping the engine configured. The key never appears in anything returned.
+ * Everything behind the settings screen: what is saved, the encrypted key, loading the models the service offers for
+ * that key, and keeping the engine configured. The key never appears in anything returned.
  */
 export class SettingsService {
   private readonly env: NodeJS.ProcessEnv;
@@ -38,12 +39,11 @@ export class SettingsService {
     return {
       displayName: s.displayName,
       organization: s.organization,
-      endpointUrl: s.endpointUrl,
       models: s.models,
       permissionMode: s.permissionMode,
       hasApiKey,
       secureStorage: this.o.secrets.available,
-      configured: hasApiKey && !!s.endpointUrl && s.models.length > 0,
+      configured: hasApiKey && s.models.length > 0,
     };
   }
 
@@ -51,13 +51,13 @@ export class SettingsService {
   async configureEngine(): Promise<boolean> {
     const s = this.o.store.get();
     const apiKey = this.o.secrets.get();
-    if (!apiKey || !s.endpointUrl || s.models.length === 0) {
-      this.o.log?.warn('not configured yet (endpoint, a model and an API key are needed); conversations cannot start until they are set');
+    if (!apiKey || s.models.length === 0) {
+      this.o.log?.warn('not configured yet (an API key, and the models it gives access to, are needed); conversations cannot start until they are set');
       return false;
     }
     this.o.onSecret?.(apiKey);
     await this.o.engine.request('engine.configure', {
-      config: buildEngineConfig({ endpointUrl: s.endpointUrl, models: s.models }, apiKey),
+      config: buildEngineConfig(this.o.endpointUrl, s.models, apiKey),
       skillRoots: skillRoots(this.o.bundledSkillsDir, this.o.userSkillsDir),
       permissionMode: s.permissionMode,
       dataDirs: this.o.dataDirs,
@@ -77,11 +77,31 @@ export class SettingsService {
     return this.view();
   }
 
-  async setApiKey(apiKey: string): Promise<SettingsView> {
+  /**
+   * Checks the key against the service. Only a key the service accepts is stored; the models it lists become the
+   * app's models. A rejected key changes nothing, and the reason comes back for the screen to explain.
+   */
+  async setApiKey(apiKey: string): Promise<ConnectResult> {
     this.o.onSecret?.(apiKey);
+    if (!this.o.secrets.available) this.o.secrets.set(apiKey); // throws the "cannot store securely" error before any network call
+    const connection = await this.list(apiKey);
+    if (!connection.ok) return { view: this.view(), connection };
     this.o.secrets.set(apiKey);
+    this.applyModels(connection.models);
     await this.configureEngine();
-    return this.view();
+    return { view: this.view(), connection };
+  }
+
+  /** Asks the service again which models the saved key gives access to. */
+  async refreshModels(): Promise<ConnectResult> {
+    const apiKey = this.o.secrets.get();
+    if (!apiKey) return { view: this.view(), connection: { ok: false, models: [], reason: 'unauthorized', message: 'No API key.' } };
+    const connection = await this.list(apiKey);
+    if (connection.ok) {
+      this.applyModels(connection.models);
+      await this.configureEngine();
+    }
+    return { view: this.view(), connection };
   }
 
   async clearApiKey(): Promise<SettingsView> {
@@ -89,53 +109,48 @@ export class SettingsService {
     return this.view();
   }
 
-  /** Lists the endpoint's models with the given address and key, or the saved ones. */
-  async testConnection(args: { endpointUrl?: string; apiKey?: string }): Promise<ConnectionTestResult> {
-    const url = args.endpointUrl ?? this.o.store.get().endpointUrl;
-    const apiKey = args.apiKey ?? this.o.secrets.get();
-    if (!url) return { ok: false, models: [], reason: 'not_found', message: 'No endpoint address.' };
+  /** Whether the saved key still works (used by the diagnostics); changes nothing. */
+  async checkConnection(): Promise<ConnectionTestResult> {
+    const apiKey = this.o.secrets.get();
     if (!apiKey) return { ok: false, models: [], reason: 'unauthorized', message: 'No API key.' };
+    return this.list(apiKey);
+  }
+
+  private async list(apiKey: string): Promise<ConnectionTestResult> {
     this.o.onSecret?.(apiKey);
-    return this.o.engine.request('connection.test', { url, apiKey });
+    const r = await this.o.engine.request('connection.test', { url: this.o.endpointUrl, apiKey });
+    if (r.ok && r.models.length === 0) return { ok: false, models: [], reason: 'no_models', message: 'The service lists no models for this key.' };
+    return r;
   }
 
-  legacyCandidate(): LegacyCandidate | null {
-    const file = findLegacyConfig(this.o.legacyFolders, this.env);
-    if (!file) return null;
-    try {
-      const c = readLegacyConfig(file, this.env);
-      return { path: file, endpointUrl: c.endpointUrl, models: c.models.length, hasApiKey: !!c.apiKey };
-    } catch {
-      return null;
-    }
+  /** The service's list replaces the saved one; what the app knew about a model it still offers (its context size) is kept. */
+  private applyModels(remote: RemoteModel[]): void {
+    const known = new Map(this.o.store.get().models.map((m) => [m.id, m]));
+    const models: ModelSetting[] = remote.map((m) => ({
+      maxInputTokens: DEFAULT_CONTEXT_TOKENS,
+      ...known.get(m.id),
+      id: m.id,
+      name: m.name,
+      // What the service states wins over what was saved.
+      ...(m.maxInputTokens ? { maxInputTokens: m.maxInputTokens } : {}),
+      ...(m.maxOutputTokens ? { maxOutputTokens: m.maxOutputTokens } : {}),
+    }));
+    this.o.store.update({ models });
+    this.o.log?.info(`models loaded from the service: ${models.length}`);
   }
 
-  /** Imports an earlier configuration from a file the user chooses. */
-  async importLegacy(): Promise<ImportSummary | null> {
-    const suggested = findLegacyConfig(this.o.legacyFolders, this.env);
-    const file = await this.o.pickLegacyFile(suggested ? path.dirname(suggested) : undefined);
-    return file ? this.importFrom(file) : null;
-  }
-
-  /** Imports from a known file (also used for the first run when the launcher names one with ALIA_CONFIG). */
-  async importFrom(file: string): Promise<ImportSummary> {
-    const c = readLegacyConfig(file, this.env);
-    this.o.store.update({ endpointUrl: c.endpointUrl, models: c.models });
-    let importedKey = false;
-    if (c.apiKey && this.o.secrets.available) {
-      this.o.secrets.set(c.apiKey);
-      importedKey = true;
-    }
-    this.o.log?.info(`imported ${c.models.length} model(s) from ${path.basename(file)}${importedKey ? ' and an API key' : ''}`);
-    await this.configureEngine();
-    return { endpointUrl: c.endpointUrl, models: c.models.length, importedKey };
-  }
-
-  /** First run: when nothing has been saved and the launcher names a configuration, take it. */
+  /**
+   * Test runs only: seeds the settings from the file ALIA_CONFIG names (models and key), so a test starts configured.
+   * Production never calls this (see main/index.ts).
+   */
   async seedFromEnvironment(): Promise<boolean> {
-    if (this.o.store.exists() || !this.env.ALIA_CONFIG) return false;
+    const file = this.env.ALIA_CONFIG;
+    if (this.o.store.exists() || !file) return false;
     try {
-      await this.importFrom(path.resolve(this.env.ALIA_CONFIG));
+      const c = readLegacyConfig(path.resolve(file), this.env);
+      this.o.store.update({ models: c.models });
+      if (c.apiKey && this.o.secrets.available) this.o.secrets.set(c.apiKey);
+      await this.configureEngine();
       return true;
     } catch (err: any) {
       this.o.log?.warn(`could not seed the settings from ALIA_CONFIG: ${err?.message ?? err}`);

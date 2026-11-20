@@ -1,23 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AliaConfig } from 'alia-harness/core';
-import type { ModelSetting, SettingsView } from '../shared/ipc';
+import type { ModelSetting } from '../shared/ipc';
 
-/** A configuration from the CLI's setup: `alia-config.json`, with the key from the environment or a `.env` beside it. */
+/**
+ * A configuration from the CLI's setup: `alia-config.json`, with the key from the environment or a `.env` beside it.
+ * The app no longer offers importing one; it only seeds the settings of the automated tests (ALIA_CONFIG, test mode).
+ */
 export interface LegacyConfig {
   endpointUrl: string;
   models: ModelSetting[];
   apiKey?: string;
-}
-
-const CONFIG_NAME = 'alia-config.json';
-
-/** The first `alia-config.json` found in the given folders (and their parents), or the one named by ALIA_CONFIG. */
-export function findLegacyConfig(folders: string[], env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const candidates: string[] = [];
-  if (env.ALIA_CONFIG) candidates.push(path.resolve(env.ALIA_CONFIG));
-  for (const folder of folders) candidates.push(path.join(folder, CONFIG_NAME), path.join(folder, '..', CONFIG_NAME));
-  return candidates.find((c) => fs.statSync(c, { throwIfNoEntry: false })?.isFile());
 }
 
 function readEnvKey(file: string): string | undefined {
@@ -66,16 +59,16 @@ export function readLegacyConfig(file: string, env: NodeJS.ProcessEnv = process.
 }
 
 /** The configuration the engine (core) is given: one endpoint, the models, and the key. */
-export function buildEngineConfig(view: Pick<SettingsView, 'endpointUrl' | 'models'>, apiKey: string): AliaConfig {
+export function buildEngineConfig(endpointUrl: string, models: ModelSetting[], apiKey: string): AliaConfig {
   return {
     name: 'alia',
     vendor: 'custom',
     apiKey,
     apiType: 'chat-completions',
-    models: view.models.map((m) => ({
+    models: models.map((m) => ({
       id: m.id,
       name: m.name,
-      url: view.endpointUrl,
+      url: endpointUrl,
       toolCalling: m.toolCalling ?? true,
       ...(m.vision !== undefined ? { vision: m.vision } : {}),
       ...(m.maxInputTokens ? { maxInputTokens: m.maxInputTokens } : {}),

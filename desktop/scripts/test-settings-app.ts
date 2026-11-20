@@ -1,7 +1,8 @@
 /**
  * The settings screen (A4) driven like a person would, in the REAL built app, against a fake model endpoint:
- * first run, typing the key, testing the connection, saving, restarting, the allowlist, removing the key,
- * importing an old configuration. Also proves the API key is never visible to the page and never in a plain file.
+ * first run (only a key is asked for; the address is fixed and the models come from the service), a wrong key,
+ * the right key, saving, restarting, the allowlist, refreshing the models, removing and re-entering the key.
+ * Also proves the API key is never visible to the page and never in a plain file.
  * Run from desktop/: `npm run test:settings-app` (builds first). Opens a window for a few seconds.
  */
 import fs from 'node:fs';
@@ -29,7 +30,6 @@ if (!fs.existsSync(path.join(desktop, 'out', 'main', 'index.js'))) {
 }
 
 const KEY = 'sk-test-ENDPOINTKEY-42424242';
-const LEGACY_KEY = 'sk-legacy-OLDCONFIGKEY-98989898';
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'alia-settings-app-'));
 const dataDir = path.join(tmp, 'data');
 const project = path.join(tmp, 'project');
@@ -47,15 +47,8 @@ const server = await startFakeServer(
   { apiKey: KEY }
 );
 
-// An earlier setup, for the import: its own folder, its own .env.
-const legacyDir = path.join(tmp, 'legacy');
-fs.mkdirSync(legacyDir);
-const legacyFile = path.join(legacyDir, 'alia-config.json');
-fs.writeFileSync(legacyFile, JSON.stringify({ name: 'old', vendor: 'x', apiKey: '', apiType: 'chat-completions', models: [{ id: 'old-model', name: 'Antigo', url: server.url, toolCalling: true, maxInputTokens: 64000 }] }));
-fs.writeFileSync(path.join(legacyDir, '.env'), `ALIA_API_KEY=${LEGACY_KEY}\n`);
-
 const electronBinary: string = createRequire(path.join(desktop, 'package.json'))('electron');
-const baseEnv = { ...process.env, ALIA_DESKTOP_DATA_DIR: dataDir, ALIA_DESKTOP_TEST: '1', ALIA_TEST_PICK_FOLDER: project, ALIA_TEST_PICK_FILE: legacyFile } as NodeJS.ProcessEnv;
+const baseEnv = { ...process.env, ALIA_DESKTOP_DATA_DIR: dataDir, ALIA_DESKTOP_TEST: '1', ALIA_TEST_PICK_FOLDER: project, ALIA_TEST_ENDPOINT: server.url } as NodeJS.ProcessEnv;
 for (const k of ['ELECTRON_RUN_AS_NODE', 'ELECTRON_RENDERER_URL', 'ALIA_API_KEY', 'OPENAI_API_KEY', 'ALIA_CONFIG']) delete baseEnv[k]; // none of the developer's own settings may leak in
 
 async function launch(): Promise<{ app: ElectronApplication; page: Page }> {
@@ -96,68 +89,59 @@ let { app, page } = await launch();
 try {
   console.log('\n=== first run ===');
   await page.waitForSelector('.settings');
-  check('with nothing configured the app opens on the settings screen, with a welcome note', (await page.locator('.settings').count()) === 1 && (await page.getByText('Vamos configurar o acesso aos modelos').count()) === 1);
+  check('with nothing configured the app opens on the settings screen, with a welcome note', (await page.locator('.settings').count()) === 1 && (await page.getByText('Vamos configurar o acesso ao Alia').count()) === 1);
   const v0 = await ok(page, 'settings.get');
   check('nothing is configured, and secure storage is available', v0.configured === false && v0.hasApiKey === false && v0.secureStorage === true && v0.models.length === 0);
   check('the name defaults from the Windows account', typeof v0.displayName === 'string' && v0.displayName.length > 0);
   check('the save button is off until something changes', await page.getByRole('button', { name: 'Salvar' }).isDisabled());
+  check('the only thing asked for is the API key: no address, no import, no model table, no "test" button', (await page.getByLabel('Chave de API').count()) === 1 && (await page.getByText('Endereço do serviço').count()) === 0 && (await page.getByText('Importar').count()) === 0 && (await page.getByRole('button', { name: 'Adicionar modelo' }).count()) === 0 && (await page.getByRole('button', { name: 'Testar conexão' }).count()) === 0);
+  check('the models card says they appear once the key is given', (await page.getByTestId('models-empty').count()) === 1 && (await page.getByRole('button', { name: 'Atualizar modelos' }).count()) === 0);
+  check('"Conectar" is off until a key is typed', await page.getByRole('button', { name: 'Conectar' }).isDisabled());
 
-  console.log('\n=== testing the connection ===');
-  await page.getByLabel('Endereço do serviço (URL)').fill(server.url);
-  await page.getByRole('button', { name: 'Testar conexão' }).click();
-  check('testing without a key asks for the key', (await page.getByText('Informe a chave de API para testar.').count()) === 1);
+  console.log('\n=== giving the key ===');
+  await page.getByLabel('Chave de API').fill('abc');
+  await page.getByLabel('Chave de API').press('Enter');
+  check('a key that is too short is explained next to the field, without calling the service', (await page.getByText('Essa chave parece curta demais.').count()) >= 1 && (await page.getByLabel('Chave de API').getAttribute('aria-invalid')) === 'true' && (await page.getByTestId('test-result').count()) === 0);
   await page.getByLabel('Chave de API').fill('sk-wrong-KEY-000000000');
-  await page.getByRole('button', { name: 'Testar conexão' }).click();
+  await page.getByRole('button', { name: 'Conectar' }).click();
   await page.getByTestId('test-result').waitFor();
   check('a wrong key is explained in plain words', (await page.getByTestId('test-result').innerText()).includes('A chave de API foi recusada'));
+  const vWrong = await ok(page, 'settings.get');
+  check('...and nothing was stored: no key, no models, still unconfigured, no credentials file', vWrong.hasApiKey === false && vWrong.configured === false && vWrong.models.length === 0 && !fs.existsSync(path.join(dataDir, 'user-data', 'credentials.bin')));
+  check('the field is still there for another try', (await page.locator('input[type=password]').count()) === 1);
   await page.getByLabel('Chave de API').fill(KEY);
-  await page.getByRole('button', { name: 'Testar conexão' }).click();
-  await page.getByText('Conexão estabelecida').waitFor();
-  check('the right key connects, and says how many models the service reports', (await page.getByTestId('test-result').innerText()).includes('1 modelo'));
-  await page.getByRole('button', { name: 'Adicionar', exact: true }).click();
-  check('a model the service reports can be added with one click', (await page.getByLabel('Identificador 1').inputValue()) === 'fake-model');
-  await page.getByLabel('Contexto (tokens) 1').fill('200000');
+  await page.getByLabel('Chave de API').press('Enter');
+  await page.getByText('Conectado.').waitFor();
+  check('the right key connects, and says how many models it gives access to', (await page.getByTestId('test-result').innerText()).includes('1 modelo disponível'));
+  check('the key field is replaced by "saved and protected"', (await page.getByTestId('key-saved').count()) === 1 && (await page.locator('input[type=password]').count()) === 0);
+  check('the models the service reported are listed, with nothing to type', (await page.getByTestId('models-list').innerText()).includes('fake-model') && (await page.getByRole('button', { name: 'Atualizar modelos' }).count()) === 1);
+  const v1 = await ok(page, 'settings.get');
+  check('the app is configured: key saved, one model, default context size', v1.configured && v1.hasApiKey && v1.models.length === 1 && v1.models[0].id === 'fake-model' && v1.models[0].maxInputTokens === 128000);
+  check('connecting did not leave the screen asking to save', (await page.getByRole('button', { name: 'Salvar' }).isDisabled()) && (await page.getByText('Há alterações não salvas.').count()) === 0);
 
-  console.log('\n=== validation ===');
-  await page.getByLabel('Endereço do serviço (URL)').fill('ftp://nope');
-  await page.getByRole('button', { name: 'Salvar' }).click();
-  check('a bad address is explained next to the field, and nothing is saved', (await page.getByText('Informe um endereço http ou https').count()) >= 1 && (await ok(page, 'settings.get')).endpointUrl === '');
-  check('the error is announced to screen readers (role=alert) and the field is marked invalid', (await page.locator('[role=alert]').count()) >= 1 && (await page.getByLabel('Endereço do serviço (URL)').getAttribute('aria-invalid')) === 'true');
-  await page.getByLabel('Endereço do serviço (URL)').fill(server.url);
-  await page.getByRole('button', { name: 'Adicionar modelo' }).click();
-  await page.getByLabel('Identificador 2').fill('fake-model');
-  await page.getByRole('button', { name: 'Salvar' }).click();
-  check('a repeated model id is refused', (await page.getByText('aparece mais de uma vez').count()) === 1);
-  await page.getByLabel('Identificador 2').fill('');
-  await page.getByRole('button', { name: 'Salvar' }).click();
-  check('an empty model id is refused', (await page.getByText('precisa de um identificador').count()) === 1);
-  await page.getByRole('button', { name: 'Remover o modelo' , exact: false }).last().click();
-  check('a model row can be removed', (await page.getByLabel('Identificador 2').count()) === 0);
-
-  console.log('\n=== saving ===');
+  console.log('\n=== saving the rest ===');
   await page.getByLabel('Seu nome').fill('Maria');
   await page.getByLabel('Organização').fill('Instituto Atlântico');
   await page.getByRole('button', { name: 'Salvar' }).click();
   await savedStatus(page).waitFor();
   check('saving confirms it', (await savedStatus(page).innerText()).includes('Configurações salvas'));
-  const v1 = await ok(page, 'settings.get');
-  check('what was typed is in the settings, and the app is configured', v1.configured && v1.hasApiKey && v1.endpointUrl === server.url && v1.models.length === 1 && v1.models[0].maxInputTokens === 200000 && v1.displayName === 'Maria' && v1.organization === 'Instituto Atlântico' && v1.permissionMode === 'ask-commands');
-  check('the key field is gone, replaced by "saved and protected"', (await page.getByTestId('key-saved').count()) === 1 && (await page.locator('input[type=password]').count()) === 0);
+  const v1b = await ok(page, 'settings.get');
+  check('what was typed is in the settings', v1b.displayName === 'Maria' && v1b.organization === 'Instituto Atlântico' && v1b.permissionMode === 'ask-commands' && v1b.configured);
 
   console.log('\n=== the key is never visible to the page, nor in a plain file ===');
   const pageSees = await page.evaluate(() => ({ html: document.documentElement.outerHTML, values: Array.from(document.querySelectorAll('input')).map((i) => (i as HTMLInputElement).value).join('|'), msgs: JSON.stringify((window as any).__msgs) }));
   check('no part of the key is in the page\'s HTML, in any field, or in anything pushed to it', !pageSees.html.includes('ENDPOINTKEY') && !pageSees.values.includes('ENDPOINTKEY') && !pageSees.msgs.includes('ENDPOINTKEY'));
-  check('settings.get and every reply about settings have no key', !JSON.stringify(v1).includes('ENDPOINTKEY') && !JSON.stringify(await ok(page, 'settings.testConnection', {})).includes('ENDPOINTKEY'));
+  check('settings.get and every reply about settings have no key', !JSON.stringify(v1).includes('ENDPOINTKEY') && !JSON.stringify(await ok(page, 'settings.refreshModels', {})).includes('ENDPOINTKEY'));
   const userData = path.join(dataDir, 'user-data');
   const settingsJson = fs.readFileSync(path.join(userData, 'settings.json'), 'utf8');
   const creds = fs.readFileSync(path.join(userData, 'credentials.bin'));
-  check('settings.json holds the endpoint and models but no key', settingsJson.includes(server.url) && !settingsJson.includes('ENDPOINTKEY'));
+  check('settings.json holds the models but no key, and no address (it is fixed)', settingsJson.includes('fake-model') && !settingsJson.includes('ENDPOINTKEY') && !settingsJson.includes(server.url) && !settingsJson.includes('endpointUrl'));
   check('credentials.bin exists and is encrypted (the key is not in it, in any form)', creds.length > 20 && !creds.toString('latin1').includes('ENDPOINTKEY') && !creds.toString('utf8').includes('sk-test') && !creds.toString('latin1').includes(Buffer.from(KEY).toString('base64')));
 
   console.log('\n=== the saved settings drive the engine ===');
   const picked = await ok(page, 'projects.pick');
   const session = await ok(page, 'session.open', { projectPath: project });
-  check('a conversation opens with the saved model and context size', session.model === 'fake-model' && session.usage.limit === 200000);
+  check('a conversation opens with the saved model and context size', session.model === 'fake-model' && session.usage.limit === 128000);
   await ok(page, 'session.run', { sessionId: session.sessionId, text: 'oi' });
   check('and runs against the endpoint with the saved key (the fake endpoint rejects any other)', (await finished(page, session.sessionId, 0)).result.text === 'Olá!');
   await ok(page, 'session.run', { sessionId: session.sessionId, text: 'rode um comando' });
@@ -182,7 +166,7 @@ try {
   await page.waitForSelector('.display');
   check('the next start goes straight to the app (nothing to set up again)', (await page.locator('.settings').count()) === 0 && (await page.locator('.home .display').innerText()).endsWith('Maria'));
   const v2 = await ok(page, 'settings.get');
-  check('everything persisted, including the encrypted key', v2.configured && v2.hasApiKey && v2.endpointUrl === server.url && v2.organization === 'Instituto Atlântico');
+  check('everything persisted, including the encrypted key', v2.configured && v2.hasApiKey && v2.models[0].id === 'fake-model' && v2.organization === 'Instituto Atlântico');
   const reopened = await ok(page, 'session.open', { projectPath: project });
   check('the folder opened earlier can be opened again without the dialog', reopened.workspace === path.resolve(project));
   const other = await call(page, 'session.open', { projectPath: tmp });
@@ -200,17 +184,24 @@ try {
   const autoFin = await finished(page, auto.sessionId, 0);
   check('a new conversation follows it: the command runs with no card', autoFin.result.text.includes('auto-ok') && !(await messages(page)).some((m) => m.kind === 'interaction' && m.interaction.sessionId === auto.sessionId));
 
-  console.log('\n=== removing the key, importing an old configuration ===');
+  console.log('\n=== refreshing the models ===');
+  await page.getByRole('button', { name: 'Atualizar modelos' }).click();
+  await page.getByText('Conectado.').waitFor();
+  check('"Atualizar modelos" asks the service again with the saved key and reports it', (await page.getByTestId('test-result').innerText()).includes('1 modelo disponível') && (await ok(page, 'settings.get')).models[0].id === 'fake-model');
+
+  console.log('\n=== removing the key, and giving one again ===');
   await page.getByRole('button', { name: 'Remover chave' }).click();
   await page.locator('input[type=password]').waitFor();
   const v3 = await ok(page, 'settings.get');
   check('removing the key deletes it and the app is no longer configured', v3.hasApiKey === false && v3.configured === false && !fs.existsSync(path.join(userData, 'credentials.bin')));
-  await page.getByRole('button', { name: 'Importar de um arquivo…' }).click();
-  await page.getByText('Configuração importada').waitFor();
+  check('with no key there is nothing to refresh', (await page.getByRole('button', { name: 'Atualizar modelos' }).count()) === 0);
+  await page.getByLabel('Chave de API').fill(KEY);
+  await page.getByLabel('Seu nome').fill('Maria S.');
+  await page.getByRole('button', { name: 'Salvar' }).click();
+  await savedStatus(page).waitFor();
   const v4 = await ok(page, 'settings.get');
-  check('importing brings the endpoint, the models and the key from the old files', v4.configured && v4.models.length === 1 && v4.models[0].id === 'old-model' && v4.models[0].maxInputTokens === 64000 && v4.hasApiKey);
-  const credsNow = fs.readFileSync(path.join(userData, 'credentials.bin'));
-  check('the imported key is encrypted like any other, and never reached the page', !credsNow.toString('latin1').includes('OLDCONFIGKEY') && !JSON.stringify(await messages(page)).includes('OLDCONFIGKEY') && !(await page.evaluate(() => document.documentElement.outerHTML)).includes('OLDCONFIGKEY'));
+  check('a key typed and then "Salvar" is checked and stored along with the other changes', v4.configured && v4.hasApiKey && v4.displayName === 'Maria S.' && (await page.getByTestId('key-saved').count()) === 1);
+  check('the re-entered key is encrypted and never reached the page', !fs.readFileSync(path.join(userData, 'credentials.bin')).toString('latin1').includes('ENDPOINTKEY') && !(await page.evaluate(() => document.documentElement.outerHTML)).includes('ENDPOINTKEY'));
 
   console.log('\n=== accessibility basics ===');
   const unnamed = await page.evaluate(() => {
@@ -225,7 +216,7 @@ try {
   });
   check('every field and button on the screen has a name a screen reader can read', unnamed.length === 0, unnamed.join(' | '));
   const logs = fs.readdirSync(path.join(userData, 'logs')).map((f) => fs.readFileSync(path.join(userData, 'logs', f), 'utf8')).join('\n');
-  check('the log never contains either key, but says what happened', !logs.includes('ENDPOINTKEY') && !logs.includes('OLDCONFIGKEY') && logs.includes('engine configured') && logs.includes('imported 1 model'));
+  check('the log never contains the key, but says what happened', !logs.includes('ENDPOINTKEY') && logs.includes('engine configured') && logs.includes('models loaded from the service'));
 } catch (err: any) {
   failures++;
   console.log(`  ✘ ${err?.stack ?? err}`);

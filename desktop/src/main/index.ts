@@ -17,6 +17,7 @@ import { TrustStore, inspectProject } from './trust';
 import { buildMenu } from './menu';
 import { APP_ORIGIN } from './securityRules';
 import { commandForInput } from './shortcuts';
+import { resolveEndpoint } from './endpoint';
 import { mainStrings } from './strings';
 
 /*
@@ -67,14 +68,6 @@ function start(): void {
     decrypt: (data) => safeStorage.decryptString(data),
   });
   const trust = new TrustStore(path.join(userData, 'trust.json'));
-  const pickLegacyFile = async (suggestedFolder?: string): Promise<string | null> => {
-    if (testMode && process.env.ALIA_TEST_PICK_FILE) return process.env.ALIA_TEST_PICK_FILE;
-    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-    const options = { title: mainStrings.dialogs.pickConfig, defaultPath: suggestedFolder, filters: [{ name: 'alia-config.json', extensions: ['json'] }], properties: ['openFile' as const] };
-    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
-    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
-  };
-
   // eslint-disable-next-line prefer-const
   let settings: SettingsService;
 
@@ -89,7 +82,7 @@ function start(): void {
       endpoint: async () => {
         const view = settings.view();
         if (!view.configured) return { configured: false };
-        const r = await settings.testConnection({});
+        const r = await settings.checkConnection();
         return { configured: true, ok: r.ok, message: r.message, models: r.models?.length };
       },
     };
@@ -134,8 +127,7 @@ function start(): void {
     store,
     secrets,
     engine,
-    legacyFolders: [repoRoot, process.cwd(), path.join(os.homedir(), '.alia')],
-    pickLegacyFile,
+    endpointUrl: resolveEndpoint(process.env, testMode),
     bundledSkillsDir: bundledSkills,
     userSkillsDir: path.join(os.homedir(), '.alia', 'skills'),
     dataDirs: dataDir ? { sessions: path.join(dataDir, 'sessions'), permissions: path.join(dataDir, 'permissions') } : undefined,
@@ -224,9 +216,7 @@ function start(): void {
       'settings.update': (patch) => settings.update(patch),
       'settings.setApiKey': ({ apiKey }) => settings.setApiKey(apiKey),
       'settings.clearApiKey': () => settings.clearApiKey(),
-      'settings.testConnection': (args) => settings.testConnection(args),
-      'settings.legacyCandidate': () => settings.legacyCandidate(),
-      'settings.importLegacy': () => settings.importLegacy(),
+      'settings.refreshModels': () => settings.refreshModels(),
       'app.info': () => ({ name: mainStrings.appName, version: app.getVersion(), platform: process.platform }),
       'app.openExternal': async ({ url }, ctx) => ({ opened: await confirmAndOpenExternal(url, windowOf(ctx), guardOptions) }),
     },
@@ -317,7 +307,7 @@ function start(): void {
   installWebContentsGuards(guardOptions);
 
   void app.whenReady().then(async () => {
-    await settings.seedFromEnvironment();
+    if (testMode) await settings.seedFromEnvironment();
     if (!devUrl) serveApp(path.join(import.meta.dirname, '../renderer'));
     installSessionGuards(guardOptions);
 

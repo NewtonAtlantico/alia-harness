@@ -438,7 +438,7 @@ console.log('\n=== testing a connection ===');
   const server = await startFakeServer([], { apiKey: KEY });
   const r = await rig(say('x'));
   const good = await r.call('connection.test', { url: server.url, apiKey: KEY });
-  check('with the right key the endpoint\'s models are listed', good.ok === true && good.models.join() === 'fake-model', JSON.stringify(good));
+  check('with the right key the endpoint\'s models are listed', good.ok === true && good.models.map((m: any) => m.id).join() === 'fake-model' && good.models[0].name === 'fake-model' && good.models[0].maxInputTokens === undefined, JSON.stringify(good));
   const noSlash = await r.call('connection.test', { url: server.url.replace(/\/$/, ''), apiKey: KEY });
   check('an address with or without the trailing slash works', noSlash.ok === true);
   const wrong = await r.call('connection.test', { url: server.url, apiKey: 'sk-wrong-KEY-000000000' });
