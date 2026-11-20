@@ -105,6 +105,9 @@ const focusEvent = () => page.evaluate(() => window.dispatchEvent(new Event('foc
 
 try {
   await ok('settings.update', { permissionMode: 'auto', displayName: 'Newton' });
+  // The window reads the settings once, when it starts: without this it keeps the OS user's name (the CI runner's is not Newton).
+  await page.reload();
+  await page.waitForSelector('.sidebar');
   await ok('projects.pick');
   await page.getByRole('button', { name: 'Abrir pasta…' }).click();
   await page.getByRole('combobox', { name: 'Mensagem' }).waitFor({ timeout: 15000 });

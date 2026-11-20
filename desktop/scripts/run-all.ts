@@ -54,8 +54,15 @@ for (const suite of selected) {
   results.push({ name: suite.name, ok, seconds });
   console.log(`${ok ? 'ok' : 'FAILED'} (${seconds}s)`);
   if (!ok) {
-    const out = `${run.stdout ?? ''}${run.stderr ?? ''}`.split('\n').filter((l) => /✘|failed|Error|error/i.test(l)).slice(0, 12);
-    for (const l of out) console.log(`    ${l.trim()}`);
+    // Each failed check with what follows it (the locator's call log, the stack with the line of the suite that failed):
+    // on a CI runner this is all there is to go by.
+    const lines = `${run.stdout ?? ''}${run.stderr ?? ''}`.split('\n');
+    const shown: string[] = [];
+    lines.forEach((l, i) => {
+      if (/✘/.test(l)) shown.push(l, ...lines.slice(i + 1, i + 9).filter((n) => /^\s+(at |-|Call log)/.test(n) || /^\s+\d+ \|/.test(n)));
+      else if (/failed|Error/i.test(l) && !/✔/.test(l)) shown.push(l);
+    });
+    for (const l of shown.slice(0, 40)) console.log(`    ${l.trim()}`);
   }
 }
 

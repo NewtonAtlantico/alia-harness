@@ -199,7 +199,8 @@ try {
   await page.getByRole('list', { name: 'Conversas de projeto' }).waitFor();
   await ok('session.run', { sessionId: c.sessionId, text: 'inicie o servidor' });
   await page.getByRole('list', { name: 'Conversas de projeto' }).getByRole('button', { name: /inicie o servidor/ }).click();
-  await tool('run_bash').waitFor({ timeout: 15000 });
+  // The previous conversation (two commands of its own) is still on screen until the new one replaces it: wait for the row that runs.
+  await page.locator('[data-tool="run_bash"]', { hasText: 'em andamento' }).waitFor({ timeout: 15000 });
   check('a running command shows as in progress', (await tool('run_bash').innerText()).includes('em andamento') && (await hang.started(pidFile)));
   await ok('session.cancel', { sessionId: c.sessionId });
   const stopNotice = page.locator('[data-notice="cancelled"]');
