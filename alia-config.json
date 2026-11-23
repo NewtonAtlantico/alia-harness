@@ -5,8 +5,8 @@
 	"apiType": "chat-completions",
 	"models": [
 		{
-			"id": "gpt-oss:20b",
-			"name": "gpt-oss",
+			"id": "glm-5.3",
+			"name": "glm-5.3",
 			"url": "https://chat.alia.atlantico.com.br/api/",
 			"toolCalling": true,
 			"vision": true,
