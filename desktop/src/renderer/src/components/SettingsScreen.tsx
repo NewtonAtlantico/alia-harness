@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ConnectionTestResult, LegacyCandidate, ModelSetting, PermissionMode, PermissionRule, ProjectInspection, SettingsView } from '../../../shared/ipc';
+import type { ConnectResult, PermissionMode, PermissionRule, ProjectInspection, SettingsView } from '../../../shared/ipc';
 import { projectName } from '../lib/projectName';
 import { t } from '../i18n/pt-BR';
 import { Diagnostics } from './Diagnostics';
@@ -9,37 +9,16 @@ const MODES: PermissionMode[] = ['ask-commands', 'ask-dangerous', 'auto'];
 interface Draft {
   displayName: string;
   organization: string;
-  endpointUrl: string;
-  models: ModelSetting[];
   permissionMode: PermissionMode;
 }
 
-const toDraft = (v: SettingsView): Draft => ({ displayName: v.displayName, organization: v.organization, endpointUrl: v.endpointUrl, models: v.models.map((m) => ({ ...m })), permissionMode: v.permissionMode });
+const toDraft = (v: SettingsView): Draft => ({ displayName: v.displayName, organization: v.organization, permissionMode: v.permissionMode });
 const sameDraft = (a: Draft, b: Draft) => JSON.stringify(a) === JSON.stringify(b);
 const message = (err: unknown) => String((err as Error)?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 
-function isHttpUrl(value: string): boolean {
-  try {
-    const u = new URL(value.trim());
-    return (u.protocol === 'http:' || u.protocol === 'https:') && !!u.hostname && !u.username && !u.password;
-  } catch {
-    return false;
-  }
-}
-
 /** Returns what is wrong with the form, keyed by field, in the words the user will read. */
-function validate(draft: Draft, newKey: string | undefined): Record<string, string> {
+function validate(newKey: string | undefined): Record<string, string> {
   const errors: Record<string, string> = {};
-  if (!isHttpUrl(draft.endpointUrl)) errors.endpoint = t.settings.errors.endpoint;
-  if (draft.models.length === 0) errors.models = t.settings.errors.noModels;
-  const seen = new Set<string>();
-  draft.models.forEach((m, i) => {
-    const id = m.id.trim();
-    if (!id) errors[`model-${i}-id`] = t.settings.errors.modelId;
-    else if (seen.has(id)) errors[`model-${i}-id`] = t.settings.errors.duplicateId(id);
-    seen.add(id);
-    if (m.maxInputTokens !== undefined && (!Number.isInteger(m.maxInputTokens) || m.maxInputTokens < 1000)) errors[`model-${i}-context`] = t.settings.errors.context;
-  });
   if (newKey !== undefined && newKey.trim().length < 8) errors.key = t.settings.errors.keyShort;
   return errors;
 }
@@ -51,8 +30,8 @@ export function SettingsScreen({ onClose, onSaved, onProjectsChanged }: { onClos
   const [editingKey, setEditingKey] = useState(false);
   const [status, setStatus] = useState<{ kind: 'ok' | 'error'; text: string }>();
   const [saving, setSaving] = useState(false);
-  const [test, setTest] = useState<{ running: boolean; result?: ConnectionTestResult; needKey?: boolean }>({ running: false });
-  const [legacy, setLegacy] = useState<LegacyCandidate | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [connection, setConnection] = useState<ConnectResult['connection']>();
   const [recent, setRecent] = useState<string[]>([]);
   const [project, setProject] = useState('');
   const [rules, setRules] = useState<PermissionRule[]>([]);
@@ -60,10 +39,9 @@ export function SettingsScreen({ onClose, onSaved, onProjectsChanged }: { onClos
   const [showErrors, setShowErrors] = useState(false);
 
   const load = useCallback(async () => {
-    const [v, candidate, projects] = await Promise.all([window.alia.request('settings.get', {}), window.alia.request('settings.legacyCandidate', {}), window.alia.request('projects.recent', {})]);
+    const [v, projects] = await Promise.all([window.alia.request('settings.get', {}), window.alia.request('projects.recent', {})]);
     setView(v);
     setDraft(toDraft(v));
-    setLegacy(v.configured ? null : candidate);
     setRecent(projects);
     setProject((p) => p || projects[0] || '');
     const found = await Promise.all(projects.map(async (p) => [p, await window.alia.request('projects.inspect', { projectPath: p }).catch(() => undefined)] as const));
@@ -84,14 +62,58 @@ export function SettingsScreen({ onClose, onSaved, onProjectsChanged }: { onClos
   }, [project]);
 
   const keyPending = editingKey && newKey.trim() !== '';
-  const errors = useMemo(() => (draft ? validate(draft, keyPending ? newKey : undefined) : {}), [draft, newKey, keyPending]);
+  const errors = useMemo(() => validate(keyPending ? newKey : undefined), [newKey, keyPending]);
   const dirty = !!draft && !!view && (!sameDraft(draft, toDraft(view)) || keyPending);
 
   if (!view || !draft) return <section className="settings"><p>{t.common.loading}</p></section>;
 
   const set = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch });
-  const setModel = (i: number, patch: Partial<ModelSetting>) => set({ models: draft.models.map((m, j) => (j === i ? { ...m, ...patch } : m)) });
   const err = (field: string) => (showErrors ? errors[field] : undefined);
+
+  /** Gives the key to the service. It is stored only if the service accepts it, and the models it offers are loaded. */
+  const connect = async (): Promise<boolean> => {
+    setConnecting(true);
+    setConnection(undefined);
+    try {
+      const { view: next, connection: result } = await window.alia.request('settings.setApiKey', { apiKey: newKey.trim() });
+      setConnection(result);
+      if (!result.ok) return false;
+      setNewKey('');
+      setView(next);
+      setEditingKey(false);
+      setShowErrors(false);
+      onSaved(next);
+      return true;
+    } catch (e) {
+      setConnection({ ok: false, models: [], reason: 'other', message: message(e) });
+      return false;
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const refreshModels = async () => {
+    setConnecting(true);
+    setConnection(undefined);
+    try {
+      const { view: next, connection: result } = await window.alia.request('settings.refreshModels', {});
+      setConnection(result);
+      if (result.ok) {
+        setView(next);
+        onSaved(next);
+      }
+    } catch (e) {
+      setConnection({ ok: false, models: [], reason: 'other', message: message(e) });
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const connectFromForm = () => {
+    setShowErrors(true);
+    if (errors.key || !keyPending) return;
+    void connect();
+  };
 
   const save = async () => {
     setShowErrors(true);
@@ -99,57 +121,19 @@ export function SettingsScreen({ onClose, onSaved, onProjectsChanged }: { onClos
     setSaving(true);
     setStatus(undefined);
     try {
-      let next = await window.alia.request('settings.update', {
-        displayName: draft.displayName,
-        organization: draft.organization,
-        endpointUrl: draft.endpointUrl.trim(),
-        models: draft.models.map((m) => ({ ...m, id: m.id.trim(), name: m.name.trim() || m.id.trim() })),
-        permissionMode: draft.permissionMode,
-      });
-      if (keyPending) next = await window.alia.request('settings.setApiKey', { apiKey: newKey.trim() });
-      setNewKey('');
+      let next = view;
+      if (!sameDraft(draft, toDraft(view))) next = await window.alia.request('settings.update', { displayName: draft.displayName, organization: draft.organization, permissionMode: draft.permissionMode });
       setView(next);
       setDraft(toDraft(next));
-      setEditingKey(!next.hasApiKey);
-      setShowErrors(false);
-      setLegacy(null);
-      setStatus({ kind: 'ok', text: t.settings.saved });
       onSaved(next);
+      // A key typed but not yet given to the service goes along with Save.
+      if (keyPending && !(await connect())) return;
+      setShowErrors(false);
+      setStatus({ kind: 'ok', text: t.settings.saved });
     } catch (e) {
       setStatus({ kind: 'error', text: t.common.errorGeneric(message(e)) });
     } finally {
       setSaving(false);
-    }
-  };
-
-  const runTest = async () => {
-    if (!isHttpUrl(draft.endpointUrl)) {
-      setShowErrors(true);
-      return;
-    }
-    if (editingKey && !newKey.trim() && !view.hasApiKey) {
-      setTest({ running: false, needKey: true });
-      return;
-    }
-    setTest({ running: true });
-    try {
-      const result = await window.alia.request('settings.testConnection', { endpointUrl: draft.endpointUrl.trim(), ...(keyPending ? { apiKey: newKey.trim() } : {}) });
-      setTest({ running: false, result });
-    } catch (e) {
-      setTest({ running: false, result: { ok: false, models: [], reason: 'other', message: message(e) } });
-    }
-  };
-
-  const importConfig = async () => {
-    setStatus(undefined);
-    try {
-      const summary = await window.alia.request('settings.importLegacy', {});
-      if (!summary) return;
-      await load();
-      onSaved(await window.alia.request('settings.get', {}));
-      setStatus({ kind: 'ok', text: t.settings.import.done(summary.models, summary.importedKey) + (summary.importedKey ? '' : ` ${t.settings.import.noKey}`) });
-    } catch (e) {
-      setStatus({ kind: 'error', text: t.settings.import.failed(message(e)) });
     }
   };
 
@@ -158,6 +142,7 @@ export function SettingsScreen({ onClose, onSaved, onProjectsChanged }: { onClos
     setView(next);
     setEditingKey(true);
     setNewKey('');
+    setConnection(undefined);
     onSaved(next);
   };
 
@@ -171,8 +156,6 @@ export function SettingsScreen({ onClose, onSaved, onProjectsChanged }: { onClos
     setInspections((cur) => ({ ...cur, [projectPath]: next }));
     onProjectsChanged?.();
   };
-
-  const configuredIds = new Set(draft.models.map((m) => m.id));
 
   return (
     <section className="settings" aria-labelledby="settings-title">
@@ -188,22 +171,8 @@ export function SettingsScreen({ onClose, onSaved, onProjectsChanged }: { onClos
         </div>
       )}
 
-      {legacy && (
-        <div className="banner" role="note" data-testid="legacy-banner">
-          <p>{t.settings.import.found(legacy.path, legacy.models)}</p>
-          <button type="button" className="btn primary" onClick={importConfig}>{t.settings.import.button}</button>
-        </div>
-      )}
-
       <div className="card">
         <h2>{t.settings.connection.title}</h2>
-        <label className="field">
-          <span>{t.settings.connection.endpoint}</span>
-          <input type="url" value={draft.endpointUrl} onChange={(e) => set({ endpointUrl: e.target.value })} aria-invalid={!!err('endpoint')} aria-describedby="endpoint-hint endpoint-error" spellCheck={false} />
-        </label>
-        <p className="hint" id="endpoint-hint">{t.settings.connection.endpointHint}</p>
-        {err('endpoint') && <p className="error" id="endpoint-error" role="alert">{err('endpoint')}</p>}
-
         <div className="field">
           <span id="key-label">{t.settings.connection.apiKey}</span>
           {!view.secureStorage && <p className="error" role="alert">{t.settings.connection.noSecureStorage}</p>}
@@ -215,35 +184,29 @@ export function SettingsScreen({ onClose, onSaved, onProjectsChanged }: { onClos
             </div>
           ) : (
             <div className="row">
-              <input type="password" aria-labelledby="key-label" value={newKey} onChange={(e) => setNewKey(e.target.value)} placeholder={t.settings.connection.keyPlaceholder} autoComplete="off" spellCheck={false} disabled={!view.secureStorage} aria-invalid={!!err('key')} />
+              <input
+                type="password"
+                aria-labelledby="key-label"
+                value={newKey}
+                onChange={(e) => setNewKey(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') connectFromForm(); }}
+                placeholder={t.settings.connection.keyPlaceholder}
+                autoComplete="off"
+                spellCheck={false}
+                disabled={!view.secureStorage || connecting}
+                aria-invalid={!!err('key')}
+              />
+              <button type="button" className="btn primary" onClick={connectFromForm} disabled={!view.secureStorage || connecting || !keyPending}>{connecting ? t.settings.connection.connecting : t.settings.connection.connect}</button>
               {view.hasApiKey && <button type="button" className="btn" onClick={() => { setEditingKey(false); setNewKey(''); }}>{t.settings.connection.keyCancel}</button>}
             </div>
           )}
           <p className="hint">{t.settings.connection.keyNote}</p>
           {err('key') && <p className="error" role="alert">{err('key')}</p>}
         </div>
-
-        <div className="row">
-          <button type="button" className="btn" onClick={runTest} disabled={test.running}>{test.running ? t.settings.connection.testing : t.settings.connection.test}</button>
-          {test.needKey && <span className="error">{t.settings.connection.needKey}</span>}
-        </div>
-        {test.result && (
-          <div className={`result ${test.result.ok ? 'ok' : 'bad'}`} role="status" data-testid="test-result">
-            {test.result.ok ? t.settings.connection.ok(test.result.models.length) : t.settings.connection.reasons[test.result.reason ?? 'other']}
-            {test.result.ok && test.result.models.length > 0 && (
-              <ul className="remote-models" aria-label={t.settings.connection.available}>
-                {test.result.models.map((id) => (
-                  <li key={id}>
-                    <code>{id}</code>
-                    {configuredIds.has(id) ? (
-                      <span className="hint">{t.settings.connection.alreadyAdded}</span>
-                    ) : (
-                      <button type="button" className="btn small" onClick={() => set({ models: [...draft.models, { id, name: id }] })}>{t.settings.connection.addModel}</button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
+        {connection && (
+          <div className={`result ${connection.ok ? 'ok' : 'bad'}`} role="status" data-testid="test-result">
+            {connection.ok ? t.settings.connection.ok(connection.models.length) : t.settings.connection.reasons[connection.reason ?? 'other']}
+            {!connection.ok && connection.reason === 'other' && connection.message && <span className="hint"> ({connection.message})</span>}
           </div>
         )}
       </div>
@@ -251,29 +214,23 @@ export function SettingsScreen({ onClose, onSaved, onProjectsChanged }: { onClos
       <div className="card">
         <h2>{t.settings.models.title}</h2>
         <p className="hint">{t.settings.models.hint}</p>
-        {err('models') && <p className="error" role="alert">{err('models')}</p>}
-        <table className="models">
-          <thead>
-            <tr><th scope="col">{t.settings.models.id}</th><th scope="col">{t.settings.models.name}</th><th scope="col">{t.settings.models.context}</th><th scope="col"><span className="sr-only">{t.settings.models.remove('')}</span></th></tr>
-          </thead>
-          <tbody>
-            {draft.models.map((m, i) => (
-              <tr key={i}>
-                <td>
-                  <input aria-label={`${t.settings.models.id} ${i + 1}`} value={m.id} onChange={(e) => setModel(i, { id: e.target.value })} aria-invalid={!!err(`model-${i}-id`)} spellCheck={false} />
-                  {err(`model-${i}-id`) && <p className="error" role="alert">{err(`model-${i}-id`)}</p>}
-                </td>
-                <td><input aria-label={`${t.settings.models.name} ${i + 1}`} value={m.name} onChange={(e) => setModel(i, { name: e.target.value })} /></td>
-                <td>
-                  <input aria-label={`${t.settings.models.context} ${i + 1}`} inputMode="numeric" value={m.maxInputTokens ?? ''} onChange={(e) => setModel(i, { maxInputTokens: e.target.value === '' ? undefined : Number(e.target.value) })} aria-invalid={!!err(`model-${i}-context`)} />
-                  {err(`model-${i}-context`) && <p className="error" role="alert">{err(`model-${i}-context`)}</p>}
-                </td>
-                <td><button type="button" className="btn small danger" aria-label={t.settings.models.remove(m.name || m.id)} onClick={() => set({ models: draft.models.filter((_, j) => j !== i) })}>×</button></td>
-              </tr>
+        {view.models.length === 0 ? (
+          <p className="hint" data-testid="models-empty">{t.settings.models.empty}</p>
+        ) : (
+          <ul className="remote-models" data-testid="models-list" aria-label={t.settings.models.title}>
+            {view.models.map((m) => (
+              <li key={m.id}>
+                <strong>{m.name}</strong>
+                {m.name !== m.id && <code>{m.id}</code>}
+              </li>
             ))}
-          </tbody>
-        </table>
-        <button type="button" className="btn" onClick={() => set({ models: [...draft.models, { id: '', name: '', maxInputTokens: 128000 }] })}>{t.settings.models.add}</button>
+          </ul>
+        )}
+        {view.hasApiKey && (
+          <div className="row">
+            <button type="button" className="btn" onClick={refreshModels} disabled={connecting}>{connecting && !editingKey ? t.settings.models.refreshing : t.settings.models.refresh}</button>
+          </div>
+        )}
       </div>
 
       <div className="card">
@@ -370,7 +327,6 @@ export function SettingsScreen({ onClose, onSaved, onProjectsChanged }: { onClos
         <button type="button" className="btn" onClick={() => { setDraft(toDraft(view)); setNewKey(''); setEditingKey(!view.hasApiKey); setShowErrors(false); setStatus(undefined); }} disabled={!dirty || saving}>{t.settings.discard}</button>
         <button type="button" className="btn primary" onClick={save} disabled={!dirty || saving}>{saving ? t.settings.saving : t.settings.save}</button>
         <div className="grow" />
-        <button type="button" className="btn" onClick={importConfig}>{t.settings.import.fromFile}</button>
         {status && <span className={status.kind === 'ok' ? 'ok-text' : 'error'} role="status" data-testid="status">{status.text}</span>}
         {dirty && !status && <span className="hint">{t.settings.unsaved}</span>}
       </footer>

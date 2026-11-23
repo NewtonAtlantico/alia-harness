@@ -155,6 +155,9 @@ const readText = (rel: string) => fs.readFileSync(path.join(project, rel), 'utf8
 
 try {
   await ok('settings.update', { displayName: 'Newton' });
+  // The window reads the settings once, when it starts: without this it keeps the OS user's name (the CI runner's is not Newton).
+  await page.reload();
+  await page.waitForSelector('.sidebar');
   console.log('\n=== first run: settings, then a project ===');
   await page.getByRole('button', { name: 'Configurações' }).click();
   await page.getByRole('heading', { name: 'Configurações', level: 1 }).waitFor();

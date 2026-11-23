@@ -7,7 +7,6 @@ export interface StoredSettings {
   version: 1;
   displayName: string;
   organization: string;
-  endpointUrl: string;
   models: ModelSetting[];
   permissionMode: PermissionMode;
   /** Folders the user opened, newest first. Also the list of projects the app will open without asking again. */
@@ -18,7 +17,7 @@ export const MAX_RECENT_PROJECTS = 20;
 const MODES: PermissionMode[] = ['ask-dangerous', 'ask-commands', 'auto'];
 
 export function defaultSettings(displayName = ''): StoredSettings {
-  return { version: 1, displayName, organization: '', endpointUrl: '', models: [], permissionMode: 'ask-commands', recentProjects: [] };
+  return { version: 1, displayName, organization: '', models: [], permissionMode: 'ask-commands', recentProjects: [] };
 }
 
 const str = (v: unknown, fallback: string, max = 2048) => (typeof v === 'string' ? v.trim().slice(0, max) : fallback);
@@ -50,7 +49,6 @@ export function normalizeSettings(raw: unknown, defaults: StoredSettings): Store
     version: 1,
     displayName: typeof r.displayName === 'string' ? str(r.displayName, defaults.displayName, 100) : defaults.displayName,
     organization: str(r.organization, defaults.organization, 100),
-    endpointUrl: str(r.endpointUrl, defaults.endpointUrl),
     models,
     permissionMode: MODES.includes(r.permissionMode as PermissionMode) ? (r.permissionMode as PermissionMode) : defaults.permissionMode,
     recentProjects: [...new Set(recent)].slice(0, MAX_RECENT_PROJECTS),
@@ -114,7 +112,6 @@ export class SettingsStore {
           ...cur,
           ...(patch.displayName !== undefined ? { displayName: patch.displayName } : {}),
           ...(patch.organization !== undefined ? { organization: patch.organization } : {}),
-          ...(patch.endpointUrl !== undefined ? { endpointUrl: patch.endpointUrl } : {}),
           ...(patch.models !== undefined ? { models: patch.models } : {}),
           ...(patch.permissionMode !== undefined ? { permissionMode: patch.permissionMode } : {}),
         },

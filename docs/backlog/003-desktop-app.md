@@ -327,7 +327,11 @@ A18                           Last, across everything.
 
 ### A4: settings, config and secrets
 
-- **Where things are** (`%APPDATA%/<app>/`): `settings.json` (endpoint, models, display name, organization, approval mode, recent projects: no secret in it) and `credentials.bin` (the API key, encrypted with Electron's
+> **Simplified after A19 (2026-11-20):** the user gives **only the API key**. The address is fixed (`https://chat.alia.atlantico.com.br/api/`, `main/endpoint.ts`) and the models are loaded from the service for that key. The screen no longer has an address field, a model table, "Testar conexão" or any import from `alia-config.json`. Where the bullets below say otherwise (endpoint, test connection, import, `settings.testConnection/legacyCandidate/importLegacy`), this note wins:
+> `settings.setApiKey` asks the service for the key's models first and **stores the key only if the service accepts it** (reply: the new settings and how the service answered; reasons `unauthorized`, `not_found`, `unreachable`, `timeout`, `no_models`, `other`); `settings.refreshModels` ("Atualizar modelos") asks again with the saved key and replaces the list (a model still offered keeps its context size; new ones get 128 000 tokens, since the service does not report it);
+> `settings.get` carries no address. Under test the address can be overridden (`ALIA_TEST_ENDPOINT`, or the `url` in the `ALIA_CONFIG` file that seeds the test's settings; both only when `ALIA_DESKTOP_TEST=1`): in production nothing can change it.
+
+- **Where things are** (`%APPDATA%/<app>/`): `settings.json` (models, display name, organization, approval mode, recent projects: no secret in it) and `credentials.bin` (the API key, encrypted with Electron's
   `safeStorage`, which is DPAPI on Windows). Both are written atomically; a damaged `settings.json` is set aside as `settings.json.damaged-<time>` and the app starts from defaults instead of failing.
 - **The key's path:** typed into a password field, sent to main with `settings.setApiKey`, encrypted and stored; main decrypts it only to hand it to the engine in memory (`engine.configure`) or to the engine's connection test.
   **It is write-only: no request returns it**, `settings.get` only says whether one is stored, and the field is emptied after saving. **If the OS cannot encrypt, the key is refused: there is no plain-text fallback**, and the screen says so.

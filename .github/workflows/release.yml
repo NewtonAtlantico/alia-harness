@@ -1,0 +1,106 @@
+# Every update of main: run everything the project is held to and, only if it all passes, publish a GitHub Release with the
+# Windows installer and the portable zip.
+#
+# Version: the major.minor of desktop/package.json plus the run number of this workflow (1.0 -> 1.0.<run>), so every release is
+# unique and always increases. Change the major or minor in desktop/package.json to start a new line. The version is stamped
+# at build time only; nothing is committed back to the repository.
+#
+# Code signing is optional: with the WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD secrets the installer is signed, without them it
+# is not (SmartScreen warns). The test job never sees the secrets: its installer test asserts that the build is unsigned.
+name: release
+
+on:
+  push:
+    branches: [main]
+
+# One release at a time, in order: a release that is being published is never cancelled by the next push.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - name: Install (CLI and core)
+        run: npm ci
+      - name: Install (desktop)
+        run: npm --prefix desktop ci
+      - name: Core and CLI
+        run: |
+          npm run typecheck
+          npm run build
+      - name: Desktop, every suite and the packaged app
+        run: npm run desktop:test:all -- --core --package
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: screenshots-on-failure
+          path: ${{ runner.temp }}/**/failure.png
+          if-no-files-found: ignore
+
+  release:
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # creates the tag and the release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - name: Install (CLI and core)
+        run: npm ci
+      - name: Install (desktop)
+        run: npm --prefix desktop ci
+      - name: Core and CLI
+        run: npm run build
+      - name: Version
+        id: version
+        shell: bash
+        run: |
+          base=$(node -p "require('./desktop/package.json').version.split('.').slice(0, 2).join('.')")
+          version="$base.${{ github.run_number }}"
+          npm --prefix desktop version "$version" --no-git-tag-version
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Installer and portable zip
+        run: npm run desktop:dist
+        env:
+          # Optional. A certificate (a base64 .pfx, or a path) and its password; without them the build is unsigned.
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          files=(desktop/dist/*.exe desktop/dist/*.zip)
+          # A re-run of the same run number finds its release already there: replace its files instead of failing.
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" "${files[@]}" --clobber
+          else
+            gh release create "v$VERSION" "${files[@]}" \
+              --target "$GITHUB_SHA" \
+              --title "alia Harness $VERSION" \
+              --generate-notes \
+              --latest
+          fi

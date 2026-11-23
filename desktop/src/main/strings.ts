@@ -17,7 +17,6 @@ export const mainStrings = {
   dialogs: {
     pickFolder: 'Escolher pasta do projeto',
     pickAttachments: 'Escolher arquivos para anexar',
-    pickConfig: 'Escolher o alia-config.json para importar',
     openLinkTitle: 'Abrir este link no navegador?',
     openLinkDetail: (url: string) => `${url}\n\nO endereço será aberto fora do aplicativo.`,
     open: 'Abrir',
