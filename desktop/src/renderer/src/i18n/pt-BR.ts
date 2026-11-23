@@ -215,6 +215,8 @@ export const t = {
     } as Record<string, string>,
     readBy: (skill: string) => `Lido por ${skill}`,
     checkingFile: 'Conferindo…',
+    waitingProject: 'Aguardando um projeto',
+    needProject: 'Abra a pasta de um projeto (botão “Abrir pasta…” na barra lateral) para conferir os arquivos e iniciar.',
     notReadable: 'Não dá para usar este arquivo',
     recordingNote: 'Gravações não podem ser lidas. Anexe a transcrição da reunião.',
     attachTranscript: 'Anexar transcrição',

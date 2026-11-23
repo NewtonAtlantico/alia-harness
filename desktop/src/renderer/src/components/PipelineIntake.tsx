@@ -72,6 +72,14 @@ export function PipelineIntake({ projects, project, onProject, rows, setRows, no
     [setRows]
   );
 
+  // Files added before a project was open could not be checked (the engine only reads inside the project or what the user chose for it).
+  // Check them as soon as there is one.
+  useEffect(() => {
+    if (!project) return;
+    const waiting = rowsRef.current.filter((r) => r.loading).map((r) => r.path);
+    if (waiting.length > 0) void inspect(waiting);
+  }, [project, inspect]);
+
   const addFiles = useCallback(
     (paths: string[]) => {
       // What is new is decided from the list as last rendered plus what was just asked for; the list itself is updated from its latest value.
@@ -168,7 +176,7 @@ export function PipelineIntake({ projects, project, onProject, rows, setRows, no
 
   const damaged = status?.exists && status.next.kind === 'damaged';
   const existing = status?.exists && !damaged;
-  const blocked = startBlockedReason(rows);
+  const blocked = project ? startBlockedReason(rows) : t.pipeline.needProject;
 
   return (
     <section className={`intake ${dropping ? 'dropping' : ''}`} aria-labelledby="intake-title" data-testid="pipeline-intake">
@@ -249,7 +257,7 @@ export function PipelineIntake({ projects, project, onProject, rows, setRows, no
                     </span>
                     {item && <span className={`chip class-${item.class}`}>{t.pipeline.class[item.class] ?? item.class}</span>}
                     {item && <span className="hint">{humanSize(item.size)}</span>}
-                    {state === 'loading' && <span className="hint">{t.pipeline.checkingFile}</span>}
+                    {state === 'loading' && <span className="hint">{project ? t.pipeline.checkingFile : t.pipeline.waitingProject}</span>}
                     <button type="button" className="icon-btn" aria-label={t.pipeline.remove(name)} title={t.pipeline.remove(name)} onClick={() => setRows((cur) => removeRow(cur, row.path))}>
                       ×
                     </button>
