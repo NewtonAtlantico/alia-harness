@@ -10,6 +10,7 @@ export * from './sessions/repairHistory.js';
 export * from './commands/commandRegistry.js';
 export * from './changes/changeTracker.js';
 export * from './documents/readDocument.js';
+export * from './pipeline/flows.js';
 export * from './pipeline/pipelineState.js';
 export * from './pipeline/taskStats.js';
 export * from './pipeline/pipelineStatus.js';

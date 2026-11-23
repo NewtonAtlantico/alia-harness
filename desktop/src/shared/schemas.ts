@@ -10,6 +10,7 @@ const sessionId = z.string().min(1).max(100).regex(/^[\w.-]+$/, 'not a valid id'
 const conversationId = z.string().min(1).max(100).regex(/^[\w.-]+$/, 'not a valid id');
 const projectPath = z.string().min(1).max(1024);
 const relPath = z.string().min(1).max(1024);
+const flowId = z.string().min(1).max(100).regex(/^[\w.-]+$/, 'not a valid flow id');
 const limit = z.number().int().min(1).max(500);
 const paths = z.array(relPath).max(1000);
 
@@ -78,8 +79,21 @@ export const rendererSchemas = {
   'sessions.active': none,
   'pipeline.brief': strict({ projectPath }),
   'pipeline.status': strict({ projectPath }),
-  'pipeline.inspect': strict({ projectPath, paths: z.array(relPath).min(1).max(100) }),
-  'pipeline.start': strict({ sessionId, inputs: z.array(strict({ path: relPath, transcriptPath: relPath.optional() })).min(1).max(100) }),
+  'pipeline.flows': none,
+  'pipeline.inspect': strict({ projectPath: projectPath.optional(), paths: z.array(relPath).min(1).max(100), flow: flowId.optional() }),
+  'pipeline.start': strict({ sessionId, inputs: z.array(strict({ path: relPath, transcriptPath: relPath.optional() })).min(1).max(100), flow: flowId.optional(), projectName: z.string().trim().min(1).max(200).optional() }),
+  'projectMeta.get': strict({ projectPath }),
+  'projectMeta.set': strict({
+    projectPath,
+    patch: strict({
+      name: z.string().trim().min(1).max(200).optional(),
+      request: z.string().trim().max(20_000).optional(),
+      owner: z.string().trim().max(200).optional(),
+      handedOff: z.union([strict({ at: z.string().min(1).max(40), mode: z.enum(['publish', 'drafts']) }), z.null()]).optional(),
+    }),
+  }),
+  'projects.create': strict({ name: z.string().trim().min(1).max(100), request: z.string().trim().max(20_000).optional() }),
+  'summary.export': strict({ projectPath, kind: z.enum(['pdf', 'link']), title: z.string().trim().min(1).max(200), html: z.string().min(1).max(2_000_000), markdown: z.string().min(1).max(500_000) }),
   'pipeline.resume': strict({ sessionId }),
   'pipeline.state': strict({ projectPath }),
   'pipeline.answer': strict({ sessionId, gate: z.enum(['G1', 'G2', 'G3']), answers: z.array(userAnswer).min(1).max(50), by: z.string().trim().min(1).max(200) }),

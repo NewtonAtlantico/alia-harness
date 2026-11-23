@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { documentKind, readDocument } from '../documents/readDocument.js';
+import { EMBRAPII_FLOW, PipelineFlow } from './flows.js';
 import { InputKind, PipelineInput, PipelineStateStore } from './pipelineState.js';
 
 /**
@@ -8,9 +9,10 @@ import { InputKind, PipelineInput, PipelineStateStore } from './pipelineState.js
  * at all. Nothing here starts a run; `planPipelineInputs` only decides, and `recordPipelineInputs` writes the inventory.
  */
 
-export const SKILL_DOCUMENTS = 'requirement-extraction-from-documents';
-export const SKILL_THREADS = 'requirement-extraction-from-threads';
-export const SKILL_BRIEF = 'ticket-to-brief';
+/** The skills of the default flow. Another flow names its own (`flow.intake`). */
+export const SKILL_DOCUMENTS = EMBRAPII_FLOW.intake.documents;
+export const SKILL_THREADS = EMBRAPII_FLOW.intake.threads;
+export const SKILL_BRIEF = EMBRAPII_FLOW.intake.brief;
 
 /** A text file this small is a request ("add a login page"), not a document. */
 export const SHORT_REQUEST_BYTES = 1500;
@@ -42,7 +44,8 @@ const TRANSCRIPT_NAME = /transcri|\bata\b|meeting|reuni|\bchat\b|thread|e-?mail|
  * What a file is, from its extension and size alone (nothing is read). A readable-or-not verdict for documents needs
  * `inspectInput`, which also opens them.
  */
-export function classifyInput(file: string): IntakeItem {
+export function classifyInput(file: string, flow: PipelineFlow = EMBRAPII_FLOW): IntakeItem {
+  const { documents: SKILL_DOCUMENTS, threads: SKILL_THREADS, brief: SKILL_BRIEF } = flow.intake;
   const name = path.basename(file);
   const ext = path.extname(file).toLowerCase();
   const base = { path: file, name, size: 0, needsTranscript: false, warnings: [] as string[] };
@@ -72,8 +75,8 @@ export function classifyInput(file: string): IntakeItem {
 }
 
 /** `classifyInput`, plus opening the file with `readDocument` so that what cannot be read is explained in its own words. */
-export async function inspectInput(file: string): Promise<IntakeItem> {
-  const item = classifyInput(file);
+export async function inspectInput(file: string, flow: PipelineFlow = EMBRAPII_FLOW): Promise<IntakeItem> {
+  const item = classifyInput(file, flow);
   if (item.class === 'document' && documentKind(file)) {
     // A few thousand characters are enough to know a scan from a document (it reads until the budget is spent).
     const read = await readDocument(file, { maxChars: 4000 });
@@ -113,7 +116,7 @@ export interface IntakePlan {
  * Decides whether these files can start a pipeline: every one must exist and be readable, and a recording must come with a
  * transcript that is itself readable. Nothing is written.
  */
-export async function planPipelineInputs(inputs: PipelineStartInput[]): Promise<IntakePlan> {
+export async function planPipelineInputs(inputs: PipelineStartInput[], flow: PipelineFlow = EMBRAPII_FLOW): Promise<IntakePlan> {
   const entries: IntakePlan['entries'] = [];
   const problems: IntakeProblem[] = [];
   const seen = new Set<string>();
@@ -127,7 +130,7 @@ export async function planPipelineInputs(inputs: PipelineStartInput[]): Promise<
   if (inputs.length === 0) problems.push({ path: '', name: '', message: 'Add at least one file or a request to start the pipeline.' });
 
   for (const input of inputs) {
-    const item = await inspectInput(input.path);
+    const item = await inspectInput(input.path, flow);
     if (item.problem && item.class !== 'recording') {
       problems.push({ path: item.path, name: item.name, message: item.problem });
       continue;
@@ -137,13 +140,13 @@ export async function planPipelineInputs(inputs: PipelineStartInput[]): Promise<
         problems.push({ path: item.path, name: item.name, message: item.problem ?? `"${item.name}" is a recording and cannot be read. Attach its transcript.` });
         continue;
       }
-      const transcript = await inspectInput(input.transcriptPath);
+      const transcript = await inspectInput(input.transcriptPath, flow);
       if (transcript.problem || transcript.class === 'recording') {
         problems.push({ path: transcript.path, name: transcript.name, message: transcript.problem ?? `"${transcript.name}" is a recording, not a transcript.` });
         continue;
       }
       add({ ...item, problem: undefined }, `Not read: audio/video. Its transcript, ${transcript.name}, stands in for it.`);
-      add({ ...transcript, kind: 'transcript', handledBy: SKILL_THREADS }, `Transcript of ${item.name}.`);
+      add({ ...transcript, kind: 'transcript', handledBy: flow.intake.threads }, `Transcript of ${item.name}.`);
       continue;
     }
     add(item);
@@ -163,7 +166,7 @@ export function inventoryPath(workspace: string, file: string): string {
  * `state.json` **before anything runs**, so a later change to a file is noticed and a resume knows what it started with.
  * Adding to an existing state replaces an input of the same name and keeps everything else.
  */
-export function recordPipelineInputs(workspace: string, plan: IntakePlan, options: { project?: string } = {}): { ok: true; inputs: PipelineInput[] } | { ok: false; error: string } {
+export function recordPipelineInputs(workspace: string, plan: IntakePlan, options: { project?: string; flow?: string } = {}): { ok: true; inputs: PipelineInput[] } | { ok: false; error: string } {
   const store = new PipelineStateStore(workspace);
   let existing;
   try {
@@ -174,6 +177,8 @@ export function recordPipelineInputs(workspace: string, plan: IntakePlan, option
   const ops: Array<Record<string, unknown>> = [];
   const project = options.project ?? path.basename(path.resolve(workspace));
   if (!existing?.project && project) ops.push({ op: 'set_project', name: project });
+  // The flow is chosen when the pipeline starts; one that already runs keeps its own.
+  if (options.flow && !existing) ops.push({ op: 'set_flow', flow: options.flow });
   for (const { item, notes } of plan.entries) {
     ops.push({
       op: 'add_input',
@@ -191,7 +196,7 @@ export function recordPipelineInputs(workspace: string, plan: IntakePlan, option
 }
 
 /** The text that opens the pipeline: what was given, which skill reads each, and what to do about an existing state. */
-export function describePipelineStart(workspace: string, inputs: PipelineInput[], resuming: boolean): string {
+export function describePipelineStart(workspace: string, inputs: PipelineInput[], resuming: boolean, flow: PipelineFlow = EMBRAPII_FLOW): string {
   const lines = inputs.map((i) => {
     const where = i.path ?? i.name;
     const how = i.handledBy ? `read with ${i.handledBy}` : i.kind === 'recording' ? 'a recording, not read: use its transcript' : 'record it';
@@ -202,9 +207,19 @@ export function describePipelineStart(workspace: string, inputs: PipelineInput[]
       ? 'A pipeline already exists for this project. These inputs were added to its inventory in docs/pipeline/state.json. Resume from the state, taking them into account.'
       : 'Start the pipeline for this project. The inputs are already inventoried in docs/pipeline/state.json (do not add them again).',
     '',
+    describeFlow(flow),
+    '',
     'Inputs:',
     ...lines,
     '',
     `Project folder: ${path.resolve(workspace)}`,
+  ].join('\n');
+}
+
+/** The flow, as the orchestrator needs to read it: its name and, for each stage, the skill that does it and where it writes. */
+export function describeFlow(flow: PipelineFlow): string {
+  return [
+    `Flow: ${flow.name} (${flow.id}). Run exactly these stages, with these skills:`,
+    ...flow.stages.map((s) => `- Stage ${s.stage} (${s.key}): skill ${s.skill}, writes ${s.artifact}${s.gate ? `; gate ${s.gate} follows` : ''}`),
   ].join('\n');
 }

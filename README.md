@@ -271,3 +271,38 @@ Run `npm run test:skills` to check loading, gating, path rewriting and pruning b
 
 **Roadmap:** running each stage of `requirements-to-tasks-pipeline` in an isolated subagent is
 planned in [docs/backlog/001-subagents.md](docs/backlog/001-subagents.md).
+
+### Flows
+
+A **flow** says which skills and which steps the end-to-end pipeline (`requirements-to-tasks-pipeline`)
+runs for a kind of project: the skill of each of the four stages and where its artifact goes, which
+skill reads each kind of input (a document, a thread or transcript, a short request), and how each
+step is called, both for people who read the code ("Requisitos") and for people who do not ("Entender
+o pedido"). The pipeline itself (the state file, the gates, the review of the specs) is the same for
+every flow. A flow lives in one entry of `FLOWS` in
+[`src/core/pipeline/flows.ts`](src/core/pipeline/flows.ts); the intake, the run, the resume and both
+screens of the desktop app follow from it.
+
+Today there is one flow, `embrapii`, which is the pipeline as it has always run. The flow of a project is
+recorded in `docs/pipeline/state.json` (`"flow": "embrapii"`; a state written before flows existed runs
+the default flow) and cannot change once a stage has started. The pipeline skill is told which flow it
+runs, and the stages with their skills, in the text that starts or resumes it. Run `npm run test:flows`.
+
+## Desktop app: two views
+
+The desktop app ([`desktop/`](desktop)) has two views of the same projects, switched with **Simples | Técnico**
+(the title bar in the technical view, the top of the page in the simple one; the choice is remembered).
+
+- **Técnico** — conversations, the pipeline's stages, gates, files and the `STATE.md`. A new pipeline
+  starts by choosing its **Fluxo** in a list, then the project and the files.
+- **Simples** — for people who are not technical. A project is made from a name, what the person wants
+  built and the files they already have (the app makes the project's folder under `Documents\alia`);
+  the **Cliente** is the flow. The four steps are shown in plain words, and the person only does what is
+  theirs: answers the questions one at a time (the files that disagree side by side; "Não sei" goes to
+  the technical owner, "Decidir depois" stays with them), confirms each feature ("Está certo" / "Algo está
+  errado"), and sends the finished plan to the technical team (published as issues, or drafts when there is
+  no connection to the team's system) or takes it away as a PDF or a link. The architecture is the
+  technical owner's to decide, in the technical view. What the simple view keeps about a project (its
+  name, the request, the technical owner, whether the plan was handed over) is in `<project>/.alia/project.json`.
+
+Run `npm --prefix desktop run test:simple-logic` and `npm --prefix desktop run test:simple-app`.

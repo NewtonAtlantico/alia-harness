@@ -33,6 +33,7 @@
     "test:pipeline": "tsx scripts/smoke-pipeline.ts",
     "test:resume": "tsx scripts/smoke-resume.ts",
     "test:intake": "tsx scripts/smoke-intake.ts",
+    "test:flows": "tsx scripts/smoke-flows.ts",
     "test:report": "tsx scripts/smoke-report.ts",
     "test:streaming": "tsx scripts/smoke-streaming.ts",
     "test:issues": "tsx scripts/smoke-issues.ts",

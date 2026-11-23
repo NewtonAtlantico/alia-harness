@@ -31,6 +31,12 @@ state file.
 Stages run strictly in order. Never start stage N+1 until stage N's artifact is on disk and its
 gate passed. Never skip a stage; if a stage is not applicable, record why in the state file.
 
+**The flow decides the skills.** The message that starts or resumes the pipeline has a `Flow:` block
+naming the flow and, for each stage, the skill that does it and where it writes. The diagram above is
+the default flow (`embrapii`): when the block names other skills or artifacts, use those, in the same
+four stages and with the same gates. `pipeline_state` (`get`) also returns the flow the project runs.
+Never change a project's flow once a stage has started.
+
 ## Artifact layout
 
 Write under the **target project's** working directory (not the skills hub):

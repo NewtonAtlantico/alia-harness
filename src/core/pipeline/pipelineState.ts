@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { TaskStats, summarizeTasks } from './taskStats.js';
+import { EMBRAPII_FLOW, PipelineFlow, findFlow, getFlow } from './flows.js';
 import type { QuestionKind, QuestionOption } from '../tools/askUser.js';
 
 /**
@@ -26,13 +27,21 @@ export type QuestionCategory = 'open_question' | 'contradiction' | 'low_confiden
 export type InputKind = 'document' | 'transcript' | 'brief' | 'recording' | 'other';
 export type SpecReviewStatus = 'draft' | 'in_review' | 'reviewed';
 
-/** The four stages, their skills and default artifacts, and the gate that follows each (stage 4 has none). */
-export const STAGES: ReadonlyArray<{ stage: StageNumber; key: string; skill: string; artifact: string; gate?: GateId }> = [
-  { stage: 1, key: 'requirements', skill: 'requirement-extraction-from-documents', artifact: 'docs/requirements/requirements.md', gate: 'G1' },
-  { stage: 2, key: 'architecture', skill: 'architecture-from-requirements', artifact: 'docs/architecture/architecture.md', gate: 'G2' },
-  { stage: 3, key: 'specs', skill: 'constitution-to-specs', artifact: 'docs/specs/INDEX.md', gate: 'G3' },
-  { stage: 4, key: 'tasks', skill: 'spec-to-tasks', artifact: 'docs/tasks/' },
-];
+/**
+ * The four stages of the default flow, their skills and default artifacts, and the gate that follows each (stage 4 has none).
+ * What a project runs is the stages of its own flow (`flowStages`); this is the default flow's list.
+ */
+export const STAGES: ReadonlyArray<{ stage: StageNumber; key: string; skill: string; artifact: string; gate?: GateId }> = EMBRAPII_FLOW.stages.map((s) => ({
+  stage: s.stage,
+  key: s.key,
+  skill: s.skill,
+  artifact: s.artifact,
+  ...(s.gate ? { gate: s.gate } : {}),
+}));
+
+/** The stages a flow runs, in the shape the state keeps them. */
+const flowStages = (flow: PipelineFlow): PipelineStage[] =>
+  flow.stages.map((s) => ({ stage: s.stage, skill: s.skill, status: 'pending', artifact: s.artifact, ...(s.gate ? { gate: s.gate } : {}) }));
 const GATES: GateId[] = ['G1', 'G2', 'G3'];
 const gateStage = (g: GateId): StageNumber => (GATES.indexOf(g) + 1) as StageNumber;
 
@@ -167,6 +176,8 @@ export interface PipelineState {
   version: 1;
   updatedAt: string;
   project?: string;
+  /** The flow this pipeline runs (`embrapii`). Absent in a state written before flows existed: it is the default flow. */
+  flow?: string;
   inputs: PipelineInput[];
   stages: PipelineStage[];
   gates: Gate[];
@@ -193,12 +204,13 @@ export class PipelineStateError extends Error {
 
 // ------------------------------------------------------------------------------------ creation
 
-export function newState(now: Date = new Date()): PipelineState {
+export function newState(now: Date = new Date(), flow?: PipelineFlow): PipelineState {
   return {
     version: STATE_VERSION,
     updatedAt: now.toISOString(),
+    ...(flow ? { flow: flow.id } : {}),
     inputs: [],
-    stages: STAGES.map((s) => ({ stage: s.stage, skill: s.skill, status: 'pending', artifact: s.artifact, ...(s.gate ? { gate: s.gate } : {}) })),
+    stages: flowStages(flow ?? EMBRAPII_FLOW),
     gates: GATES.map((id) => ({ id, status: 'pending', questions: [] })),
     specReviews: [],
     decisions: [],
@@ -217,7 +229,8 @@ const isObject = (v: unknown): v is Record<string, any> => typeof v === 'object'
 export function normalizeState(raw: unknown): PipelineState {
   if (!isObject(raw)) throw new PipelineStateError('state.json must contain an object');
   if (raw.version !== STATE_VERSION) throw new PipelineStateError(`state.json has version ${JSON.stringify(raw.version)}; this harness understands version ${STATE_VERSION}`);
-  const base = newState(new Date(0));
+  const flowId = typeof raw.flow === 'string' && raw.flow.trim() ? raw.flow.trim() : undefined;
+  const base = newState(new Date(0), getFlow(flowId));
   const list = (v: unknown, name: string): any[] => {
     if (v === undefined) return [];
     if (!Array.isArray(v)) throw new PipelineStateError(`state.json: "${name}" must be a list`);
@@ -229,6 +242,7 @@ export function normalizeState(raw: unknown): PipelineState {
     version: STATE_VERSION,
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : base.updatedAt,
     ...(typeof raw.project === 'string' ? { project: raw.project } : {}),
+    ...(flowId ? { flow: flowId } : {}),
     inputs: list(raw.inputs, 'inputs'),
     stages: base.stages.map((d) => ({ ...d, ...(stages.find((s) => s?.stage === d.stage) ?? {}) })),
     gates: base.gates.map((d) => {
@@ -290,7 +304,7 @@ export interface ApplyContext {
 }
 
 const OP_NAMES = [
-  'set_project', 'add_input', 'set_stage', 'add_question', 'answer_question', 'defer_question', 'reopen_question',
+  'set_project', 'set_flow', 'add_input', 'set_stage', 'add_question', 'answer_question', 'defer_question', 'reopen_question',
   'set_gate', 'set_spec_review', 'add_assumption', 'add_decision', 'add_adr', 'add_note', 'mark_stale',
   'set_architecture', 'set_adr_alignment', 'set_spec', 'set_check',
 ];
@@ -354,6 +368,19 @@ export function applyOps(
         const name = str(op.name);
         if (!name) return fail('"name" is required');
         state.project = name;
+        break;
+      }
+
+      case 'set_flow': {
+        const flow = findFlow(str(op.flow));
+        if (!flow || !str(op.flow)) return fail('"flow" must be the id of a known flow');
+        // The stages of a flow are fixed once work has started: switching then would orphan what the stages already wrote.
+        const was = getFlow(state.flow).id;
+        if (was !== flow.id) {
+          if (state.stages.some((s) => s.status !== 'pending')) return fail(`the flow cannot change from "${was}" once a stage has started`);
+          state.stages = flowStages(flow);
+        }
+        state.flow = flow.id;
         break;
       }
 

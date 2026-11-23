@@ -49,6 +49,11 @@ export function PipelineHeader({
         ))}
       </ol>
       <div className="pipeline-bar">
+        {view.flow && (
+          <span className="hint pipeline-flow" data-testid="pipeline-flow">
+            {t.run.flowLine(view.flow.id)}
+          </span>
+        )}
         {chip && (
           <span className={`chip ${chip.tone}`} role="status" data-testid="run-chip">
             {chip.label}

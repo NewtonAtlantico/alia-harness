@@ -24,12 +24,16 @@ import {
   type CommandProbe,
   gateProgress,
   PipelineStateStore,
+  FLOWS,
+  findFlow,
+  getFlow,
   inspectInput,
   extractMentionPaths,
   listDirectory,
   readDocument,
 } from 'alia-harness/core';
 import { previewFile } from './preview';
+import { readProjectMeta, writeProjectMeta } from './projectMeta';
 import type {
   ActiveSession,
   ChangeInfo,
@@ -197,7 +201,7 @@ export class EngineRuntime {
   }
 
   /** Starts a run in the background: shows `text` as what the user said and gives the model `prompt`. */
-  private launch(e: Entry, text: string, prompt: string, title?: string): void {
+  private launch(e: Entry, text: string, prompt: string, title?: string, whenDone?: () => void): void {
     const sessionId = e.id;
     // Only the first run names a conversation: later ones (Retomar) keep the name it has.
     if (title && !this.store.exists(e.id)) e.titleOnStart = title;
@@ -207,6 +211,9 @@ export class EngineRuntime {
     e.controller = controller;
     void e.session
       .run(prompt, { signal: controller.signal })
+      .then(() => {
+        if (!controller.signal.aborted) whenDone?.();
+      })
       .catch((err: unknown) => this.notice(sessionId, 'error', `The run failed: ${(err as Error)?.message ?? err}`))
       .finally(() => {
         // A newer run may already have started (the event above freed the conversation); leave it alone.
@@ -225,10 +232,10 @@ export class EngineRuntime {
   }
 
   /** The user chose these files in the page (or dropped them); only those, or files in the project, may be inventoried. */
-  private checkInputPaths(workspace: string, paths: string[]): void {
+  private checkInputPaths(workspace: string | undefined, paths: string[]): void {
     for (const p of paths) {
       const abs = path.resolve(p);
-      if (isInside(workspace, abs)) continue;
+      if (workspace && isInside(workspace, abs)) continue;
       if (this.allowedOutside.some((allowed) => sameFile(allowed, abs) || isInside(allowed, abs))) continue;
       throw new Error(`"${abs}" is outside the project folder. Choose it with the file dialog or drag it into the window.`);
     }
@@ -487,17 +494,28 @@ export class EngineRuntime {
 
     'pipeline.status': ({ projectPath }) => getPipelineStatus(path.resolve(projectPath)),
 
-    'pipeline.inspect': async ({ projectPath, paths }) => {
-      const workspace = path.resolve(projectPath);
-      this.checkInputPaths(workspace, paths);
-      return { items: await Promise.all(paths.map((p) => inspectInput(path.resolve(p)))) };
+    'pipeline.flows': () => [...FLOWS],
+
+    'pipeline.inspect': async ({ projectPath, paths, flow }) => {
+      // The simple view looks at files before it has a project: then only what the user chose or dropped may be read.
+      this.checkInputPaths(projectPath ? path.resolve(projectPath) : undefined, paths);
+      const chosen = findFlow(flow);
+      if (!chosen) throw new Error(`There is no flow "${flow}".`);
+      return { items: await Promise.all(paths.map((p) => inspectInput(path.resolve(p), chosen))) };
     },
 
-    'pipeline.start': async ({ sessionId, inputs }): Promise<PipelineStartResult> => {
+    'projectMeta.get': ({ projectPath }) => readProjectMeta(path.resolve(projectPath)),
+
+    'projectMeta.set': ({ projectPath, patch }) => writeProjectMeta(path.resolve(projectPath), patch),
+
+    'pipeline.start': async ({ sessionId, inputs, flow, projectName }): Promise<PipelineStartResult> => {
       const e = this.entry(sessionId);
       if (e.busy) throw new Error('This conversation is already running. Stop it first, or wait for it to finish.');
       this.checkInputPaths(e.workspace, inputs.flatMap((i) => (i.transcriptPath ? [i.path, i.transcriptPath] : [i.path])));
-      const started = await e.session.startPipelinePrompt(inputs.map((i) => ({ path: path.resolve(i.path), ...(i.transcriptPath ? { transcriptPath: path.resolve(i.transcriptPath) } : {}) })));
+      const started = await e.session.startPipelinePrompt(
+        inputs.map((i) => ({ path: path.resolve(i.path), ...(i.transcriptPath ? { transcriptPath: path.resolve(i.transcriptPath) } : {}) })),
+        { ...(flow ? { flow } : {}), ...(projectName ? { project: projectName } : {}) }
+      );
       if (started.status === 'refused') return { started: false, problems: started.problems };
       const count = started.inputs.length;
       this.launch(e, `Iniciar o pipeline com ${count} ${count === 1 ? 'entrada' : 'entradas'}: ${started.inputs.map((i) => i.name).join(', ')}`, started.prompt, pipelineTitle(e.workspace));
@@ -518,7 +536,7 @@ export class EngineRuntime {
         return { stage: st.stage, path: st.artifact, exists: !!stat, isDir: !!stat?.isDirectory() };
       });
       const report = state ? buildReport(state, new PipelineStateStore(workspace).tasks(), status.staleInputs) : undefined;
-      return { status, state, artifacts, markdownExists: fs.existsSync(path.join(workspace, 'docs', 'pipeline', 'STATE.md')), report };
+      return { flow: getFlow(state?.flow), status, state, artifacts, markdownExists: fs.existsSync(path.join(workspace, 'docs', 'pipeline', 'STATE.md')), report };
     },
 
     'pipeline.answer': ({ sessionId, gate, answers, by }) => {
@@ -585,7 +603,14 @@ export class EngineRuntime {
         ? `Publish the tasks in docs/tasks/ as issues, using the tracker connection that is available (${status.via}). Report the issue links when done.`
         : `There is no tracker connection. Write each task in docs/tasks/ as an issue draft under ${status.draftsDir}/ and do not try to publish anything. Say where the drafts are when done.`;
       const resolved = await e.session.resolveSkill(`/${status.skill}`, request);
-      this.launch(e, publish ? 'Publicar issues' : 'Gerar rascunhos de issues', resolved.status === 'ready' ? resolved.prompt : request);
+      // The simple view says "Com o time técnico" once the run that hands the plan over has finished without failing.
+      this.launch(e, publish ? 'Publicar issues' : 'Gerar rascunhos de issues', resolved.status === 'ready' ? resolved.prompt : request, undefined, () => {
+        try {
+          writeProjectMeta(e.workspace, { handedOff: { at: new Date().toISOString(), mode: status.mode } });
+        } catch {
+          /* the mark is a convenience: the issues were published all the same */
+        }
+      });
       return { started: true, mode: status.mode, ...(status.via ? { via: status.via } : {}), skill: status.skill };
     },
 
@@ -713,8 +738,9 @@ function pipelineTitle(workspace: string): string {
 /** The pipeline of a project, reduced to what the sidebar chip needs. Never throws. */
 export function pipelineBrief(workspace: string): PipelineBrief {
   const status = getPipelineStatus(workspace);
-  if (!status.exists) return { exists: false, summary: status.summary, state: 'not_started' };
-  const base = { exists: true, ...(status.project ? { project: status.project } : {}), summary: status.summary };
+  const meta = readProjectMeta(workspace);
+  if (!status.exists) return { exists: false, summary: status.summary, state: 'not_started', ...(meta ? { meta } : {}) };
+  const base = { exists: true, ...(status.project ? { project: status.project } : {}), ...(status.flow ? { flow: status.flow } : {}), ...(meta ? { meta } : {}), summary: status.summary };
   const next = status.next;
   switch (next.kind) {
     case 'answer_questions':

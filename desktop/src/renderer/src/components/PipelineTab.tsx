@@ -1,5 +1,6 @@
 import type { PipelineView } from '../../../shared/ipc';
 import { t } from '../i18n/pt-BR';
+import { stageLabel } from '../lib/pipelineRun';
 
 /**
  * The pipeline's side of the right panel: the artifacts of each stage (open with the system), the inputs with a warning for
@@ -24,7 +25,7 @@ export function PipelineTab({ view, onOpen, error }: { view?: PipelineView; onOp
         <ul>
           {artifacts.map((a) => (
             <li key={a.path} data-artifact={a.path}>
-              <span className="hint">{t.run.steps[String(a.stage)]}</span>
+              <span className="hint">{stageLabel(view, a.stage)}</span>
               {a.exists ? (
                 <button type="button" className="link-btn" onClick={() => onOpen(a.path)} aria-label={t.run.panel.open(a.path)}>
                   {a.path}

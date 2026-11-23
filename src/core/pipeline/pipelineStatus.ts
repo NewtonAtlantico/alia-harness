@@ -13,6 +13,8 @@ import {
   gateProgress,
 } from './pipelineState.js';
 import { TaskStats } from './taskStats.js';
+import { describeFlow } from './intake.js';
+import { getFlow } from './flows.js';
 
 /**
  * Where a pipeline stopped, and what comes next, read from `state.json` alone, so a session can be
@@ -46,6 +48,8 @@ export type PipelineNext =
 export interface PipelineStatus {
   exists: boolean;
   project?: string;
+  /** The id of the flow the pipeline runs. */
+  flow?: string;
   stages: Array<{ stage: StageNumber; skill: string; status: StageStatus; gate?: GateId; gateStatus?: string; gateProgress?: GateProgress }>;
   gates: GateProgress[];
   next: PipelineNext;
@@ -168,7 +172,8 @@ function instruction(next: PipelineNext): string {
 
 function buildResumePrompt(state: PipelineState | undefined, next: PipelineNext, summary: string): string {
   return [
-    'Resume the requirements-to-tasks pipeline in this project, with the `requirements-to-tasks-pipeline` skill.',
+    `Resume the requirements-to-tasks pipeline in this project, with the \`${getFlow(state?.flow).orchestrator}\` skill.`,
+    state ? describeFlow(getFlow(state.flow)) : '',
     state
       ? 'Its state is in docs/pipeline/state.json: read it with `pipeline_state` (action `get`). Do not redo stages that are done, and do not ask a question that is already answered.'
       : '',
@@ -213,6 +218,7 @@ export function getPipelineStatus(workspace: string): PipelineStatus {
   return {
     exists: true,
     project: state.project,
+    flow: getFlow(state.flow).id,
     stages: state.stages.map((s) => ({
       stage: s.stage,
       skill: s.skill,

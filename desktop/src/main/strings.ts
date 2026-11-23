@@ -17,6 +17,8 @@ export const mainStrings = {
   dialogs: {
     pickFolder: 'Escolher pasta do projeto',
     pickAttachments: 'Escolher arquivos para anexar',
+    saveSummary: 'Salvar o resumo do plano',
+    pdfFiles: 'Documento PDF',
     openLinkTitle: 'Abrir este link no navegador?',
     openLinkDetail: (url: string) => `${url}\n\nO endereço será aberto fora do aplicativo.`,
     open: 'Abrir',
