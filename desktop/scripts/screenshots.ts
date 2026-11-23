@@ -1,6 +1,6 @@
 /**
  * Takes a screenshot of every screen of the journey (settings, start, an approval, the changes panel, the pipeline intake, the
- * three gates, the final report and the publish dialog) into docs/screenshots/desktop/, for review against the design. It is the
+ * three gates, the final report and the publish dialog, then the simple view and the flow list) into docs/screenshots/desktop/, for review against the design. It is the
  * journey test with a folder to keep the pictures in, so each picture is of a state the app really reached. Run from desktop/:
  * `npm run screenshots` (builds first). The fake model and the tmp project are the same as in the test: no real data is shown.
  */
@@ -22,5 +22,7 @@ if (build.status !== 0) {
 }
 const run = spawnSync(win ? 'npx.cmd' : 'npx', ['tsx', '--tsconfig', 'tsconfig.node.json', 'scripts/test-journey-app.ts'], { cwd: desktop, stdio: 'inherit', shell: win, env: { ...process.env, ALIA_SHOTS: out, ALIA_JOURNEY_TMP: path.join(path.parse(os.tmpdir()).root, 'alia-demo') } });
 fs.rmSync(path.join(path.parse(os.tmpdir()).root, 'alia-demo'), { recursive: true, force: true });
+// The simple view and the flow list: the same, from the test that drives them.
+const simple = spawnSync(win ? 'npx.cmd' : 'npx', ['tsx', '--tsconfig', 'tsconfig.node.json', 'scripts/test-simple-app.ts'], { cwd: desktop, stdio: 'inherit', shell: win, env: { ...process.env, ALIA_SHOTS: out } });
 console.log(`\n${fs.readdirSync(out).length} screenshots in ${path.relative(path.resolve(desktop, '..'), out)}`);
-process.exit(run.status ?? 1);
+process.exit(run.status || simple.status || 0);

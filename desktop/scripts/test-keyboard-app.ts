@@ -66,7 +66,7 @@ try {
     order.push(await focused());
   }
   const at = (needle: RegExp) => order.findIndex((o) => needle.test(o));
-  check('it starts in the sidebar (the window buttons are not stops: the system has its own keys for them), at "Nova conversa", then "Novo pipeline" and the search', /^Nova conversa/.test(order[0]) && /Novo pipeline/.test(order[1]) && /Buscar conversas/.test(order[2]), order.slice(0, 5).join(' | '));
+  check('it starts with the switch between the views (the window buttons are not stops: the system has its own keys for them), then the sidebar at "Nova conversa", "Novo pipeline" and the search', /^Simples/.test(order[0]) && /^Técnico/.test(order[1]) && /^Nova conversa/.test(order[2]) && /Novo pipeline/.test(order[3]) && /Buscar conversas/.test(order[4]), order.slice(0, 6).join(' | '));
   check('the sidebar comes before the conversation, and the composer is within reach', at(/Configurações/) >= 0 && at(/Configurações/) < at(/Mensagem/) && at(/Mensagem/) > 0 && at(/Mensagem/) < 40, order.join(' | '));
   const firstRepeat = order.findIndex((o, i) => i > 0 && order.indexOf(o) !== i && o !== '' && !/^(Copiar|Fechar|OK)/.test(o));
   check('no control is visited twice before the composer (no trap, no loop)', firstRepeat === -1 || firstRepeat > at(/Mensagem/), `repeat at ${firstRepeat}: ${order[firstRepeat]}`);

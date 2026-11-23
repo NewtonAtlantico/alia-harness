@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import logoAlia from '../assets/logo-alia.png';
 import { t } from '../i18n/pt-BR';
 
 /** The window has no native frame: this bar is the title bar. Dragging it moves the window; the buttons call main. */
-export function TitleBar() {
+export function TitleBar({ simple = false, toggle }: { simple?: boolean; toggle?: ReactNode }) {
   const [version, setVersion] = useState('');
   const [maximized, setMaximized] = useState(false);
 
@@ -21,8 +21,9 @@ export function TitleBar() {
     <header className="titlebar">
       <div className="titlebar-brand">
         <img src={logoAlia} alt="alia" height={22} />
-        <span className="titlebar-version">{version ? t.titleBar.version(version) : ''}</span>
+        {!simple && <span className="titlebar-version">{version ? t.titleBar.version(version) : ''}</span>}
       </div>
+      {toggle && <div className="titlebar-toggle">{toggle}</div>}
       <div className="titlebar-controls">
         <button type="button" tabIndex={-1} aria-label={t.titleBar.minimize} title={t.titleBar.minimize} onClick={call('window.minimize')}>
           <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5h10" stroke="currentColor" strokeWidth="1" /></svg>

@@ -1,5 +1,7 @@
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { BrowserWindow, Menu, app, clipboard, dialog, ipcMain, safeStorage, shell } from 'electron';
 import { CHANNELS, type AppCommand, type DiagnosticsResult, type PushMessage } from '../shared/ipc';
 import { registerAppSchemePrivileges, serveApp } from './appProtocol';
@@ -9,6 +11,7 @@ import { EngineHost } from './engineHost';
 import { confirmAndOpenExternal, installSessionGuards, installWebContentsGuards, isTrustedSender } from './guards';
 import { Logger } from './logger';
 import { decideOpen } from './openFile';
+import { createProjectFolder } from './projectFolder';
 import { countSkills, execRun, formatReport, runDiagnostics, type DiagnosticsDeps } from './diagnostics';
 import { SecretStore } from './secrets';
 import { SettingsService } from './settingsService';
@@ -196,6 +199,48 @@ function start(): void {
         return { copied: true as const, lines: text.split('\n').length };
       },
       'projects.recent': () => store.recentProjects(),
+      'projects.create': ({ name, request }) => {
+        // The projects of the simple view live in the app's own folder, so the person never has to choose where.
+        const root = dataDir ? path.join(dataDir, 'projects') : path.join(app.getPath('documents'), 'alia');
+        const folder = projects.allow(createProjectFolder(root, name));
+        store.rememberProject(folder);
+        log.info(`created project folder ${path.basename(folder)}`);
+        if (!request) return { path: folder };
+        const requestFile = path.join(folder, 'docs', 'inputs', 'pedido-inicial.txt');
+        fs.mkdirSync(path.dirname(requestFile), { recursive: true });
+        fs.writeFileSync(requestFile, `${request}\n`);
+        return { path: folder, requestFile };
+      },
+      'summary.export': async ({ projectPath, kind, title, html, markdown }, ctx) => {
+        if (kind === 'link') {
+          const file = path.join(path.resolve(projectPath), 'docs', 'pipeline', 'RESUMO.md');
+          fs.mkdirSync(path.dirname(file), { recursive: true });
+          fs.writeFileSync(file, markdown);
+          const link = pathToFileURL(file).href;
+          clipboard.writeText(link);
+          return { saved: true, path: path.join('docs', 'pipeline', 'RESUMO.md'), link };
+        }
+        const parent = windowOf(ctx);
+        const suggested = `${title.replace(/[\/:*?"<>|]+/g, ' ').trim() || 'resumo'}.pdf`;
+        let target: string | undefined;
+        if (testMode && process.env.ALIA_TEST_SAVE_PATH) target = process.env.ALIA_TEST_SAVE_PATH;
+        else {
+          const options = { title: mainStrings.dialogs.saveSummary, defaultPath: path.join(app.getPath('documents'), suggested), filters: [{ name: mainStrings.dialogs.pdfFiles, extensions: ['pdf'] }] };
+          const chosen = parent ? await dialog.showSaveDialog(parent, options) : await dialog.showSaveDialog(options);
+          target = chosen.canceled ? undefined : chosen.filePath;
+        }
+        if (!target) return { saved: false };
+        // The page's HTML is drawn in a window of its own that runs no script and has no way back to the app.
+        const printer = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false, contextIsolation: true, nodeIntegration: false, webviewTag: false } });
+        try {
+          await printer.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+          const pdf = await printer.webContents.printToPDF({ printBackground: true, pageSize: 'A4' });
+          fs.writeFileSync(target, pdf);
+        } finally {
+          printer.destroy();
+        }
+        return { saved: true, path: target };
+      },
       'projects.openFile': async ({ projectPath, path: rel }) => {
         const decision = decideOpen(projectPath, rel);
         if (!decision.ok) throw new Error(decision.reason === 'outside' ? 'That path is outside the project folder.' : 'That file does not exist.');

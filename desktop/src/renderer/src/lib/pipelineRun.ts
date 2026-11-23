@@ -18,6 +18,7 @@ export interface Step {
 
 /** The stepper: Entradas, then the four stages with the status and gate progress of each. */
 export function stepperFor(view: PipelineView, running: boolean): Step[] {
+  const label = (stage: number) => stageLabel(view, stage);
   const { status, state } = view;
   const inputs = state?.inputs.length ?? 0;
   const next = status.next;
@@ -49,10 +50,13 @@ export function stepperFor(view: PipelineView, running: boolean): Step[] {
     } else if (s.status === 'running') step = 'active';
     else if (s.status === 'blocked') step = 'blocked';
     else step = running && next.kind === 'run_stage' && next.stage === s.stage ? 'active' : 'pending';
-    steps.push({ id: String(s.stage) as Step['id'], label: t.run.steps[String(s.stage)], state: step, detail });
+    steps.push({ id: String(s.stage) as Step['id'], label: label(s.stage), state: step, detail });
   }
   return steps;
 }
+
+/** A stage as the flow of the pipeline calls it ("Requisitos"); the catalog's name when the view carries no flow. */
+export const stageLabel = (view: PipelineView, stage: number): string => view.flow?.stages.find((s) => s.stage === stage)?.label ?? t.run.steps[String(stage)] ?? String(stage);
 
 export interface RunChip {
   label: string;
@@ -108,7 +112,7 @@ export function gateCardFor(view: PipelineView): GateCardData | null {
   if (!gate) return null;
   const open = gate.questions.filter((q) => q.status === 'open');
   const settled = gate.questions.filter((q) => q.status !== 'open');
-  return { gate: next.gate, stage: next.stage, title: t.run.gate.title(next.gate, t.run.steps[String(next.stage)]), settled, open, ready: next.kind === 'pass_gate' || open.length === 0 };
+  return { gate: next.gate, stage: next.stage, title: t.run.gate.title(next.gate, stageLabel(view, next.stage)), settled, open, ready: next.kind === 'pass_gate' || open.length === 0 };
 }
 
 /** A gate's open questions in the shape the question form takes. Choices may always be answered in the user's own words, and anything may be deferred. */

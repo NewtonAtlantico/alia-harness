@@ -9,7 +9,8 @@ import { AskUserHandler, createAskUserTool } from './tools/askUser.js';
 import { createPipelineStateTool } from './tools/pipelineState.js';
 import { PipelineStatus, getPipelineStatus } from './pipeline/pipelineStatus.js';
 import { IntakeProblem, PipelineStartInput, describePipelineStart, planPipelineInputs, recordPipelineInputs } from './pipeline/intake.js';
-import type { PipelineInput } from './pipeline/pipelineState.js';
+import { findFlow, getFlow } from './pipeline/flows.js';
+import { PipelineStateStore, type PipelineInput } from './pipeline/pipelineState.js';
 import { CommandProbe, IssuePublishingStatus, detectIssuePublishing } from './issues/issuePublishing.js';
 import {
   PermissionMode,
@@ -395,31 +396,44 @@ export class AliaSession {
   async resumePipelinePrompt(): Promise<{ status: PipelineStatus; prompt?: string }> {
     const status = this.pipelineStatus();
     if (!status.exists) return { status };
-    const resolved = await this.resolveSkill('/requirements-to-tasks-pipeline', status.resumePrompt);
+    const resolved = await this.resolveSkill(`/${this.pipelineFlow().orchestrator}`, status.resumePrompt);
     // If the skill is not available the model can still load it with use_skill, as the text says.
     return { status, prompt: resolved.status === 'ready' ? resolved.prompt : status.resumePrompt };
+  }
+
+  /** The flow this project's pipeline runs (the default flow when there is no pipeline yet, or its state cannot be read). */
+  private pipelineFlow() {
+    try {
+      return getFlow(new PipelineStateStore(this.workspace).load()?.flow);
+    } catch {
+      return getFlow();
+    }
   }
 
   /**
    * Starts the pipeline from the files the user gave ("Iniciar pipeline"). Every file must be readable (a recording needs its
    * transcript); if any is not, nothing is written and `refused` says why, file by file. Otherwise the inventory (names, kinds,
    * the skill that reads each, and the hash of each file) is written to `docs/pipeline/state.json` **first**, and the prompt to
-   * pass to `run()` is returned. Starting on a project that already has a pipeline adds the inputs to it.
+   * pass to `run()` is returned. Starting on a project that already has a pipeline adds the inputs to it, in the flow it already runs;
+   * a new pipeline runs `options.flow` (the default flow when none is given) and is called `options.project`.
    */
-  async startPipelinePrompt(inputs: PipelineStartInput[]): Promise<
+  async startPipelinePrompt(inputs: PipelineStartInput[], options: { flow?: string; project?: string } = {}): Promise<
     | { status: 'ready'; prompt: string; inputs: PipelineInput[]; resumed: boolean }
     | { status: 'refused'; problems: IntakeProblem[] }
   > {
-    const plan = await planPipelineInputs(inputs);
-    if (plan.problems.length > 0) return { status: 'refused', problems: plan.problems };
     const before = this.pipelineStatus();
     if (before.exists && before.next.kind === 'damaged') {
       return { status: 'refused', problems: [{ path: '', name: 'state.json', message: before.next.message }] };
     }
-    const recorded = recordPipelineInputs(this.workspace, plan);
+    const requested = findFlow(options.flow);
+    if (!requested) return { status: 'refused', problems: [{ path: '', name: 'flow', message: `There is no flow "${options.flow}".` }] };
+    const flow = before.exists ? this.pipelineFlow() : requested;
+    const plan = await planPipelineInputs(inputs, flow);
+    if (plan.problems.length > 0) return { status: 'refused', problems: plan.problems };
+    const recorded = recordPipelineInputs(this.workspace, plan, { flow: flow.id, ...(options.project ? { project: options.project } : {}) });
     if (!recorded.ok) return { status: 'refused', problems: [{ path: '', name: 'state.json', message: recorded.error }] };
-    const text = describePipelineStart(this.workspace, recorded.inputs, before.exists);
-    const resolved = await this.resolveSkill('/requirements-to-tasks-pipeline', text);
+    const text = describePipelineStart(this.workspace, recorded.inputs, before.exists, flow);
+    const resolved = await this.resolveSkill(`/${flow.orchestrator}`, text);
     // If the skill is not available the model can still load it with use_skill, as in a resume.
     return { status: 'ready', prompt: resolved.status === 'ready' ? resolved.prompt : text, inputs: recorded.inputs, resumed: before.exists };
   }

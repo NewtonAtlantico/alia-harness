@@ -1,4 +1,5 @@
 import { GateProgress, PipelineState, PipelineStateStore, STATE_FILE, STATE_MD_FILE, gateProgress } from '../pipeline/pipelineState.js';
+import { getFlow } from '../pipeline/flows.js';
 import { ToolDefinition } from './types.js';
 
 export const PIPELINE_STATE_TOOL_NAME = 'pipeline_state';
@@ -124,6 +125,7 @@ export function createPipelineStateTool(): ToolDefinition<PipelineStateArgs> {
           {
             exists: true,
             project: state.project,
+            flow: getFlow(state.flow).id,
             ...overview(state),
             inputs: state.inputs.map(({ hash, size, ...i }) => i),
             questions: state.gates.flatMap((g) => g.questions.map((q) => ({ gate: g.id, ...q }))),

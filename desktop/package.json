@@ -35,6 +35,8 @@
     "test:run-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-run-app.ts",
     "test:gates-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-gates-app.ts",
     "test:report-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-report-app.ts",
+    "test:simple-logic": "tsx --tsconfig tsconfig.node.json scripts/test-simple-logic.ts",
+    "test:simple-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-simple-app.ts",
     "test:journey-app": "npm run build && tsx --tsconfig tsconfig.node.json scripts/test-journey-app.ts",
     "test:all": "tsx --tsconfig tsconfig.node.json scripts/run-all.ts",
     "screenshots": "tsx --tsconfig tsconfig.node.json scripts/screenshots.ts",

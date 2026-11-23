@@ -89,8 +89,8 @@ try {
   console.log('\n=== the screen ===');
   await openIntake();
   check('"Novo pipeline" in the sidebar opens it, and says it is the current page', (await page.getByTestId('new-pipeline').getAttribute('aria-current')) === 'page' && (await intake().getByRole('heading', { level: 1 }).innerText()) === 'Novo pipeline');
-  const stages = await intake().getByRole('list', { name: 'Etapas do pipeline' }).locator('li').allInnerTexts();
-  check('the four stages are shown with their gates', stages.length === 4 && stages[0].includes('Requisitos') && stages[0].includes('Gate 1') && stages[2].includes('Gate 3') && stages[3].includes('Tarefas'), JSON.stringify(stages));
+  check('the flow comes first: a labelled list with Embrapii, and what a flow defines', (await intake().getByRole('combobox', { name: 'Fluxo' }).inputValue()) === 'embrapii' && (await intake().getByTestId('flow-card').innerText()).includes('Define as etapas, os gates e as skills do pipeline.'));
+  check('the stages come from the flow, each with its skill (the row of four cards is gone)', (await intake().getByTestId('flow-stages').innerText()).includes('2 · Arquitetura (architecture-from-requirements)') && (await intake().getByRole('list', { name: 'Etapas do pipeline' }).count()) === 0);
   check('the target project is a labelled choice, and it is the open one', (await intake().getByLabel('Projeto de destino').inputValue()) === project);
   check('with no file, it cannot start and says why (the button points at the reason)', (await start().isDisabled()) && (await intake().innerText()).includes('Adicione ao menos um arquivo.') && (await page.locator('#' + (await start().getAttribute('aria-describedby'))).innerText()) === 'Adicione ao menos um arquivo.');
   check('with no pipeline yet there is no banner', (await page.getByTestId('resume-banner').count()) === 0);

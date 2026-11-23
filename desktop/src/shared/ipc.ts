@@ -45,9 +45,11 @@ import type {
   CheckResult,
   Blocker,
   IssuePublishingStatus,
+  PipelineFlow,
 } from 'alia-harness/core';
 
 export type { PermissionMode };
+export type { PipelineFlow };
 export type { ToolAnnotation, DirectoryEntry, IntakeItem, IntakeProblem, PipelineStatus, PipelineState, GateId, GateProgress, GateQuestion, PipelineStage, Assumption, PipelineInput, SpecReview, SpecSummary, ArchitectureSummary, AdrAlignment, AdrRef, PipelineReport, CheckResult, Blocker, IssuePublishingStatus };
 export type { AgentEvent, AliaModelConfig, ChatMessage, CommandInfo, CompactResult, ContextUsage, PermissionDecision, PermissionRule, RevertResult, SearchHit, SessionInfo, SwitchModelResult, UserAnswer, UserQuestion, WorkspaceEntry };
 
@@ -101,10 +103,28 @@ export interface ActiveSession {
   waiting: number;
 }
 
+/**
+ * What the simple view keeps about a project, in `<project>/.alia/project.json`: the name as the person wrote it (the folder is named
+ * after it, without accents), what they asked for, who answers the technical questions, and whether the plan went to the technical team.
+ */
+export interface ProjectMeta {
+  name?: string;
+  /** "O que você quer construir?", in the person's words. */
+  request?: string;
+  /** Who answers the technical questions. */
+  owner?: string;
+  /** The plan was sent to the technical team (published as issues, or written as drafts). */
+  handedOff?: { at: string; mode: 'publish' | 'drafts' };
+}
+
 /** The pipeline of a project in a few fields, for the sidebar chip. */
 export interface PipelineBrief {
   exists: boolean;
   project?: string;
+  /** The id of the flow the pipeline runs. */
+  flow?: string;
+  /** What the simple view keeps about the project (absent for a project it did not create). */
+  meta?: ProjectMeta;
   summary: string;
   /** What the chip should show. */
   state: 'not_started' | 'damaged' | 'answer_questions' | 'review_specs' | 'pass_gate' | 'run_stage' | 'inputs_changed' | 'complete';
@@ -127,6 +147,8 @@ export type PipelineStartResult =
 
 /** A pipeline as the run view shows it: where it stands, its state (absent when there is none or it is damaged) and the files its stages produce. */
 export interface PipelineView {
+  /** The flow the pipeline runs: its stages, with the skill and the name of each. */
+  flow: PipelineFlow;
   status: PipelineStatus;
   state?: PipelineState;
   /** What each stage's artifact is, and whether it exists yet (a folder for stage 4). */
@@ -333,10 +355,12 @@ export interface RendererRequests {
   'pipeline.brief': { request: { projectPath: string }; result: PipelineBrief };
   /** Where a project's pipeline stands (stages, gates, what is next). Reads `docs/pipeline/state.json`; changes nothing. */
   'pipeline.status': { request: { projectPath: string }; result: PipelineStatus };
-  /** What each file is, which skill would read it, and why it cannot be used (in the reader's own words). Files must be in the project or chosen by the user. */
-  'pipeline.inspect': { request: { projectPath: string; paths: string[] }; result: { items: IntakeItem[] } };
-  /** Writes the input inventory to state.json, then starts the pipeline in this conversation. Refuses (and writes nothing) if a file cannot be used. */
-  'pipeline.start': { request: { sessionId: string; inputs: PipelineInputRef[] }; result: PipelineStartResult };
+  /** The flows the pipeline can run (the first is the default): their stages, with the skill and the name of each. */
+  'pipeline.flows': { request: Record<string, never>; result: PipelineFlow[] };
+  /** What each file is, which skill would read it (in the given flow), and why it cannot be used (in the reader's own words). Files must be in the project or chosen by the user. */
+  'pipeline.inspect': { request: { projectPath?: string; paths: string[]; flow?: string }; result: { items: IntakeItem[] } };
+  /** Writes the input inventory to state.json, then starts the pipeline in this conversation, in the given flow (the default one when none is given; a pipeline that already exists keeps its own). Refuses (and writes nothing) if a file cannot be used. */
+  'pipeline.start': { request: { sessionId: string; inputs: PipelineInputRef[]; flow?: string; projectName?: string }; result: PipelineStartResult };
   /** The pipeline's state, status and artifacts for the run view. Reads only. */
   'pipeline.state': { request: { projectPath: string }; result: PipelineView };
   /** Records the user's answers (or deferrals) to a gate's open questions in state.json, as the person who gave them. Not while the conversation is running. */
@@ -351,6 +375,17 @@ export interface RendererRequests {
   'issues.publish': { request: { sessionId: string; confirmDrafts?: boolean }; result: IssuesPublishResult };
   /** Resumes the pipeline from where `state.json` says it stopped. */
   'pipeline.resume': { request: { sessionId: string }; result: PipelineResumeResult };
+  /** What the simple view keeps about a project (null when there is nothing yet). */
+  'projectMeta.get': { request: { projectPath: string }; result: ProjectMeta | null };
+  /** Changes what the simple view keeps about a project: the fields present change, `handedOff: null` clears the mark. */
+  'projectMeta.set': { request: { projectPath: string; patch: Omit<ProjectMeta, 'handedOff'> & { handedOff?: ProjectMeta['handedOff'] | null } }; result: ProjectMeta };
+  /**
+   * Creates the folder of a new project from the name the person gave it (inside the app's own projects folder), and opens it.
+   * What they asked for ("O que você quer construir?") is written to a file of the project, which becomes one of the pipeline's inputs.
+   */
+  'projects.create': { request: { name: string; request?: string }; result: { path: string; requestFile?: string } };
+  /** The plan's summary for people who are not in the app: a PDF the person saves (`pdf`), or a Markdown file inside the project whose link is copied (`link`). */
+  'summary.export': { request: { projectPath: string; kind: 'pdf' | 'link'; title: string; html: string; markdown: string }; result: { saved: boolean; path?: string; link?: string } };
   /** Opens a file or folder of the project with the system. Documents are opened, a folder is shown, anything else is only shown in its folder. */
   'projects.openFile': { request: { projectPath: string; path: string }; result: { how: 'open' | 'reveal' } };
   /** What the app needs from this machine (Git Bash, Git, Python, the skills, the endpoint) and whether it is there. */
@@ -375,7 +410,7 @@ export interface RendererRequests {
 }
 
 /** Requests answered by main itself; they never reach the engine. */
-export type MainRequestName = 'attachments.pick' | 'diagnostics.run' | 'diagnostics.copy' | 'projects.openFile' | 'projects.pick' | 'projects.recent' | 'projects.inspect' | 'projects.setTrust' | 'settings.get' | 'settings.update' | 'settings.setApiKey' | 'settings.clearApiKey' | 'settings.refreshModels' | 'window.minimize' | 'window.toggleMaximize' | 'window.close' | 'window.state' | 'app.info' | 'app.openExternal';
+export type MainRequestName = 'projects.create' | 'summary.export' | 'attachments.pick' | 'diagnostics.run' | 'diagnostics.copy' | 'projects.openFile' | 'projects.pick' | 'projects.recent' | 'projects.inspect' | 'projects.setTrust' | 'settings.get' | 'settings.update' | 'settings.setApiKey' | 'settings.clearApiKey' | 'settings.refreshModels' | 'window.minimize' | 'window.toggleMaximize' | 'window.close' | 'window.state' | 'app.info' | 'app.openExternal';
 
 export interface DiagnosticsResult {
   items: Array<{ id: 'bash' | 'git' | 'python' | 'python-docx' | 'skills' | 'endpoint'; status: 'ok' | 'warn' | 'missing'; value?: string; optional: boolean }>;
