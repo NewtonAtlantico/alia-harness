@@ -66,7 +66,7 @@ export function createExecProbe(timeoutMs = 5000): CommandProbe {
 /** Tool names that create an issue. Matched on the last segment, so `mcp__github__create_issue` and `createJiraIssue` both count. */
 export function isIssueCreationTool(name: string): boolean {
   const base = name.split('__').pop() ?? name;
-  return /^(create|save)(jira|github|gitlab|linear)?(issue|ticket)$/.test(base.replace(/[_-]/g, '').toLowerCase());
+  return /^(jira|github|gitlab|linear)?(create|save)(jira|github|gitlab|linear)?(issue|ticket)$/.test(base.replace(/[_-]/g, '').toLowerCase());
 }
 
 /** `https://github.com/o/r.git`, `git@github.com:o/r.git`, `ssh://git@gitlab.corp:2222/o/r` -> the host. */

@@ -37,6 +37,7 @@
     "test:report": "tsx scripts/smoke-report.ts",
     "test:streaming": "tsx scripts/smoke-streaming.ts",
     "test:issues": "tsx scripts/smoke-issues.ts",
+    "test:mcp": "tsx scripts/smoke-mcp.ts",
     "test:e2e": "tsx scripts/smoke-e2e.ts",
     "desktop:install": "npm --prefix desktop install",
     "desktop:dev": "npm --prefix desktop run dev",
@@ -92,6 +93,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "diff": "^9.0.0",
     "fflate": "^0.8.3",
     "openai": "^7.54.0",

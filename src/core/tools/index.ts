@@ -21,6 +21,8 @@ export class ToolRegistry {
   private tools: Map<string, ToolDefinition> = new Map();
   /** Tools deliberately withheld from this registry (name -> why), for a clear error if called. */
   private withheld: Map<string, string> = new Map();
+  /** Tools that come and go while the app runs (an MCP server connecting or disconnecting): asked for at every use. */
+  private dynamic?: () => ToolDefinition[];
 
   /**
    * @param tools use exactly these tools instead of the built-in set (see `without`).
@@ -57,12 +59,29 @@ export class ToolRegistry {
     this.tools.set(tool.name, tool);
   }
 
+  /**
+   * Adds tools from a source that changes over time (MCP servers). The source is asked every time the registry is read,
+   * so a server connected after the conversation opened is available at once. A built-in tool is never shadowed by one.
+   */
+  setDynamicSource(source: (() => ToolDefinition[]) | undefined) {
+    this.dynamic = source;
+  }
+
   get(name: string): ToolDefinition | undefined {
-    return this.tools.get(name);
+    return this.tools.get(name) ?? this.dynamicTools().find((t) => t.name === name);
   }
 
   getAll(): ToolDefinition[] {
-    return Array.from(this.tools.values());
+    return [...this.tools.values(), ...this.dynamicTools()];
+  }
+
+  private dynamicTools(): ToolDefinition[] {
+    if (!this.dynamic) return [];
+    try {
+      return this.dynamic().filter((t) => !this.tools.has(t.name));
+    } catch {
+      return [];
+    }
   }
 
   getOpenAITools(): OpenAI.Chat.Completions.ChatCompletionTool[] {
@@ -82,7 +101,7 @@ export class ToolRegistry {
     if (!tool) {
       const why = this.withheld.get(name);
       if (why) return `Error: ${why}`;
-      return `Error: Tool "${name}" is not registered. Available tools: ${Array.from(this.tools.keys()).join(', ')}`;
+      return `Error: Tool "${name}" is not registered. Available tools: ${this.getAll().map((t) => t.name).join(', ')}`;
     }
 
     let parsedArgs: any = {};

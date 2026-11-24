@@ -263,9 +263,18 @@ requires: createJiraIssue, searchJiraIssuesUsingJql
 ```
 
 If no registered tool matches (exactly, or as an MCP-prefixed `mcp__server__<name>`), the skill is
-left out of the catalog and the `/` menu, and `/skills` shows why. Today this hides
-`add-tasks-to-jira` and `playwright-mcp-verification`, which need an MCP client the harness does not
-have yet.
+left out of the catalog and the `/` menu, and `/skills` shows why. This hides `add-tasks-to-jira` until
+a Jira MCP server is connected (see below), and `playwright-mcp-verification` (which still needs its own server).
+
+**MCP servers (Jira).** `core/mcp/` is an MCP client (the official SDK): `McpManager` keeps servers connected over
+streamable HTTP (SSE as a fallback) or as a local command, and gives their tools to every session as
+`mcp__<server>__<tool>` through `createSession({ mcp })`, so a server connected after a conversation opened is available
+at once. Destructive tools (`delete*`, `remove*`, `archive*`) are never offered, and subagents get none. Sign-in through
+the browser (OAuth with PKCE, on a loopback address) is `authorizeMcp`. In the desktop app the report's "Conectar ao
+Jira" button drives it; the chosen project is saved in `docs/tasks/.jira-target.json`, which `add-tasks-to-jira`
+reads (without it, the skill keeps its fixed default board). Secrets (tokens, secret variables, the sign-in) stay in the
+OS-encrypted vault, never in a plain file. `npm run test:mcp` (core, with a fake Jira MCP server) and, in `desktop/`,
+`npm run test:mcp` and `npm run test:jira-app`.
 
 Run `npm run test:skills` to check loading, gating, path rewriting and pruning behavior.
 

@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { utilityProcess, type UtilityProcess } from 'electron';
-import type { EngineMessage, EngineReplyMessage, EngineRequestName, EngineRequests, PushMessage } from '../shared/ipc';
+import type { EngineMcpMessage, EngineMessage, EngineReplyMessage, EngineRequestName, EngineRequests, PushMessage } from '../shared/ipc';
 
 interface Pending {
   resolve: (value: unknown) => void;
@@ -17,11 +17,11 @@ export interface EngineHostOptions {
   /** Runs after every (re)start, before any request: hands the engine its configuration. */
   onStart?: (host: EngineHost) => Promise<void>;
   /** Pushed messages from the engine (events, interactions) and status changes. */
-  onPush?: (message: PushMessage) => void;
+  onPush?: (message: PushMessage | EngineMcpMessage) => void;
 }
 
 /** Slow requests: a compaction asks the model to summarize. */
-const LONG_REQUESTS: ReadonlySet<EngineRequestName> = new Set(['session.compact']);
+const LONG_REQUESTS: ReadonlySet<EngineRequestName> = new Set(['session.compact', 'mcp.configure', 'mcp.probe', 'mcp.authorize']);
 const LONG_TIMEOUT_MS = 5 * 60_000;
 
 /**

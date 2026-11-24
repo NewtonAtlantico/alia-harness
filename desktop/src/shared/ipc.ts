@@ -46,9 +46,21 @@ import type {
   Blocker,
   IssuePublishingStatus,
   PipelineFlow,
+  McpPreset,
+  McpAuthKind,
+  McpEnvVar,
+  McpCapabilities,
+  McpFailure,
+  McpTestResult,
+  McpProject,
+  McpProjectList,
+  McpResolvedServer,
+  McpCredentials,
+  JiraTarget,
 } from 'alia-harness/core';
 
 export type { PermissionMode };
+export type { McpPreset, McpAuthKind, McpEnvVar, McpCapabilities, McpFailure, McpTestResult, McpProject, McpProjectList, JiraTarget };
 export type { PipelineFlow };
 export type { ToolAnnotation, DirectoryEntry, IntakeItem, IntakeProblem, PipelineStatus, PipelineState, GateId, GateProgress, GateQuestion, PipelineStage, Assumption, PipelineInput, SpecReview, SpecSummary, ArchitectureSummary, AdrAlignment, AdrRef, PipelineReport, CheckResult, Blocker, IssuePublishingStatus };
 export type { AgentEvent, AliaModelConfig, ChatMessage, CommandInfo, CompactResult, ContextUsage, PermissionDecision, PermissionRule, RevertResult, SearchHit, SessionInfo, SwitchModelResult, UserAnswer, UserQuestion, WorkspaceEntry };
@@ -160,6 +172,42 @@ export interface PipelineView {
 
 /** Whether "Publicar issues" ran. In drafts mode it asks first: `status.warning` says why, how to fix it and where the drafts go. */
 export type IssuesPublishResult = { started: true; mode: 'publish' | 'drafts'; via?: string; skill: string } | { started: false; reason: 'needs_confirmation'; status: IssuePublishingStatus };
+
+/** What the page may ask the app to connect. Secrets are write-only: they go in, and only `signedIn` comes back. */
+export interface McpServerInput {
+  /** The id of a server already saved (editing it); absent for a new one (the app chooses `jira`). */
+  id?: string;
+  preset: McpPreset;
+  label?: string;
+  transport:
+    | { type: 'http'; url: string }
+    | { type: 'stdio'; command: string; args: string[]; env: Array<{ name: string; value?: string; secret: boolean }> };
+  auth: McpAuthKind;
+  /** The access token, for auth `token`. Left out on an edit, the saved one stays. */
+  token?: string;
+}
+
+export interface McpServerSummary {
+  id: string;
+  label: string;
+  preset: McpPreset;
+  transport: 'http' | 'stdio';
+  /** The address, or the command with its arguments. Never a secret. */
+  address: string;
+  auth: McpAuthKind;
+  /** A token, a sign-in or a secret variable is saved for it. */
+  signedIn: boolean;
+  /** Whether the engine has it connected now, and how many tools it gave. */
+  connected: boolean;
+  tools: number;
+  capabilities?: McpCapabilities;
+}
+
+export interface McpView {
+  servers: McpServerSummary[];
+  /** False when this computer cannot encrypt secrets: tokens and sign-ins cannot be saved (a server with no secret still can). */
+  secureStorage: boolean;
+}
 
 export type PipelineResumeResult = { started: true } | { started: false; reason: 'no_pipeline' };
 
@@ -372,7 +420,23 @@ export interface RendererRequests {
   /** The user asks for changes to a spec: the comment goes to the agent, the specs stage (and what follows) is marked stale, and the run starts. */
   'pipeline.requestChanges': { request: { sessionId: string; spec: string; comment: string; by: string }; result: { started: true } };
   /** Publishes the backlog as issues. Detects at every attempt: with a tracker connection it runs the suggested skill; without one it answers `needs_confirmation` with the warning, and writes drafts only when called again with `confirmDrafts`. */
-  'issues.publish': { request: { sessionId: string; confirmDrafts?: boolean }; result: IssuesPublishResult };
+  'issues.publish': { request: { sessionId: string; confirmDrafts?: boolean; destination?: 'jira' }; result: IssuesPublishResult };
+  /** The MCP servers the person connected (Jira) and whether secrets can be stored. Never returns a token. */
+  'mcp.get': { request: Record<string, never>; result: McpView };
+  /** Connects to the server described (stored secrets are used for any the request leaves out), lists its tools and says what it can do. Saves nothing. */
+  'mcp.test': { request: { server: McpServerInput }; result: McpTestResult };
+  /** The browser sign-in (OAuth) for a server: opens the sign-in page, waits for the person to authorize, then tests the connection. The sign-in is kept encrypted. */
+  'mcp.signIn': { request: { server: McpServerInput }; result: McpTestResult };
+  /** Saves the server (config in settings, secrets encrypted with the OS) and connects it, so its tools reach every conversation. */
+  'mcp.save': { request: { server: McpServerInput }; result: McpView };
+  /** Disconnects the server and forgets its saved secrets and sign-in. */
+  'mcp.remove': { request: { id: string }; result: McpView };
+  /** The projects a connected server offers (`listed: false` when it cannot say: the person types the key). */
+  'mcp.projects': { request: { serverId: string }; result: McpProjectList };
+  /** Where this project's tasks go in Jira (null when not chosen yet). Kept in the project, in `docs/tasks/.jira-target.json`. */
+  'jira.getTarget': { request: { projectPath: string }; result: JiraTarget | null };
+  /** Chooses (or with null clears) where this project's tasks go in Jira. */
+  'jira.setTarget': { request: { projectPath: string; target: JiraTarget | null }; result: JiraTarget | null };
   /** Resumes the pipeline from where `state.json` says it stopped. */
   'pipeline.resume': { request: { sessionId: string }; result: PipelineResumeResult };
   /** What the simple view keeps about a project (null when there is nothing yet). */
@@ -410,7 +474,7 @@ export interface RendererRequests {
 }
 
 /** Requests answered by main itself; they never reach the engine. */
-export type MainRequestName = 'projects.create' | 'summary.export' | 'attachments.pick' | 'diagnostics.run' | 'diagnostics.copy' | 'projects.openFile' | 'projects.pick' | 'projects.recent' | 'projects.inspect' | 'projects.setTrust' | 'settings.get' | 'settings.update' | 'settings.setApiKey' | 'settings.clearApiKey' | 'settings.refreshModels' | 'window.minimize' | 'window.toggleMaximize' | 'window.close' | 'window.state' | 'app.info' | 'app.openExternal';
+export type MainRequestName = 'mcp.get' | 'mcp.test' | 'mcp.signIn' | 'mcp.save' | 'mcp.remove' | 'projects.create' | 'summary.export' | 'attachments.pick' | 'diagnostics.run' | 'diagnostics.copy' | 'projects.openFile' | 'projects.pick' | 'projects.recent' | 'projects.inspect' | 'projects.setTrust' | 'settings.get' | 'settings.update' | 'settings.setApiKey' | 'settings.clearApiKey' | 'settings.refreshModels' | 'window.minimize' | 'window.toggleMaximize' | 'window.close' | 'window.state' | 'app.info' | 'app.openExternal';
 
 export interface DiagnosticsResult {
   items: Array<{ id: 'bash' | 'git' | 'python' | 'python-docx' | 'skills' | 'endpoint'; status: 'ok' | 'warn' | 'missing'; value?: string; optional: boolean }>;
@@ -444,6 +508,12 @@ export interface InternalRequests {
   'attachments.allow': { request: { paths: string[] }; result: { ok: true } };
   /** The shell commands run in (for diagnostics). */
   'diagnostics.shell': { request: Record<string, never>; result: { shell: string; label: string; posix: boolean } };
+  /** The MCP servers to keep connected (with their secrets, in memory only). Replaces the previous set; sent again after every restart. */
+  'mcp.configure': { request: { servers: McpResolvedServer[] }; result: { connected: Array<{ id: string; ok: boolean; tools: number; capabilities: McpCapabilities; error?: string }> } };
+  /** Connects once to check a server (nothing is kept) and reports what it can do. */
+  'mcp.probe': { request: { server: McpResolvedServer }; result: McpTestResult };
+  /** Runs the OAuth sign-in in a loopback listener; asks main to open the page (`mcp_open_url`) and to keep the result (`mcp_credentials`). */
+  'mcp.authorize': { request: { server: McpResolvedServer }; result: McpTestResult };
   /** Lists the models at an endpoint, to test an address and key. Runs in the engine (it has the HTTP client). */
   'connection.test': { request: { url: string; apiKey: string }; result: ConnectionTestResult };
 }
@@ -488,7 +558,10 @@ export type PushMessage =
   | { kind: 'window_state'; maximized: boolean }
   | { kind: 'command'; command: AppCommand };
 
-export type EngineMessage = EngineRequestMessage | EngineReplyMessage | { kind: 'ready' } | Extract<PushMessage, { kind: 'event' | 'user_message' | 'interaction' | 'interaction_closed' }>;
+/** The engine asks main to do what only main may: open the sign-in page in the browser, and keep what a sign-in gave. */
+export type EngineMcpMessage = { kind: 'mcp_open_url'; url: string } | { kind: 'mcp_credentials'; serverId: string; credentials: McpCredentials };
+
+export type EngineMessage = EngineRequestMessage | EngineReplyMessage | EngineMcpMessage | { kind: 'ready' } | Extract<PushMessage, { kind: 'event' | 'user_message' | 'interaction' | 'interaction_closed' }>;
 
 // ------------------------------------------------------------------------------------ renderer API
 

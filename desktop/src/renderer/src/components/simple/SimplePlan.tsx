@@ -3,14 +3,17 @@ import type { IssuePublishingStatus, PipelineView, ProjectMeta } from '../../../
 import { t } from '../../i18n/pt-BR';
 import { canPublish } from '../../lib/finalReport';
 import { planFor, planHtml, planMarkdown } from '../../lib/plan';
+import { useJira } from '../../hooks/useJira';
 import { ConfirmDialog } from '../ConfirmDialog';
+import { JiraPublish } from '../JiraPublish';
 
 const errorText = (err: unknown) => String((err as Error)?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 
 /**
  * The end of the flow for someone who is not technical: what the plan comes to (features, tasks, points), the order the features
  * are delivered in and why, what was decided, and what is still open with whom. From here the plan goes to the technical team
- * (published as issues, or written as drafts when there is no connection to their system) or is taken away as a PDF or a link.
+ * (published as issues, sent to their Jira when it is connected, or written as drafts when there is no connection to their system)
+ * or is taken away as a PDF or a link.
  */
 export function SimplePlan({
   view,
@@ -35,16 +38,17 @@ export function SimplePlan({
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
+  const jira = useJira(project);
   const plan = planFor(view);
   if (!plan || !view.report) return null;
   const ready = canPublish(view.report);
 
-  const publish = async (confirmDrafts: boolean) => {
+  const publish = async (confirmDrafts: boolean, destination?: 'jira') => {
     setWorking(true);
     setError(undefined);
     setMessage(undefined);
     try {
-      const r = await window.alia.request('issues.publish', { sessionId, ...(confirmDrafts ? { confirmDrafts: true } : {}) });
+      const r = await window.alia.request('issues.publish', { sessionId, ...(confirmDrafts ? { confirmDrafts: true } : {}), ...(destination ? { destination } : {}) });
       setAsking(undefined);
       if (!r.started) return setAsking(r.status);
       onStarted();
@@ -91,12 +95,28 @@ export function SimplePlan({
 
       <div className={`card send-card ${sent ? 'sent' : ''}`} data-testid="simple-send">
         <div className="grow">
-          <h3>{sent ? t.simple.plan.sentTitle : t.simple.plan.sendTitle}</h3>
-          <p className="hint">{sent ? t.simple.plan.sentText : t.simple.plan.sendText}</p>
+          <h3>{sent ? t.simple.plan.sentTitle : jira.ready ? t.jira.simple.sendTitle : t.simple.plan.sendTitle}</h3>
+          <p className="hint">{sent ? (jira.ready ? t.jira.simple.sentText : t.simple.plan.sentText) : jira.ready ? t.jira.simple.sendText(jira.target?.projectKey ?? '') : t.simple.plan.sendText}</p>
+          {!jira.ready && jira.loaded && !sent && <p className="hint">{t.jira.simple.hint}</p>}
         </div>
-        <button type="button" className={`btn ${sent ? '' : 'primary'}`} disabled={working || running || !ready} data-testid="simple-send-button" onClick={() => void publish(false)}>
-          {running ? t.simple.plan.sending : sent ? t.simple.plan.sentAgain : t.simple.plan.send}
-        </button>
+        <div className="send-actions">
+          <JiraPublish
+            projectPath={project}
+            jira={jira}
+            tasks={view.report.tasks}
+            points={view.report.points}
+            working={working || running}
+            disabled={!ready}
+            onPublish={() => void publish(false, 'jira')}
+            onError={(why) => setError(why)}
+            publishLabel={running ? t.simple.plan.sending : sent ? t.simple.plan.sentAgain : t.jira.simple.send}
+            primary={!sent}
+          >
+            <button type="button" className={`btn ${sent ? '' : 'primary'}`} disabled={working || running || !ready} data-testid="simple-send-button" onClick={() => void publish(false)}>
+              {running ? t.simple.plan.sending : sent ? t.simple.plan.sentAgain : t.simple.plan.send}
+            </button>
+          </JiraPublish>
+        </div>
       </div>
 
       <div className="card">
