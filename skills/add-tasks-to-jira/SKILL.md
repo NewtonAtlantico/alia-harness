@@ -15,7 +15,21 @@ This is the Jira-specific sibling of `issue-writer` (which targets GitHub/GitLab
 instead of `issue-writer` when the destination is this project's Jira, not a git-forge issue
 tracker.
 
-## Target Jira board (fixed — edit here to repoint)
+## Target saved by the app (read this first)
+
+Before anything else, read `docs/tasks/.jira-target.json` (`read_file`). The desktop app writes it when the
+person connects Jira and chooses a project: `{ "serverId", "projectKey", "projectName"?, "site"? }`.
+
+- **If it exists, it replaces the fixed table below.** Wherever this skill says project `MPT`, use its
+  `projectKey`. Resolve the rest live, never from the table: the cloud id from
+  `getAccessibleAtlassianResources` (pick the site that matches `site`; if there is only one, use it); the
+  issue type ids for the story-like type (História / Story) and the task type (Tarefa / Task) and the Story
+  Points field from `listJiraProjectIssueTypesMetadata` and `getJiraIssueTypeMetaWithFields` for that project.
+  The board link in the final report becomes the project's own page on that site.
+- **If it does not exist**, use the fixed table below, as before.
+- Never delete issues, and only edit the issues this skill itself created (the ones recorded in the sync file).
+
+## Default Jira board (fixed — edit here to repoint)
 
 This skill always publishes to the same board. There is no per-run prompt for project/board;
 change these constants (and re-save the skill) if the team ever moves boards.

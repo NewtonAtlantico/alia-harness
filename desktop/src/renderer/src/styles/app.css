@@ -761,3 +761,53 @@ fieldset.choices legend.question-prompt { font-size: 20px; font-weight: 600; lin
 @media (max-width: 900px) { .simple-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .simple-content > .settings { padding: var(--space-6) var(--space-4) 88px; }
 .simple-content > .banner { margin: var(--space-3) var(--space-6) 0; }
+
+/* ---- Jira connection: the buttons on the report, and the dialog that connects ---- */
+.jira-connect { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--primary); border-color: var(--primary); background: var(--surface); }
+.jira-pill { white-space: nowrap; }
+.send-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); justify-content: flex-end; }
+.dialog:has(.jira-dialog) { width: min(620px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; box-sizing: border-box; }
+.jira-dialog h2:focus { outline: none; }
+.jira-dialog h3 { margin: 0 0 var(--space-1); font-size: var(--text-base); }
+.jira-dialog > p { margin: 0 0 var(--space-3); }
+.jira-dialog .mono { font-family: var(--font-mono); font-size: var(--text-sm); }
+.jira-dialog .field input { width: 100%; box-sizing: border-box; }
+.jira-steps { list-style: none; display: flex; gap: var(--space-5); margin: 0 0 var(--space-4); padding: 0; }
+.jira-steps li { display: flex; align-items: center; gap: var(--space-2); color: var(--text-muted); font-size: var(--text-sm); }
+.jira-steps .current { color: var(--text); font-weight: 600; }
+.jira-steps .current .step-n { background: var(--primary); color: #fff; }
+.jira-steps .done .step-n { background: var(--diff-add); color: var(--success); }
+.jira-dialog fieldset { border: 0; margin: 0 0 var(--space-3); padding: 0; min-width: 0; }
+.jira-dialog legend { font-weight: 600; font-size: var(--text-sm); padding: 0; margin-bottom: var(--space-1); }
+.jira-choices { display: flex; flex-direction: column; gap: var(--space-2); }
+.jira-choices legend { margin-bottom: var(--space-2); }
+.jira-auth { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+.jira-auth legend { width: 100%; }
+.jira-seg { align-self: flex-start; }
+.jira-seg button:disabled { cursor: default; }
+.jira-can { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); margin: var(--space-3) 0; }
+.jira-can .tick-list { margin: 0; }
+.tick-list.cross-list .mark { color: var(--danger); }
+.jira-env-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto auto; gap: var(--space-2); align-items: center; margin-bottom: var(--space-2); }
+.jira-env-row input:not([type='checkbox']) { width: 100%; box-sizing: border-box; }
+.jira-secret { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-sm); white-space: nowrap; }
+.jira-env-err { grid-column: 1 / -1; margin: 0; }
+.jira-warn { background: var(--warning-bg); color: var(--warning); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3); margin: var(--space-3) 0; font-size: var(--text-sm); }
+.jira-wait { display: flex; align-items: center; gap: var(--space-2); }
+.jira-wait .mark.spinner { width: 14px; height: 14px; border-radius: 50%; display: inline-block; flex: none; }
+.jira-result { border-radius: var(--radius-sm); padding: var(--space-3) var(--space-4); margin: var(--space-3) 0; }
+.jira-result p { margin: var(--space-2) 0 0; }
+.jira-result .hint { color: inherit; }
+.jira-result.ok { background: var(--diff-add); color: var(--success); }
+.jira-result.bad { background: var(--diff-remove); color: var(--danger); }
+.jira-result .jira-warn { margin: var(--space-2) 0 0; }
+.jira-caps { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.jira-caps li { display: flex; align-items: center; gap: var(--space-2); }
+.jira-caps .mark { font-weight: 700; width: 1.2em; text-align: center; }
+.jira-account { display: flex; align-items: center; gap: var(--space-2); }
+.jira-map { width: 100%; border-collapse: collapse; margin-bottom: var(--space-2); }
+.jira-map th, .jira-map td { text-align: left; padding: var(--space-1) var(--space-2) var(--space-1) 0; border-top: 1px solid var(--border); font-size: var(--text-sm); vertical-align: top; }
+.jira-map thead th { border-top: 0; color: var(--text-muted); font-weight: 600; }
+.jira-map tbody th { font-weight: 600; width: 38%; }
+.jira-dialog .dialog-actions { align-items: center; }
+@media (max-width: 640px) { .jira-can { grid-template-columns: 1fr; } .jira-env-row { grid-template-columns: 1fr 1fr; } }

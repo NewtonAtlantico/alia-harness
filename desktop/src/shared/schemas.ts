@@ -32,6 +32,25 @@ const interactionResponse = z.union([
 
 const none = strict({});
 
+const mcpId = z.string().min(1).max(40).regex(/^[A-Za-z0-9-]+$/, 'not a valid server id');
+const mcpServerInput = strict({
+  id: mcpId.optional(),
+  preset: z.enum(['atlassian', 'custom']),
+  label: z.string().trim().min(1).max(100).optional(),
+  transport: z.union([
+    strict({ type: z.literal('http'), url: z.string().trim().min(1).max(2048) }),
+    strict({
+      type: z.literal('stdio'),
+      command: z.string().trim().min(1).max(1024),
+      args: z.array(z.string().max(2048)).max(50),
+      env: z.array(strict({ name: z.string().trim().min(1).max(200).regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'not a valid variable name'), value: z.string().max(8192).optional(), secret: z.boolean() })).max(50),
+    }),
+  ]),
+  auth: z.enum(['oauth', 'token', 'none']),
+  token: z.string().trim().min(1).max(8192).optional(),
+});
+const jiraTarget = strict({ serverId: mcpId, projectKey: z.string().trim().min(1).max(100), projectName: z.string().trim().max(200).optional(), site: z.string().trim().max(500).optional() });
+
 const modelSetting = strict({
   id: z.string().trim().min(1).max(200),
   name: z.string().trim().min(1).max(200),
@@ -99,7 +118,15 @@ export const rendererSchemas = {
   'pipeline.answer': strict({ sessionId, gate: z.enum(['G1', 'G2', 'G3']), answers: z.array(userAnswer).min(1).max(50), by: z.string().trim().min(1).max(200) }),
   'pipeline.reviewSpec': strict({ sessionId, spec: z.string().min(1).max(200).regex(/^[\w.-]+$/, 'not a valid spec name'), status: z.enum(['reviewed', 'in_review', 'draft']), comment: z.string().trim().max(5000).optional(), by: z.string().trim().min(1).max(200) }),
   'pipeline.requestChanges': strict({ sessionId, spec: z.string().min(1).max(200).regex(/^[\w.-]+$/, 'not a valid spec name'), comment: z.string().trim().min(1).max(5000), by: z.string().trim().min(1).max(200) }),
-  'issues.publish': strict({ sessionId, confirmDrafts: z.boolean().optional() }),
+  'issues.publish': strict({ sessionId, confirmDrafts: z.boolean().optional(), destination: z.literal('jira').optional() }),
+  'mcp.get': none,
+  'mcp.test': strict({ server: mcpServerInput }),
+  'mcp.signIn': strict({ server: mcpServerInput }),
+  'mcp.save': strict({ server: mcpServerInput }),
+  'mcp.remove': strict({ id: mcpId }),
+  'mcp.projects': strict({ serverId: mcpId }),
+  'jira.getTarget': strict({ projectPath }),
+  'jira.setTarget': strict({ projectPath, target: z.union([jiraTarget, z.null()]) }),
   'pipeline.approveGate': strict({ sessionId, gate: z.enum(['G1', 'G2', 'G3']) }),
   'settings.get': none,
   'settings.update': strict({

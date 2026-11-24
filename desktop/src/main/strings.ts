@@ -23,6 +23,9 @@ export const mainStrings = {
     openLinkDetail: (url: string) => `${url}\n\nO endereço será aberto fora do aplicativo.`,
     open: 'Abrir',
     cancel: 'Cancelar',
+    runCommandTitle: 'Rodar este comando neste computador?',
+    runCommandDetail: (command: string) => `${command}\n\nÉ assim que o servidor MCP do Jira é iniciado. O comando roda com as suas permissões. Só continue se você confia nele.`,
+    runCommand: 'Rodar',
     aboutDetail: (version: string) => `Versão ${version}`,
   },
 };

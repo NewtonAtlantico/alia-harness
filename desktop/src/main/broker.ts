@@ -87,6 +87,11 @@ export class Broker {
 
 /** Requests that are never forwarded to the engine. The type makes this list complete: a new main request that is missing here does not compile. */
 const MAIN_ONLY = {
+  'mcp.get': true,
+  'mcp.test': true,
+  'mcp.signIn': true,
+  'mcp.save': true,
+  'mcp.remove': true,
   'projects.create': true,
   'summary.export': true,
   'attachments.pick': true,

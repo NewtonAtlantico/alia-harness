@@ -129,8 +129,8 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
       }
 
       // A child cannot start subagents or ask the user. Built first: the pre-loaded skill describes these tools.
-      const childRegistry = deps
-        .getRegistry()
+      const parentRegistry = deps.getRegistry();
+      const childRegistry = parentRegistry
         .without(
           [RUN_SUBAGENT_TOOL_NAME],
           'Tool "run_subagent" is not available inside a subagent: subagents cannot start other subagents. Do the work yourself.'
@@ -138,6 +138,10 @@ export function createRunSubagentTool(deps: SubagentDeps): ToolDefinition<RunSub
         .without(
           [ASK_USER_TOOL_NAME],
           'Tool "ask_user" is not available inside a subagent: there is no user to ask. Decide, or stop at the gate and write the open questions into the artifact (STATUS: blocked).'
+        )
+        .without(
+          parentRegistry.getAll().map((t) => t.name).filter((n) => n.startsWith('mcp__')),
+          'MCP tools (Jira and the like) are not available inside a subagent: they act outside the project. Ask the main agent to do it.'
         );
 
       if (args.skill) {

@@ -2,7 +2,9 @@ import { useState } from 'react';
 import type { IssuePublishingStatus, PipelineView } from '../../../shared/ipc';
 import { t } from '../i18n/pt-BR';
 import { blockerText, canPublish, checkRow, totalsLine } from '../lib/finalReport';
+import { useJira } from '../hooks/useJira';
 import { ConfirmDialog } from './ConfirmDialog';
+import { JiraPublish } from './JiraPublish';
 
 const errorText = (err: unknown) => String((err as Error)?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 const MARK: Record<string, string> = { pass: '✓', fail: '✗', unknown: '?' };
@@ -11,23 +13,25 @@ const MARK: Record<string, string> = { pass: '✓', fail: '✗', unknown: '?' };
  * The done screen: the backlog by spec (ids, points, dependencies), the checks across specs with each failure explained, the
  * final report (specs, tasks, points, ADRs), "Nada bloqueado" or what blocks, the assumptions with their owners, the way to
  * docs/tasks/, and "Publicar issues". Publishing asks core at every attempt; without a tracker connection it shows the warning
- * and writes drafts only after the user confirms.
+ * and writes drafts only after the user confirms. With Jira connected (an MCP server and a project chosen for this project) the
+ * primary action is "Publicar no Jira", which asks first and then runs the same publish with the Jira destination.
  */
-export function FinalReport({ view, sessionId, onOpen, onStarted }: { view: PipelineView; sessionId: string; onOpen: (path: string) => void; onStarted: () => void }) {
+export function FinalReport({ view, sessionId, project, onOpen, onStarted }: { view: PipelineView; sessionId: string; project: string; onOpen: (path: string) => void; onStarted: () => void }) {
   const [asking, setAsking] = useState<IssuePublishingStatus>();
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string>();
+  const jira = useJira(project);
   const report = view.report;
   const state = view.state;
   if (!report || !state) return null;
   const rows = report.checks.map(checkRow);
   const blocked = report.blockers.length > 0;
 
-  const publish = async (confirmDrafts: boolean) => {
+  const publish = async (confirmDrafts: boolean, destination?: 'jira') => {
     setWorking(true);
     setError(undefined);
     try {
-      const r = await window.alia.request('issues.publish', { sessionId, ...(confirmDrafts ? { confirmDrafts: true } : {}) });
+      const r = await window.alia.request('issues.publish', { sessionId, ...(confirmDrafts ? { confirmDrafts: true } : {}), ...(destination ? { destination } : {}) });
       setAsking(undefined);
       if (!r.started) return setAsking(r.status);
       onStarted();
@@ -140,11 +144,13 @@ export function FinalReport({ view, sessionId, onOpen, onStarted }: { view: Pipe
         <button type="button" className="btn" onClick={() => onOpen('docs/tasks')} disabled={!view.artifacts.some((a) => a.stage === 4 && a.exists)}>
           {t.run.report.openTasks}
         </button>
-        <button type="button" className="btn primary" disabled={working || !canPublish(report)} aria-describedby="publish-why" onClick={() => void publish(false)} data-testid="publish-issues">
-          {working ? t.run.report.publishing : t.run.report.publish}
-        </button>
+        <JiraPublish projectPath={project} jira={jira} tasks={report.tasks} points={report.points} working={working} disabled={!canPublish(report)} onPublish={() => void publish(false, 'jira')} onError={setError}>
+          <button type="button" className="btn primary" disabled={working || !canPublish(report)} aria-describedby="publish-why" onClick={() => void publish(false)} data-testid="publish-issues">
+            {working ? t.run.report.publishing : t.run.report.publish}
+          </button>
+        </JiraPublish>
         <span id="publish-why" className="hint">
-          {canPublish(report) ? t.run.report.publishHint : t.run.report.publishBlocked}
+          {!canPublish(report) ? t.run.report.publishBlocked : jira.ready ? t.jira.hintConnected(jira.target?.projectKey ?? '') : jira.loaded ? t.jira.hint : t.run.report.publishHint}
         </span>
       </div>
       {error && (

@@ -14,6 +14,8 @@ import { decideOpen } from './openFile';
 import { createProjectFolder } from './projectFolder';
 import { countSkills, execRun, formatReport, runDiagnostics, type DiagnosticsDeps } from './diagnostics';
 import { SecretStore } from './secrets';
+import { McpConfigStore, McpVault } from './mcpStore';
+import { McpService } from './mcpService';
 import { SettingsService } from './settingsService';
 import { SettingsStore, defaultSettings } from './settings';
 import { TrustStore, inspectProject } from './trust';
@@ -71,8 +73,17 @@ function start(): void {
     decrypt: (data) => safeStorage.decryptString(data),
   });
   const trust = new TrustStore(path.join(userData, 'trust.json'));
+  // The Jira connection: which MCP server (a plain file, no secret) and its secrets (encrypted the same way as the key).
+  const mcpStore = new McpConfigStore(path.join(userData, 'mcp.json'));
+  const mcpVault = new McpVault(path.join(userData, 'mcp-credentials.bin'), {
+    isAvailable: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (plain) => safeStorage.encryptString(plain),
+    decrypt: (data) => safeStorage.decryptString(data),
+  });
   // eslint-disable-next-line prefer-const
   let settings: SettingsService;
+  // eslint-disable-next-line prefer-const
+  let mcp: McpService;
 
   /** What the app needs from this machine. Under test, ALIA_TEST_DIAG says what the machine has (JSON), so the answer does not depend on it. */
   const diagnose = async (): Promise<DiagnosticsResult> => {
@@ -117,12 +128,47 @@ function start(): void {
   const engine: EngineHost = new EngineHost({
     log: (line) => log.info(line),
     onPush: (message) => {
+      // What the engine asks of main alone: never goes to the page.
+      if (message.kind === 'mcp_open_url') {
+        // The address comes from the server the person is signing in to: it still goes through the confirmation dialog (https only).
+        void confirmAndOpenExternal(message.url, mainWindow(), guardOptions).catch((err) => log.warn(`could not open the sign-in page: ${String((err as Error)?.message ?? err)}`));
+        return;
+      }
+      if (message.kind === 'mcp_credentials') {
+        mcp.keepCredentials(message.serverId, message.credentials);
+        return;
+      }
       if (message.kind === 'engine_status') log.warn(`engine ${message.status}`);
       broadcast(message);
     },
     // Every (re)start of the engine: give it the saved configuration (the service reads the key from the encrypted file).
     onStart: async () => {
       await settings.configureEngine();
+      // The MCP servers connect in the background (a local command can take a while to start): conversations do not wait for them.
+      void mcp.configureEngine();
+    },
+  });
+
+  mcp = new McpService({
+    store: mcpStore,
+    vault: mcpVault,
+    engine,
+    log,
+    // A command from the page runs on this computer: a native question, which the page cannot answer, comes first.
+    approveCommand: async (commandLine) => {
+      if (testMode) return process.env.ALIA_TEST_DENY_MCP_COMMAND !== '1';
+      const parent = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+      const box = {
+        type: 'warning' as const,
+        buttons: [mainStrings.dialogs.runCommand, mainStrings.dialogs.cancel],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+        message: mainStrings.dialogs.runCommandTitle,
+        detail: mainStrings.dialogs.runCommandDetail(commandLine),
+      };
+      const { response } = parent ? await dialog.showMessageBox(parent, box) : await dialog.showMessageBox(box);
+      return response === 0;
     },
   });
 
@@ -257,6 +303,11 @@ function start(): void {
         log.info(`project skills ${trusted ? 'trusted' : 'not trusted'} for ${path.basename(projectPath)}`);
         return inspectProject(trust, projectPath);
       },
+      'mcp.get': () => mcp.view(),
+      'mcp.test': ({ server }) => mcp.test(server),
+      'mcp.signIn': ({ server }) => mcp.signIn(server),
+      'mcp.save': ({ server }) => mcp.save(server),
+      'mcp.remove': ({ id }) => mcp.remove(id),
       'settings.get': () => settings.view(),
       'settings.update': (patch) => settings.update(patch),
       'settings.setApiKey': ({ apiKey }) => settings.setApiKey(apiKey),

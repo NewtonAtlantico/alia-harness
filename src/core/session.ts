@@ -12,6 +12,7 @@ import { IntakeProblem, PipelineStartInput, describePipelineStart, planPipelineI
 import { findFlow, getFlow } from './pipeline/flows.js';
 import { PipelineStateStore, type PipelineInput } from './pipeline/pipelineState.js';
 import { CommandProbe, IssuePublishingStatus, detectIssuePublishing } from './issues/issuePublishing.js';
+import type { McpToolSource } from './mcp/mcpManager.js';
 import {
   PermissionMode,
   SafetyChecker,
@@ -98,6 +99,11 @@ export interface SessionOptions {
   maxSteps?: number;
   /** Use this client instead of building one from the config. Mainly a test seam (see scripts/lib/fakeModel.ts). */
   client?: OpenAI;
+  /**
+   * Tools of the MCP servers the person connected (Jira). Asked at every use, so a server connected after this
+   * conversation opened is available at once. Subagents never get them.
+   */
+  mcp?: McpToolSource;
 }
 
 export interface ContextUsage {
@@ -202,6 +208,10 @@ export class AliaSession {
     this.client = options.client ?? selected.client;
 
     this.tools = new ToolRegistry();
+    if (options.mcp) {
+      const mcp = options.mcp;
+      this.tools.setDynamicSource(() => mcp.toolDefinitions());
+    }
 
     // Skills: scan folders, expose use_skill, and advertise a catalog in the system prompt.
     this.skills = new SkillRegistry({

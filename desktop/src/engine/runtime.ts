@@ -31,6 +31,13 @@ import {
   extractMentionPaths,
   listDirectory,
   readDocument,
+  McpManager,
+  McpOAuthProvider,
+  McpConnectError,
+  authorizeMcp,
+  readJiraTarget,
+  writeJiraTarget,
+  type McpTestResult,
 } from 'alia-harness/core';
 import { previewFile } from './preview';
 import { readProjectMeta, writeProjectMeta } from './projectMeta';
@@ -94,6 +101,19 @@ interface PendingInteraction {
 }
 
 export class EngineRuntime {
+  /**
+   * The MCP servers the person connected (Jira). Their tools reach every conversation, including ones opened before the
+   * server connected. A sign-in the server renews by itself is handed to main to keep (it holds the encrypted vault).
+   */
+  private readonly mcp = new McpManager({
+    authProviderFor: (server) =>
+      server.config.auth === 'oauth'
+        ? new McpOAuthProvider({
+            initial: server.credentials.oauth,
+            onChange: (oauth) => this.options.post({ kind: 'mcp_credentials', serverId: server.config.id, credentials: { oauth } }),
+          })
+        : undefined,
+  });
   private config?: AliaConfig;
   private skillRoots: Array<{ label: string; dir: string }> = [];
   private store = new SessionStore();
@@ -225,6 +245,31 @@ export class EngineRuntime {
       });
   }
 
+  /**
+   * "Publicar no Jira": runs the Jira skill through the connected server. The person already chose the project (saved in the
+   * project) and confirmed in the page; here it is only checked that the connection and the target are really there.
+   */
+  private async publishToJira(e: Entry): Promise<IssuesPublishResult> {
+    const target = readJiraTarget(e.workspace);
+    if (!target) throw new Error('No Jira project was chosen for this project yet. Connect to Jira first.');
+    const prefix = `mcp__${target.serverId}__`;
+    const names = e.session.tools.getAll().map((t) => t.name);
+    if (!names.includes(`${prefix}createJiraIssue`) && !names.some((n) => n.startsWith(prefix) && /create.*issue/i.test(n))) {
+      throw new Error('The Jira connection is not available right now. Connect to Jira again and try once more.');
+    }
+    const request = `Publish the tasks in docs/tasks/ to Jira with this skill. The target is saved in docs/tasks/.jira-target.json (project ${target.projectKey}${target.site ? `, site ${target.site}` : ''}): use it instead of the skill's default board. Report the issue links when done.`;
+    const resolved = await e.session.resolveSkill('/add-tasks-to-jira', request);
+    if (resolved.status === 'unavailable') throw new Error(resolved.message);
+    this.launch(e, 'Publicar no Jira', resolved.status === 'ready' ? resolved.prompt : request, undefined, () => {
+      try {
+        writeProjectMeta(e.workspace, { handedOff: { at: new Date().toISOString(), mode: 'publish' } });
+      } catch {
+        /* the mark is a convenience: the issues were published all the same */
+      }
+    });
+    return { started: true, mode: 'publish', via: 'mcp', skill: 'add-tasks-to-jira' };
+  }
+
   /** A spec the state knows of (a typo in a slug must not create a review of nothing). */
   private requireSpec(store: PipelineStateStore, spec: string): void {
     const state = store.load();
@@ -304,6 +349,7 @@ export class EngineRuntime {
         config,
         streaming: true, // the answer appears as it is written; core falls back to whole answers by itself when the endpoint cannot stream
         client: this.options.clientFor?.(config),
+        mcp: this.mcp,
         // Project skills are instructions the agent follows: they load only for a folder the user trusts (main decides).
         skillRoots: trustedProject ? [...this.skillRoots, { label: 'project', dir: path.join(workspace, '.alia', 'skills') }] : this.skillRoots,
         sessionStore: this.store,
@@ -457,6 +503,30 @@ export class EngineRuntime {
 
     'connection.test': ({ url, apiKey }) => this.testConnection(url, apiKey),
 
+    'mcp.configure': async ({ servers }) => ({ connected: await this.mcp.configure(servers) }),
+
+    'mcp.probe': ({ server }) => this.mcp.probe(server),
+
+    'mcp.authorize': async ({ server }): Promise<McpTestResult> => {
+      try {
+        const oauth = await authorizeMcp(server, {
+          openUrl: (url) => this.options.post({ kind: 'mcp_open_url', url }),
+          onSaved: (saved) => this.options.post({ kind: 'mcp_credentials', serverId: server.config.id, credentials: { oauth: saved } }),
+        });
+        // Signed in: check what the server can do with the new sign-in.
+        return await this.mcp.probe({ ...server, credentials: { ...server.credentials, oauth } });
+      } catch (err) {
+        const failure = err instanceof McpConnectError ? err : new McpConnectError('other', String((err as Error)?.message ?? err));
+        return { ok: false, reason: failure.reason, message: failure.message, toolCount: 0, capabilities: { createsIssues: false, listsProjects: false, linksIssues: false } };
+      }
+    },
+
+    'mcp.projects': ({ serverId }) => this.mcp.projects(serverId),
+
+    'jira.getTarget': ({ projectPath }) => readJiraTarget(path.resolve(projectPath)),
+
+    'jira.setTarget': ({ projectPath, target }) => writeJiraTarget(path.resolve(projectPath), target),
+
     'conversations.list': ({ projectPath, limit }) => this.store.list({ ...(projectPath ? { workspace: path.resolve(projectPath) } : {}), limit }),
 
     'conversations.search': ({ text, projectPath, limit }) => this.store.search(text, { ...(projectPath ? { workspace: path.resolve(projectPath) } : {}), limit }),
@@ -592,9 +662,10 @@ export class EngineRuntime {
       return { started: true };
     },
 
-    'issues.publish': async ({ sessionId, confirmDrafts }): Promise<IssuesPublishResult> => {
+    'issues.publish': async ({ sessionId, confirmDrafts, destination }): Promise<IssuesPublishResult> => {
       const e = this.entry(sessionId);
       if (e.busy) throw new Error('This conversation is already running. Stop it first, or wait for it to finish.');
+      if (destination === 'jira') return this.publishToJira(e);
       // Detected at every attempt: a connection made (or lost) since the last one is what counts.
       const status = await e.session.issuePublishing({ probe: this.options.issueProbe });
       if (status.mode === 'drafts' && !confirmDrafts) return { started: false, reason: 'needs_confirmation', status };
